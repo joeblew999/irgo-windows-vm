@@ -122,7 +122,7 @@ func Create(opts Options) (string, error) {
 
 	// The unattend medium is generated unless the caller supplied one. This is
 	// what carries autounattend.xml, startup.nsh and the probe binaries.
-	unattendImg := filepath.Join(data, "unattend.img")
+	unattendImg := filepath.Join(data, "unattend.iso")
 	if opts.UnattendISO != "" {
 		if err := linkOrCopy(opts.UnattendISO, unattendImg); err != nil {
 			return "", fmt.Errorf("unattend medium: %w", err)
@@ -133,11 +133,11 @@ func Create(opts Options) (string, error) {
 		}
 	}
 	id3, _ := newUUID()
-	// A removable USB disk, not a CD. Windows Setup scans removable drives for
-	// autounattend.xml, and the UEFI shell reads FAT for startup.nsh — one
-	// image satisfies both, where an ISO satisfies neither reliably.
+	// A CD, not a removable disk. Attached as a FAT disk, Setup ignored
+	// autounattend.xml and ran interactively with no diagnostic; as a CD it is
+	// read and applied. Do not "improve" this back to a disk.
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: id3, ImageName: "unattend.img", Type: DriveDisk, Interface: IfaceUSB})
+		Drive{ID: id3, ImageName: "unattend.iso", Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
 
 	// Guest tools give the QEMU guest agent, and with it utmctl exec and
 	// ip-address. A VM without them boots but cannot be driven from the host,

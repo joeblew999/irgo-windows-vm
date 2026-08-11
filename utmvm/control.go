@@ -35,7 +35,37 @@ func (v VM) run(args ...string) (string, error) {
 func (v VM) Status() (string, error) { return v.run("status") }
 
 // Start powers on the VM. Starting an already-running VM is not an error.
+//
+// Note this does NOT open a display window, which matters more than it sounds:
+// UTM routes keyboard input through the display, so a VM started this way
+// cannot be sent keystrokes at all — they are accepted and silently discarded.
+// Use StartWithDisplay when the UEFI shell will need driving, which on this
+// firmware is every boot.
 func (v VM) Start() error { _, err := v.run("start"); return err }
+
+// StartWithDisplay powers on the VM through UTM itself so a display window
+// opens.
+//
+// Discovered the hard way: identical VMs booted with utmctl start ignored every
+// keystroke, while the same VM started from the app accepted them. utmctl
+// starts the machine headless, and without a display there is nowhere for input
+// to go. Since UTM's aarch64 firmware always drops to the interactive UEFI
+// shell, a Windows VM is unusable without this.
+func (v VM) StartWithDisplay() error {
+	script := fmt.Sprintf(`tell application "UTM"
+  activate
+  start virtual machine named %q
+end tell`, v.Ref)
+	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	if err != nil {
+		// Fall back to the UUID form; AppleScript matches on name only.
+		if e, ferr := Find(v.Ref); ferr == nil && !strings.EqualFold(e.Name, v.Ref) {
+			return VM{Ref: e.Name}.StartWithDisplay()
+		}
+		return fmt.Errorf("starting %s with a display: %w: %s", v.Ref, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 
 // Stop requests a shutdown.
 func (v VM) Stop() error { _, err := v.run("stop"); return err }

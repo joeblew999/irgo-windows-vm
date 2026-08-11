@@ -64,7 +64,11 @@ func reclaimableBytes(root string) int64 {
 			}
 			seen[ino] = true
 		}
-		total += info.Size()
+		if used, ok := diskUsage(p); ok {
+			total += used // blocks actually occupied, not the sparse length
+		} else {
+			total += info.Size()
+		}
 		return nil
 	})
 	return total

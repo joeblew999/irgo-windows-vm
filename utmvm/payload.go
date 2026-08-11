@@ -39,6 +39,9 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	if opts.SizeMiB == 0 {
 		opts.SizeMiB = 256
 	}
+	// Deliberately an ISO9660 CD, not a FAT disk. Setup did not read
+	// autounattend.xml from a FAT removable disk and silently fell back to an
+	// interactive install; from a CD it applies. See BuildISOImage.
 
 	stage, err := os.MkdirTemp("", "irgo-winvm-payload-*")
 	if err != nil {
@@ -53,11 +56,11 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 		return err
 	}
 
+	// Probe binaries go at the ROOT, not in a subdirectory. go-diskfs's Joliet
+	// encoding mangles names inside nested directories into UCS-2 garbage —
+	// root entries survive intact. Flat is uglier and it works.
 	if opts.ProbeDir != "" {
-		dst := filepath.Join(stage, "probe")
-		if err := os.MkdirAll(dst, 0o755); err != nil {
-			return err
-		}
+		dst := stage
 		entries, err := os.ReadDir(opts.ProbeDir)
 		if err != nil {
 			return fmt.Errorf("probe dir: %w", err)
@@ -72,7 +75,7 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 		}
 	}
 
-	return BuildFATImage(imagePath, stage, opts.SizeMiB)
+	return BuildISOImage(imagePath, stage, opts.SizeMiB)
 }
 
 func copyFile(src, dst string) error {

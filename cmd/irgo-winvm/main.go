@@ -34,6 +34,7 @@ func usage() {
   prune    Remove generated payload images and staging leftovers
   targets  Show which desktop builds this machine can actually run
   start    Start a VM and wait until its guest agent answers
+  boot     Start a VM and drive it past UTM's UEFI shell (needed every boot)
   status   Report a VM's state and IP
   exec     Run a command inside a VM
   probe    Run the bundled probes in a VM and print the report
@@ -58,6 +59,8 @@ func run(args []string) error {
 		return runTargets()
 	case "start":
 		return runStart(args[1:])
+	case "boot":
+		return runBoot(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "exec":
@@ -379,5 +382,38 @@ func runPrune() error {
 		fmt.Println("removed", p)
 	}
 	fmt.Printf("%.1f MB reclaimed\n", float64(freed)/(1<<20))
+	return nil
+}
+
+// runBoot exists because UTM's aarch64 firmware never auto-selects a boot
+// entry; it drops to the UEFI shell on every boot, including after Windows is
+// installed. This types the boot path the way a person would.
+func runBoot(args []string) error {
+	fs := flag.NewFlagSet("boot", flag.ContinueOnError)
+	installed := fs.Bool("installed", false, "boot an installed Windows rather than the installer")
+	wait := fs.Duration("wait", 15*time.Minute, "how long to wait for signs of life")
+	ref, err := vmRef(fs, args)
+	if err != nil {
+		return err
+	}
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	dir, err := utmvm.DefaultVMDir()
+	if err != nil {
+		return err
+	}
+	diskPath := filepath.Join(dir, e.Name+".utm", "Data", "disk.img")
+
+	target := utmvm.BootInstaller
+	if *installed {
+		target = utmvm.BootInstalled
+	}
+	fmt.Printf("starting %s and driving the UEFI shell...\n", e.Name)
+	if err := utmvm.BootAndWait(e.UUID, target, diskPath, *wait); err != nil {
+		return err
+	}
+	fmt.Println("boot took — Setup is running or the guest agent answered")
 	return nil
 }

@@ -33,15 +33,33 @@ irgo-winvm doctor        # installs UTM via Homebrew if missing
 ## Use
 
 ```sh
-irgo-winvm doctor                                   # UTM version, guest tools, disk space
-irgo-winvm targets                                  # what this machine can test
-irgo-winvm verify  -iso win11-arm64.iso             # ARM64? unattended-capable?
-irgo-winvm create  -iso win11-arm64.iso -name dev-win -probes ./out
-irgo-winvm start   -vm dev-win                      # start, wait for the guest agent
-irgo-winvm probe   -vm dev-win                      # run the probes, print the report
-irgo-winvm delete  -vm dev-win -force               # stop and reclaim the space
-irgo-winvm prune                                    # drop staged payload images
+irgo-winvm doctor                                # UTM version, guest tools, disk space
+irgo-winvm targets                               # what this machine can test
+irgo-winvm verify -iso win11-arm64.iso           # ARM64? can it boot unattended?
+
+# The usual entry point: create, restart UTM, boot past the UEFI shell.
+irgo-winvm up -iso win11-arm64.iso -name dev-win -probes ./out
+
+irgo-winvm status -vm dev-win                    # state, IP, whether the agent answers
+irgo-winvm probe  -vm dev-win                    # run the probes, print the report
+irgo-winvm delete -vm dev-win -force             # stop and reclaim the space
 ```
+
+`up` is `create` + `RestartUTM` + `boot`. The steps stay separate underneath
+because each fails differently and is worth retrying alone.
+
+Two behaviours that look like bugs and are not:
+
+**UTM must be restarted after `create`.** It enumerates its bundle directory
+only at launch, so a VM written while UTM is running does not exist as far as
+`utmctl` or the UI are concerned — with no error saying so. `up` does this for
+you.
+
+**Every boot needs driving.** UTM's aarch64 firmware never auto-selects a boot
+entry; it drops to the interactive UEFI shell. `boot` types the path the way a
+person would, and must open a display window first: `utmctl start` powers the VM
+on headless, and UTM routes keyboard input through the display, so keystrokes to
+a windowless VM are accepted and discarded.
 
 `create` writes a bundle whose install needs no input: a generated FAT medium
 carries `autounattend.xml`, `startup.nsh` and your probe binaries, and the UTM

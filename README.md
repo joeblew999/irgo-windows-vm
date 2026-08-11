@@ -61,9 +61,13 @@ person would, and must open a display window first: `utmctl start` powers the VM
 on headless, and UTM routes keyboard input through the display, so keystrokes to
 a windowless VM are accepted and discarded.
 
-`create` writes a bundle whose install needs no input: a generated FAT medium
+`create` writes a bundle whose install needs no input. A generated ISO9660 CD
 carries `autounattend.xml`, `startup.nsh` and your probe binaries, and the UTM
 guest tools CD is attached so the QEMU agent exists afterwards.
+
+It has to be a CD, not a removable FAT disk. Attached as a disk, Windows Setup
+did not read `autounattend.xml` and fell back to an interactive install with no
+error; as a CD it is read and applied.
 
 ## Things that cost hours, encoded so they cannot regress
 
@@ -82,6 +86,11 @@ config with one generic *"cannot import this VM"* that names no field.
 | `efi\boot\bootaa64.efi` | prints "Press any key to boot from CD" and times out. Use `cdboot_noprompt.efi` |
 | no `startup.nsh` | UTM's firmware does not auto-boot; it sits in the UEFI shell |
 | Windows ISOs are **UDF**, not ISO9660 | `install.wim` exceeds ISO9660's 4 GB limit, so ISO9660 readers fail on every path |
+| answer file on a FAT disk | Setup ignores it and runs interactive. Use an ISO9660 **CD** |
+| ISO padded past its declared volume size | mounts fine on macOS, ignored by Setup. Trim to the PVD size |
+| Joliet disabled | `autounattend.xml` becomes `AUTOUNAT.XML`, which Setup never looks for |
+| `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs |
+| `utmctl start` then keystrokes | headless VM has no display, and UTM routes input through it — keystrokes vanish |
 
 ## Layout
 

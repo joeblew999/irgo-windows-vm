@@ -299,13 +299,16 @@ func runProbe(args []string) error {
 		letters = []string{strings.TrimSuffix(*drive, ":")}
 	}
 	for _, l := range letters {
-		out, err := vm.Exec("cmd", "/c", l+`:\probe\run-all.cmd`)
+		// Binaries sit at the medium's root, not in a subdirectory: go-diskfs
+		// mangles Joliet names inside nested directories into UCS-2 garbage,
+		// while root entries survive intact.
+		out, err := vm.Exec("cmd", "/c", l+`:\run-all.cmd`)
 		if err == nil {
 			fmt.Println(out)
 			return nil
 		}
 	}
-	return fmt.Errorf("could not find probe\\run-all.cmd on any of %v", letters)
+	return fmt.Errorf("could not find run-all.cmd on any of %v", letters)
 }
 
 func runDoctor() error {

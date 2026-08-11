@@ -188,3 +188,24 @@ func firstLine(s string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// RestartUTM quits and relaunches UTM.
+//
+// Necessary because UTM enumerates its bundle directory only at launch: a VM
+// written to disk while UTM is running simply does not exist as far as utmctl
+// or the UI are concerned, with no error to suggest why.
+func RestartUTM() error {
+	_ = exec.Command("osascript", "-e", `tell application "UTM" to quit`).Run()
+	for i := 0; i < 15; i++ {
+		if err := exec.Command("pgrep", "-f", AppPath+"/Contents/MacOS/UTM").Run(); err != nil {
+			break // gone
+		}
+		time.Sleep(time.Second)
+	}
+	if err := exec.Command("open", "-a", "UTM").Run(); err != nil {
+		return fmt.Errorf("relaunching UTM: %w", err)
+	}
+	// Give it time to enumerate before anything asks for the new VM.
+	time.Sleep(8 * time.Second)
+	return nil
+}

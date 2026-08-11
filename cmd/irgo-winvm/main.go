@@ -38,6 +38,7 @@ func usage() {
   status   Report a VM's state and IP
   exec     Run a command inside a VM
   probe    Run the bundled probes in a VM and print the report
+  up       create + start + boot in one step, the usual entry point
   create   Generate a UTM bundle from a Windows ARM64 ISO  (Apple Silicon only)
   verify   Check an ISO is really ARM64 and can boot unattended
 
@@ -61,6 +62,8 @@ func run(args []string) error {
 		return runStart(args[1:])
 	case "boot":
 		return runBoot(args[1:])
+	case "up":
+		return runUp(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "exec":
@@ -415,5 +418,66 @@ func runBoot(args []string) error {
 		return err
 	}
 	fmt.Println("boot took — Setup is running or the guest agent answered")
+	return nil
+}
+
+// runUp is the single command that takes an ISO to a running Windows VM.
+//
+// The separate steps exist because each one can fail in its own way and is
+// worth retrying alone, but nobody wants to type four commands to get started.
+func runUp(args []string) error {
+	fs := flag.NewFlagSet("up", flag.ContinueOnError)
+	var (
+		iso     = fs.String("iso", "", "path to the Windows 11 ARM64 ISO (required)")
+		name    = fs.String("name", "irgo-win11", "VM name")
+		probes  = fs.String("probes", "", "directory of Windows test binaries to embed")
+		wait    = fs.Duration("wait", 45*time.Minute, "how long to allow for the install")
+		replace = fs.Bool("replace", false, "delete an existing VM of the same name first")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *iso == "" {
+		fs.Usage()
+		return fmt.Errorf("-iso is required")
+	}
+	if !utmvm.CanCreateVMs() {
+		return fmt.Errorf("this needs macOS on Apple Silicon; see `irgo-winvm targets`")
+	}
+
+	if *replace {
+		if _, err := utmvm.Delete(*name, true); err == nil {
+			fmt.Printf("removed the existing %s\n", *name)
+		}
+	}
+
+	info, err := utmvm.InspectISO(*iso)
+	if err != nil {
+		return err
+	}
+	if !info.IsARM64 {
+		return fmt.Errorf("%s is not an ARM64 ISO; it cannot boot on Apple Silicon", filepath.Base(*iso))
+	}
+
+	bundle, err := utmvm.Create(utmvm.Options{Name: *name, InstallISO: *iso, ProbeDir: *probes})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("created %s\n", bundle)
+
+	// UTM only rescans its bundle directory at launch, so a VM generated while
+	// UTM is running is invisible to it until restarted.
+	fmt.Println("restarting UTM so it picks up the new VM...")
+	if err := utmvm.RestartUTM(); err != nil {
+		return err
+	}
+
+	diskPath := filepath.Join(bundle, "Data", "disk.img")
+	fmt.Println("starting and driving the UEFI shell...")
+	if err := utmvm.BootAndWait(*name, utmvm.BootInstaller, diskPath, *wait); err != nil {
+		return err
+	}
+	fmt.Printf("\nWindows Setup is running. It installs unattended from here.\n")
+	fmt.Printf("Watch with:  irgo-winvm status -vm %s\n", *name)
 	return nil
 }

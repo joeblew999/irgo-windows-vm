@@ -54,7 +54,26 @@ zero sockets, this is a genuine SSE substitute for a desktop app — relevant
 because glaze's `SchemeResponse` is a buffered `[]byte` on the UI thread and so
 cannot stream SSE itself.
 
-## Windows ARM64 — not yet run
+## Windows ARM64 — installed, probes not yet run
+
+An unattended install completed on 11 Aug 2026: Windows 11 ARM64 (build 26100)
+reached a logged-in desktop as `dev` with no interaction after the boot command.
+That proves the answer file, the disk layout, the display device and the boot
+path. The probes themselves have not produced a report yet — the host locked
+before the run finished, and driving the guest needs the screen unlocked while
+the VM has no guest agent.
+
+### What the install proved
+
+| claim | status |
+|---|---|
+| ARM64 Windows installs unattended in UTM | **yes** — desktop reached, auto-login as `dev` |
+| answer file is read and applied | **yes** — GPT layout matched `DiskConfiguration` exactly |
+| `virtio-ramfb-gl` display works | **yes** — Setup and desktop both render |
+| NVMe system disk is visible to Setup | **yes** |
+| glaze runs on Windows | **not yet measured** |
+
+## Windows ARM64 — outstanding
 
 Pending a working VM. These are the claims that **cannot** be checked on a Mac
 and are the whole reason for the VM:

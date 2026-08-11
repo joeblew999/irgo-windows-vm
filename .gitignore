@@ -1,0 +1,5 @@
+# Generated media and disks — rebuild with `irgo-winvm create`
+*.iso
+*.dmg
+*.img
+/out/

@@ -211,10 +211,16 @@
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
              from the host, which defeats the point of generating it from code.
-             The CD letter varies with drive count, so scan for it. -->
+
+             Two loops, not one. The CD letter varies with how many drives the
+             VM has, so the outer loop scans for it. The inner loop exists
+             because `start` does NOT expand wildcards — passing
+             utm-guest-tools-*.exe to it fails silently, and the installer
+             simply never runs. `for` expands the version-stamped filename to a
+             literal path first. -->
         <SynchronousCommand wcm:action="add">
           <Order>6</Order>
-          <CommandLine>cmd /c for %i in (D E F G H) do @if exist %i:\utm-guest-tools-*.exe start /wait %i:\utm-guest-tools-*.exe /S</CommandLine>
+          <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->

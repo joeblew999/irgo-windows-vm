@@ -1,6 +1,7 @@
 package utmvm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +75,7 @@ func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
 	}
 	// Without Finalize the descriptors are never written and the image is not
 	// a readable ISO at all.
-	return iso.Finalize(iso9660.FinalizeOptions{
+	if err := iso.Finalize(iso9660.FinalizeOptions{
 		VolumeIdentifier: "UNATTEND",
 		RockRidge:        true,
 		// Joliet is what Windows reads. Without it the image is 8.3 only and
@@ -82,7 +83,48 @@ func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
 		// so the install silently runs interactive.
 		Joliet:          true,
 		DeepDirectories: true,
-	})
+	}); err != nil {
+		return err
+	}
+	return trimToVolumeSize(imagePath)
+}
+
+// trimToVolumeSize cuts the image down to the size its Primary Volume
+// Descriptor declares.
+//
+// go-diskfs needs a size up front and leaves whatever is left over as a tail of
+// zeros past the end of the volume. Readers disagree about that: macOS mounts
+// such an image happily, which is why it looked fine, while Windows Setup did
+// not pick up autounattend.xml from one and fell back to an interactive install
+// with no error. The working reference image, built by hdiutil, has no tail.
+//
+// Volume space size lives at offset 0x8050 as a little-endian block count, with
+// 2048-byte logical blocks.
+func trimToVolumeSize(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var b [4]byte
+	if _, err := f.ReadAt(b[:], 0x8050); err != nil {
+		return fmt.Errorf("reading volume size: %w", err)
+	}
+	blocks := int64(binary.LittleEndian.Uint32(b[:]))
+	if blocks == 0 {
+		return fmt.Errorf("ISO reports zero volume blocks; image is malformed")
+	}
+	want := blocks * 2048
+
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if st.Size() <= want {
+		return nil
+	}
+	return f.Truncate(want)
 }
 
 func copyIntoISO(fs filesystem.FileSystem, hostPath, target string) error {

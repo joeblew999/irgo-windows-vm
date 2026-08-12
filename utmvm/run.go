@@ -30,6 +30,45 @@ const guestPublic = `C:\Users\Public`
 //
 // utmctl's file push reads the payload from stdin rather than taking a source
 // path, so the file is streamed in.
+// pushScript writes a batch file, sends it to the guest, and removes the local
+// copy.
+//
+// Everything that runs in the guest goes through a batch file rather than
+// straight through exec, and that is not a style choice: cmd.exe applies its own
+// quote-stripping to a quoted command line passed through `utmctl exec`, so any
+// command containing quotes silently fails. Writing it to a file and running the
+// file by path is the only reliable route.
+//
+// Three call sites did this by hand and each could drop the temp file on a
+// different error path.
+func pushScript(vmRef, guestPath, script string) error {
+	tmp, err := os.CreateTemp("", "irgo-*.bat")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(script); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return Push(vmRef, tmp.Name(), guestPath)
+}
+
+// batchFile builds the CRLF batch text that runs argv, capturing its output and
+// exit code to files the host can pull afterwards.
+//
+// The capture is the point: `utmctl exec` never returns the guest's output and
+// always exits 0, so a suite that ran nothing looks exactly like one that
+// passed.
+func batchFile(argv []string, outFile, rcFile string) string {
+	return "@echo off\r\n" +
+		quoteForCmd(argv) + " > \"" + outFile + "\" 2>&1\r\n" +
+		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
+}
+
 func Push(vmRef, localPath, guestPath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -95,21 +134,7 @@ func RunInGuest(vmRef string, argv []string, timeout time.Duration) (Result, err
 	outFile := guestTemp + `\irgo-out-` + stamp + `.txt`
 	rcFile := guestTemp + `\irgo-rc-` + stamp + `.txt`
 
-	script := "@echo off\r\n" +
-		quoteForCmd(argv) + " > \"" + outFile + "\" 2>&1\r\n" +
-		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
-
-	tmp, err := os.CreateTemp("", "irgo-*.bat")
-	if err != nil {
-		return res, err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(script); err != nil {
-		return res, err
-	}
-	tmp.Close()
-
-	if err := Push(vmRef, tmp.Name(), batFile); err != nil {
+	if err := pushScript(vmRef, batFile, batchFile(argv, outFile, rcFile)); err != nil {
 		return res, err
 	}
 	if _, err := Named(vmRef).Exec("cmd.exe", "/c", batFile); err != nil {
@@ -223,19 +248,8 @@ func RunInteractive(vmRef, guestExe string, args []string, user, pass string, ti
 
 	// The task runs this; it captures output and exit code the same way the
 	// headless path does.
-	inner_script := "@echo off\r\n" +
-		quoteForCmd(append([]string{guestExe}, args...)) + " > \"" + outFile + "\" 2>&1\r\n" +
-		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
-	tmp, err := os.CreateTemp("", "irgo-i-*.bat")
-	if err != nil {
-		return res, err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(inner_script); err != nil {
-		return res, err
-	}
-	tmp.Close()
-	if err := Push(vmRef, tmp.Name(), inner); err != nil {
+	inner_script := batchFile(append([]string{guestExe}, args...), outFile, rcFile)
+	if err := pushScript(vmRef, inner, inner_script); err != nil {
 		return res, err
 	}
 
@@ -254,17 +268,8 @@ func RunInteractive(vmRef, guestExe string, args []string, user, pass string, ti
 		"schtasks /delete /tn " + task + " /f >nul 2>&1\r\n" +
 		"schtasks /create /tn " + task + " /tr \"cmd /c " + inner + "\" /sc once /st 23:59 /ru " + user + " /it /f\r\n" +
 		"schtasks /run /tn " + task + "\r\n"
-	ltmp, lerr := os.CreateTemp("", "irgo-l-*.bat")
-	if lerr != nil {
-		return res, lerr
-	}
-	defer os.Remove(ltmp.Name())
-	if _, werr := ltmp.WriteString(launcher); werr != nil {
-		return res, werr
-	}
-	ltmp.Close()
 	launcherGuest := guestPublic + `\irgo-l-` + stamp + `.bat`
-	if perr := Push(vmRef, ltmp.Name(), launcherGuest); perr != nil {
+	if perr := pushScript(vmRef, launcherGuest, launcher); perr != nil {
 		return res, perr
 	}
 	if _, xerr := vm.Exec("cmd.exe", "/c", launcherGuest); xerr != nil {

@@ -34,7 +34,8 @@ func usage() {
   prune    Remove generated payload images and staging leftovers
   targets  Show which desktop builds this machine can actually run
   start    Start a VM and wait until its guest agent answers
-  boot     Start a VM and drive it past UTM's UEFI shell (needed every boot)
+  boot     Start a VM and drive it past UTM's UEFI shell (one boot only)
+  install  Drive an unattended install to completion, unsupervised
   status   Report a VM's state and IP
   screenshot  Capture the VM's screen (works with no guest agent)
   exec     Run a command inside a VM
@@ -65,6 +66,8 @@ func run(args []string) error {
 		return runBoot(args[1:])
 	case "up":
 		return runUp(args[1:])
+	case "install":
+		return runInstall(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "screenshot":
@@ -488,13 +491,19 @@ func runUp(args []string) error {
 		return err
 	}
 
-	diskPath := filepath.Join(bundle, "Data", "disk.img")
-	fmt.Println("starting and driving the UEFI shell...")
-	if err := utmvm.BootAndWait(e.UUID, utmvm.BootInstaller, diskPath, *wait); err != nil {
+	// Drive the whole install, not just the first boot. Setup reboots partway
+	// and lands back in the UEFI shell needing a different boot; handling only
+	// the first is what made every previous run need a human.
+	fmt.Println("installing (both boot phases, unsupervised)...")
+	if err := utmvm.RunInstall(utmvm.InstallOptions{
+		VMRef:      e.UUID,
+		BundlePath: bundle,
+		Timeout:    *wait,
+		Log:        os.Stdout,
+	}); err != nil {
 		return err
 	}
-	fmt.Printf("\nWindows Setup is running. It installs unattended from here.\n")
-	fmt.Printf("Watch with:  irgo-winvm status -vm %s\n", *name)
+	fmt.Printf("\n%s is ready. Try:  irgo-winvm probe -vm %s\n", *name, *name)
 	return nil
 }
 
@@ -521,4 +530,28 @@ func runScreenshot(args []string) error {
 	}
 	fmt.Println(path)
 	return nil
+}
+
+// runInstall drives an install with no supervision, through both boot phases.
+func runInstall(args []string) error {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	wait := fs.Duration("wait", 45*time.Minute, "overall timeout")
+	ref, err := vmRef(fs, args)
+	if err != nil {
+		return err
+	}
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	dir, err := utmvm.DefaultVMDir()
+	if err != nil {
+		return err
+	}
+	return utmvm.RunInstall(utmvm.InstallOptions{
+		VMRef:      e.UUID,
+		BundlePath: filepath.Join(dir, e.Name+".utm"),
+		Timeout:    *wait,
+		Log:        os.Stdout,
+	})
 }

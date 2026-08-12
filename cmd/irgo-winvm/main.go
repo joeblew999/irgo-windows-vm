@@ -36,6 +36,7 @@ func usage() {
   start    Start a VM and wait until its guest agent answers
   boot     Start a VM and drive it past UTM's UEFI shell (one boot only)
   install  Drive an unattended install to completion, unsupervised
+  run      Push a local binary into the VM, run it, print its output
   status   Report a VM's state and IP
   screenshot  Capture the VM's screen (works with no guest agent)
   exec     Run a command inside a VM
@@ -68,6 +69,8 @@ func run(args []string) error {
 		return runUp(args[1:])
 	case "install":
 		return runInstall(args[1:])
+	case "run":
+		return runRun(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "screenshot":
@@ -258,13 +261,30 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	vm := utmvm.Named(ref)
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	vm := utmvm.Named(e.UUID)
 	st, err := vm.Status()
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%-10s %s\n", "state:", st)
-	if ips, err := vm.IPAddress(); err == nil {
+
+	// Phase comes from host-side signals only — block usage and whether the
+	// guest has written EFI NVRAM — so it works during an install, when there
+	// is no agent to ask and a screenshot is the only alternative.
+	if dir, dErr := utmvm.DefaultVMDir(); dErr == nil {
+		p := utmvm.Inspect(e.UUID, filepath.Join(dir, e.Name+".utm"))
+		fmt.Printf("%-10s %s\n", "phase:", p.Phase)
+		fmt.Printf("%-10s %d MB\n", "disk:", p.DiskMiB)
+		if p.BootEntryWritten {
+			fmt.Printf("%-10s yes (Setup registered its own boot entry)\n", "boot-entry:")
+		}
+	}
+
+	if ips, ipErr := vm.IPAddress(); ipErr == nil {
 		fmt.Printf("%-10s %s\n", "ip:", strings.Join(ips, ", "))
 		fmt.Printf("%-10s yes\n", "agent:")
 	} else {
@@ -283,9 +303,26 @@ func runExec(args []string) error {
 	if *cmdline == "" {
 		return fmt.Errorf("-cmd is required")
 	}
-	out, err := utmvm.Named(ref).Exec(strings.Fields(*cmdline)...)
-	fmt.Println(out)
-	return err
+	// Everything after the flags is the command, so quoted arguments and paths
+	// with spaces survive. strings.Fields used to mangle them.
+	argv := fs.Args()
+	if len(argv) == 0 {
+		if *cmdline == "" {
+			return fmt.Errorf("give a command after the flags, e.g. exec -vm X -- cmd.exe /c dir")
+		}
+		argv = strings.Fields(*cmdline)
+	}
+	res, err := utmvm.RunInGuest(ref, argv, 5*time.Minute)
+	if res.Stdout != "" {
+		fmt.Println(res.Stdout)
+	}
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("guest command exited %d", res.ExitCode)
+	}
+	return nil
 }
 
 // runProbe runs the probe suite that was baked onto the unattend medium.
@@ -554,4 +591,48 @@ func runInstall(args []string) error {
 		Timeout:    *wait,
 		Log:        os.Stdout,
 	})
+}
+
+// runRun is the inner loop: build on the Mac, run on Windows, read output back.
+func runRun(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
+	name := fs.String("vm", "", "VM name or UUID (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" || fs.NArg() == 0 {
+		return fmt.Errorf("usage: irgo-winvm run -vm <name> <local.exe> [args...]")
+	}
+	e, err := utmvm.Find(*name)
+	if err != nil {
+		return err
+	}
+	vm := utmvm.Named(e.UUID)
+
+	// Resuming a suspended VM restores RAM instead of booting, so it never
+	// reaches the UEFI shell and needs no keystrokes — which is what makes the
+	// loop fast and headless.
+	if st, _ := vm.Status(); st != "started" {
+		fmt.Fprintln(os.Stderr, "resuming VM...")
+		if err := vm.Start(); err != nil {
+			return err
+		}
+		if err := vm.WaitForAgent(3 * time.Minute); err != nil {
+			return err
+		}
+	}
+
+	local := fs.Arg(0)
+	res, err := utmvm.RunLocalBinary(e.UUID, local, fs.Args()[1:], *timeout)
+	if res.Stdout != "" {
+		fmt.Println(res.Stdout)
+	}
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("%s exited %d in the guest", filepath.Base(local), res.ExitCode)
+	}
+	return nil
 }

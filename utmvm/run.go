@@ -1,0 +1,162 @@
+package utmvm
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// guestTemp is where pushed binaries and captured output live in the guest.
+// C:\Windows\Temp rather than the user profile: it exists on every install and
+// does not depend on which account the agent runs as.
+const guestTemp = `C:\Windows\Temp`
+
+// Push copies a local file into the guest.
+//
+// utmctl's file push reads the payload from stdin rather than taking a source
+// path, so the file is streamed in.
+func Push(vmRef, localPath, guestPath string) error {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	cmd := exec.Command(utmctlPath(), "file", "push", vmRef, guestPath)
+	cmd.Stdin = f
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pushing %s to %s: %w: %s", localPath, guestPath, err, strings.TrimSpace(errb.String()))
+	}
+	return nil
+}
+
+// Pull reads a file out of the guest.
+func Pull(vmRef, guestPath string) ([]byte, error) {
+	cmd := exec.Command(utmctlPath(), "file", "pull", vmRef, guestPath)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("pulling %s: %w: %s", guestPath, err, strings.TrimSpace(errb.String()))
+	}
+	return out.Bytes(), nil
+}
+
+// Result is the outcome of running something in the guest.
+type Result struct {
+	Stdout   string
+	ExitCode int
+}
+
+// RunInGuest executes a command in the guest and returns its output and exit
+// code.
+//
+// Two properties of utmctl exec force this shape:
+//
+//  1. It does not stream the process's output back, and always exits 0 whatever
+//     the guest command did. Treating an empty result as success is how a suite
+//     that ran nothing would look like a suite that passed.
+//  2. Complex command lines do not survive it. Passing
+//     `cmd.exe /c "prog" > "out" 2>&1 & echo %ERRORLEVEL% > "rc"` produced
+//     neither file: cmd.exe applies its own quote-stripping rules to a string
+//     that already contains quotes, and the whole line silently does nothing.
+//
+// So the command is written to a batch file, pushed, and run by path. A batch
+// file has no quoting ambiguity, and each line is parsed as it executes — which
+// also makes %ERRORLEVEL% read the previous command's code rather than being
+// expanded early, as it is in a single chained line.
+func RunInGuest(vmRef string, argv []string, timeout time.Duration) (Result, error) {
+	var res Result
+	if len(argv) == 0 {
+		return res, fmt.Errorf("no command given")
+	}
+	if timeout == 0 {
+		timeout = 10 * time.Minute
+	}
+
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
+	batFile := guestTemp + `\irgo-` + stamp + `.bat`
+	outFile := guestTemp + `\irgo-out-` + stamp + `.txt`
+	rcFile := guestTemp + `\irgo-rc-` + stamp + `.txt`
+
+	script := "@echo off\r\n" +
+		quoteForCmd(argv) + " > \"" + outFile + "\" 2>&1\r\n" +
+		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
+
+	tmp, err := os.CreateTemp("", "irgo-*.bat")
+	if err != nil {
+		return res, err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(script); err != nil {
+		return res, err
+	}
+	tmp.Close()
+
+	if err := Push(vmRef, tmp.Name(), batFile); err != nil {
+		return res, err
+	}
+	if _, err := Named(vmRef).Exec("cmd.exe", "/c", batFile); err != nil {
+		return res, err
+	}
+
+	// exec returns once the process is launched, so wait for the exit-code file
+	// rather than assuming the work is done.
+	deadline := time.Now().Add(timeout)
+	var rcRaw []byte
+	for {
+		var perr error
+		rcRaw, perr = Pull(vmRef, rcFile)
+		if perr == nil && len(bytes.TrimSpace(rcRaw)) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			return res, fmt.Errorf("guest command did not finish within %s", timeout)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	if out, perr := Pull(vmRef, outFile); perr == nil {
+		res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+	}
+	if n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw))); cerr == nil {
+		res.ExitCode = n
+	}
+
+	_, _ = Named(vmRef).Exec("cmd.exe", "/c", "del /q "+batFile+" "+outFile+" "+rcFile)
+	return res, nil
+}
+
+// RunLocalBinary pushes a binary into the guest and runs it there.
+//
+// This is the inner loop the whole tool exists for: build on the Mac, run on
+// Windows, read the output back — with no GUI, no keystrokes, and no screen.
+func RunLocalBinary(vmRef, localPath string, args []string, timeout time.Duration) (Result, error) {
+	guestPath := guestTemp + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
+	if err := Push(vmRef, localPath, guestPath); err != nil {
+		return Result{}, err
+	}
+	return RunInGuest(vmRef, append([]string{guestPath}, args...), timeout)
+}
+
+// quoteForCmd renders argv for cmd.exe, quoting only what needs it.
+//
+// Paths under C:\Windows\Temp are space-free, but a caller's arguments are not
+// guaranteed to be, and an unquoted space silently becomes two arguments.
+func quoteForCmd(argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, a := range argv {
+		if a == "" || strings.ContainsAny(a, ` "&|<>^`) {
+			parts = append(parts, `"`+strings.ReplaceAll(a, `"`, `""`)+`"`)
+			continue
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " ")
+}

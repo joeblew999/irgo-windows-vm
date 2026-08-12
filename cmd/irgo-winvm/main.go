@@ -610,15 +610,16 @@ func runRun(args []string) error {
 	}
 	vm := utmvm.Named(e.UUID)
 
-	// Resuming a suspended VM restores RAM instead of booting, so it never
-	// reaches the UEFI shell and needs no keystrokes — which is what makes the
-	// loop fast and headless.
-	if st, _ := vm.Status(); st != "started" {
-		fmt.Fprintln(os.Stderr, "resuming VM...")
-		if err := vm.Start(); err != nil {
-			return err
+	// Recover the VM if it is not answering. A Windows guest reboots on its own
+	// — Windows Update does it — and lands back in the UEFI shell, so a run
+	// cannot assume the VM is still reachable just because it was earlier.
+	if !vm.AgentReady() {
+		fmt.Fprintln(os.Stderr, "VM not answering; recovering...")
+		dir, dErr := utmvm.DefaultVMDir()
+		if dErr != nil {
+			return dErr
 		}
-		if err := vm.WaitForAgent(3 * time.Minute); err != nil {
+		if err := utmvm.EnsureReady(e.UUID, filepath.Join(dir, e.Name+".utm"), 10*time.Minute); err != nil {
 			return err
 		}
 	}

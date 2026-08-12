@@ -133,6 +133,33 @@ func RunInGuest(vmRef string, argv []string, timeout time.Duration) (Result, err
 	return res, nil
 }
 
+// EnsureReady brings a VM to a state where commands can be run in it.
+//
+// A Windows guest reboots on its own — Windows Update did so mid-session here,
+// dropping the agent with "Port is not connected" — and UTM's firmware does not
+// reliably auto-boot afterwards. So "is the VM ready" cannot be assumed just
+// because it was ready a minute ago, and every entry point that talks to the
+// guest has to be able to recover rather than fail.
+func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
+	vm := Named(vmRef)
+	if vm.AgentReady() {
+		return nil
+	}
+	if st, _ := vm.Status(); st != "started" {
+		// Resuming a suspended VM restores RAM and never reaches the firmware,
+		// so this is both the fast path and the one needing no keystrokes.
+		if err := vm.StartWithDisplay(); err != nil {
+			return err
+		}
+		if err := vm.WaitForAgent(timeout); err == nil {
+			return nil
+		}
+	}
+	// Running but unreachable means it is sitting in the UEFI shell after a
+	// reboot. Drive it out the same way an install would.
+	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout})
+}
+
 // RunLocalBinary pushes a binary into the guest and runs it there.
 //
 // This is the inner loop the whole tool exists for: build on the Mac, run on

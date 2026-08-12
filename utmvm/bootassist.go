@@ -91,6 +91,32 @@ func BootAssistOn(vmRef string, target BootTarget, override string) error {
 		}
 	}
 
+	// Booting an INSTALLED Windows is a different problem from booting the
+	// installer, and needs a loop where the installer must not have one.
+	//
+	// The ESP lives on the NVMe disk, whose filesystem number depends on how
+	// many CDs are attached and whether Windows has partitioned yet — it is not
+	// fs0, which is the install CD. Guessing one number fails silently.
+	//
+	// Retrying is safe here in a way it is not for the installer: until Windows
+	// boots there is only the UEFI shell to type into, and once it boots the
+	// loop stops. The installer case is different because Setup's UI appears
+	// while typing may still be in flight, which is what destroyed an install.
+	if target == BootInstalled && override == "" {
+		for _, fsn := range []string{"fs2:", "fs3:", "fs1:", "fs4:", "fs0:"} {
+			if err := typeBootCommand(vmRef, fsn, paths[0]); err != nil {
+				return err
+			}
+			for i := 0; i < 4; i++ {
+				time.Sleep(10 * time.Second)
+				if Named(vmRef).AgentReady() {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+
 	// ONE attempt. Not a loop.
 	//
 	// Looping over candidates is actively destructive and this is not a

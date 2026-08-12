@@ -54,7 +54,58 @@ zero sockets, this is a genuine SSE substitute for a desktop app — relevant
 because glaze's `SchemeResponse` is a buffered `[]byte` on the UI thread and so
 cannot stream SSE itself.
 
-## Windows ARM64 — installed, probes not yet run
+## Windows ARM64 — MEASURED (native capabilities)
+
+Host: Apple M2 Pro / UTM 4.7.5, guest Windows 11 ARM64 build 26100, run headless
+through the QEMU guest agent — no GUI, no keystrokes, no screen.
+
+### The inner loop works
+
+```
+$ irgo-winvm run -vm irgo-win11 hello-arm64.exe alpha beta
+hello from windows/arm64
+args: [alpha beta]
+```
+
+10.8 seconds end to end. The binary was cross-compiled on macOS with plain
+`GOOS=windows GOARCH=arm64` and **no toolchain at all** — which is what cgo-free
+buys, and what irgo cannot currently do because mingw pins it to amd64.
+
+Exit codes propagate: a binary exiting 3 fails the command rather than passing
+silently.
+
+### Native capabilities — windows/arm64, native
+
+| capability | result |
+|---|---|
+| `clipboard.write` / `clipboard.read` | **OK** — round trip verified |
+| `power.preventSleep` | **OK** — acquired and released |
+| `singleinstance.acquire` | **OK** — lock held, re-acquire correctly refused |
+| `mmap.map` | **OK** — mapped and wrote through |
+| `openurl` / `tray` / `filedialog` / `menu` | skipped (see the caveat in PLAN.md — three are not even linked) |
+| `notifications`, `keychain`, `fswatch` | missing from the ecosystem |
+
+Identical to the macOS column. Every capability that works on macOS works on
+Windows ARM64.
+
+### glaze probes — still outstanding
+
+The two glaze probes open a WebView2 window, and that is where this stopped.
+The VM rebooted itself mid-session (Windows Update, disk grew 14 → 27 GB),
+dropping the agent with `Port is not connected`, and it has not been brought
+back yet.
+
+Two constraints learned in the attempt, both now understood rather than guessed:
+
+- **The guest agent runs without a desktop session.** A GUI app started through
+  it has no window station, so the glaze probes need launching into the
+  interactive session — a scheduled task with `/it`, not a plain exec.
+- **Keystrokes do not reach the VM while the Mac is locked.** Boot recovery
+  depends on typing at the UEFI shell, so a locked screen blocks it. This is the
+  strongest argument for suspend/resume: resuming restores RAM and never reaches
+  the firmware, so it needs no keystrokes and works locked.
+
+## Windows ARM64 — the claims still unverified
 
 An unattended install completed on 11 Aug 2026: Windows 11 ARM64 (build 26100)
 reached a logged-in desktop as `dev` with no interaction after the boot command.

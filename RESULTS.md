@@ -22,7 +22,7 @@ destroyed an install when surplus presses reached Setup's UI. Media built with
 the no-prompt loader does not need it.
 
 Full detail, including the two failed attempts and why they failed, is in
-[PLAN-fetch-iso.md](PLAN-fetch-iso.md).
+the trap table in [README.md](README.md).
 
 ---
 
@@ -268,3 +268,26 @@ and are the whole reason for the VM:
 
 Run with `probe/run-all.cmd` from the payload image; it writes one report to the
 Desktop covering ARM64-native and x64-emulated for every probe.
+
+## Still open
+
+Everything the plan files tracked is done and measured above. What is left:
+
+- **Durable suspend.** Resume is 400 ms but the state is in memory, so it does
+  not survive quitting UTM. The blocker is the emulated NVMe device, and NVMe is
+  not optional — Windows ARM64 Setup has no inbox VirtIO storage driver. Getting
+  past it means switching the system disk to VirtIO and injecting the driver
+  into `boot.wim`, which is now reachable because `build-iso` already drives
+  wimlib over the media.
+- **`Delete` safety.** It removes files 30 seconds after asking QEMU to stop,
+  whether or not it actually did. (`Prune` was the worse half of this and is
+  fixed: it used to delete any `*.img`/`*.dmg` in the system temp directory
+  regardless of owner.)
+- **Dead code.** `BuildFATImage`, `OpenDisplay`, `BootAssist`,
+  `SchemaConfigurationVersion`, `IfaceVirtIO` and `GuestToolsInstallCommand` are
+  unreferenced; the last still carries a `start`-wildcard bug already fixed in
+  the answer file.
+- **Two upstream fixes are prepared and unpushed** — see [UPSTREAM.md](UPSTREAM.md).
+
+**No irgo integration until this works standalone with glaze.** Integrating a
+tool that does not yet work makes the framework absorb its failures.

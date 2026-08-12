@@ -194,10 +194,12 @@ func extractCatalogCAB(cab []byte) ([]byte, error) {
 // letting an archive choose where to write in a directory somebody else uses is
 // how a download becomes a path-traversal bug.
 func extractCABWithLibarchive(cab []byte) ([]byte, error) {
-	bsdtar, err := exec.LookPath("bsdtar")
-	if err != nil {
-		return nil, fmt.Errorf("bsdtar not found (it ships with macOS at /usr/bin/bsdtar): %w", err)
+	tar := Tool{Name: "bsdtar", Formula: "libarchive",
+		Why: "extracts Microsoft's LZX-compressed catalog cabinet"}
+	if !tar.resolve() {
+		return nil, fmt.Errorf("bsdtar not found; it ships with macOS at /usr/bin/bsdtar")
 	}
+	bsdtar := tar.Path
 	dir, err := os.MkdirTemp("", "irgo-catalog-*")
 	if err != nil {
 		return nil, err

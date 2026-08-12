@@ -96,11 +96,8 @@ func EnsureUTM() (Install, error) {
 	// Homebrew is still used when it is present, because a developer who
 	// manages their applications with it will want UTM in that inventory rather
 	// than dropped into /Applications behind its back.
-	if brew, lookErr := exec.LookPath("brew"); lookErr == nil {
-		fmt.Fprintln(os.Stderr, "UTM not found — installing with Homebrew...")
-		cmd := exec.Command(brew, "install", "--cask", "utm")
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-		if runErr := cmd.Run(); runErr == nil {
+	if BrewPath() != "" {
+		if runErr := BrewInstall("utm", true); runErr == nil {
 			return DetectUTM()
 		}
 		fmt.Fprintln(os.Stderr, "Homebrew could not install it; downloading the .dmg instead...")

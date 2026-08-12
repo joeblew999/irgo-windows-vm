@@ -91,7 +91,7 @@ eight timed keypresses.
 Microsoft's catalog is an LZX-compressed CAB, which Go cannot read. It is
 extracted with `/usr/bin/bsdtar` — libarchive, which ships with macOS — so this
 needs nothing installed beyond the two tools above. Detail, and the two
-approaches that failed first, are in [PLAN-fetch-iso.md](PLAN-fetch-iso.md).
+approaches that failed first, are in [RESULTS.md](RESULTS.md).
 
 ## Use
 

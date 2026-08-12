@@ -16,7 +16,7 @@
 # this file exists.
 #
 #   mise tasks       every task, with what it is for
-#   mise run check   what Verification in PLAN.md asks for
+#   mise run check   build, vet and test all four modules
 #   mise run probes  build every probe for Windows — do this after a restart
 #
 # Go is deliberately NOT pinned in [tools]. It manages its own version: the
@@ -30,9 +30,8 @@
 # Where `probes` writes and where `run` reads. One variable, so the two cannot
 # drift apart and leave a stale binary being run against fresh source.
 #
-# It is inside the repo, not /tmp: PLAN.md's first open item is that the probes
-# are hand-built into /tmp today and a restart loses them. .bin/ is gitignored
-# and survives.
+# It is inside the repo, not /tmp, so a restart does not lose the probes.
+# .bin/ is gitignored.
 PROBE_DIR = "{{config_root}}/.bin"
 
 # The VM these tasks talk to. Override for a second one:
@@ -78,8 +77,7 @@ description = "setup, including a 4.2 GB download and a 45-minute Windows instal
 run = "go run ./cmd/irgo-winvm setup -fetch -install"
 
 [tasks.check]
-# Everything PLAN.md's Verification section asks for, in one command, across
-# all four modules.
+# Build, vet and test, in one command, across all four modules.
 #
 # -race on utmvm only: it is where the concurrency is (UTM control, install
 # driving), and it is the only module whose tests do not need a desktop.
@@ -114,7 +112,7 @@ run = [
 ]
 
 [tasks.probes]
-# The task PLAN.md item 1 asks for, until the CLI grows `probes build -o`.
+# Cross-compiles every probe. Until the CLI grows `probes build -o`.
 #
 # Both architectures every time. arm64 is the primary target and the only place
 # glaze's hand-written AAPCS64 register passing is ever executed; amd64 is what

@@ -12,7 +12,7 @@ package utmvm
 //   - the boot image should be efisys_noprompt.bin, not efisys.bin, because the
 //     difference is whether the disc stops at "Press any key to boot from CD";
 //   - and `hdiutil makehybrid` cannot do it at all — measured, twice, see
-//     PLAN-fetch-iso.md. An external masterer is required.
+//     RESULTS.md. An external masterer is required.
 //
 // Only the masterer is external. Everything else — mounting, copying, checking,
 // refusing to overwrite media in use — is done here, so the part that can
@@ -36,6 +36,18 @@ type Tool struct {
 
 // Found reports whether the tool is installed.
 func (t Tool) Found() bool { return t.Path != "" }
+
+// resolve looks the executable up on PATH, recording where it was found. The
+// one place in this package that asks that question about an external tool.
+func (t *Tool) resolve() bool {
+	p, err := exec.LookPath(t.Name)
+	if err != nil {
+		t.Path = ""
+		return false
+	}
+	t.Path = p
+	return true
+}
 
 // Install is the command that provides it.
 func (t Tool) Install() string { return "brew install " + t.Formula }
@@ -69,14 +81,14 @@ func isoMasterers() []Tool {
 }
 
 // WimTool is the one thing with no Go alternative: reading LZMS-compressed ESD
-// archives. See PLAN-fetch-iso.md for why writing one is not a weekend job.
+// archives. No Go implementation exists that is worth trusting.
 func WimTool() Tool {
 	t := Tool{
 		Name:    "wimlib-imagex",
 		Formula: "wimlib",
 		Why:     "reads Microsoft's .esd archives (LZMS compression, which no Go library implements).",
 	}
-	t.Path, _ = exec.LookPath(t.Name)
+	t.resolve()
 	return t
 }
 
@@ -85,30 +97,11 @@ func WimTool() Tool {
 func FindMasterer() (Tool, []Tool) {
 	all := isoMasterers()
 	for i := range all {
-		if p, err := exec.LookPath(all[i].Name); err == nil {
-			all[i].Path = p
+		if all[i].resolve() {
 			return all[i], all
 		}
 	}
 	return Tool{}, all
-}
-
-// MissingToolError explains what to install, rather than failing with
-// "executable file not found in $PATH".
-type MissingToolError struct {
-	Candidates []Tool
-	For        string
-}
-
-func (e *MissingToolError) Error() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "utmvm: no tool available to %s.\n", e.For)
-	for _, t := range e.Candidates {
-		fmt.Fprintf(&b, "\n  %s\n    %s\n    %s\n", t.Name, t.Why, t.Install())
-	}
-	b.WriteString("\nOne of these is enough. See PLAN-fetch-iso.md for why macOS's built-in\n")
-	b.WriteString("hdiutil is not an option: it produces media UTM's firmware will not boot.")
-	return b.String()
 }
 
 // ExpandESD lays a Microsoft .esd archive out as a directory of installation
@@ -132,8 +125,8 @@ func (e *MissingToolError) Error() string {
 // compression is what keeps it near the disc size at all.
 func ExpandESD(esd, dir string, progress func(step string)) error {
 	wim := WimTool()
-	if !wim.Found() {
-		return &MissingToolError{Candidates: []Tool{wim}, For: "read the .esd archive"}
+	if eErr := wim.Ensure(); eErr != nil {
+		return eErr
 	}
 	if _, err := os.Stat(esd); err != nil {
 		return fmt.Errorf("utmvm: %s: %w", esd, err)
@@ -265,7 +258,10 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 
 	tool, candidates := FindMasterer()
 	if !tool.Found() {
-		return &MissingToolError{Candidates: candidates, For: "write a bootable ISO"}
+		tool = candidates[0]
+		if eErr := tool.Ensure(); eErr != nil {
+			return eErr
+		}
 	}
 
 	boot, noPrompt := opts.BootImage()

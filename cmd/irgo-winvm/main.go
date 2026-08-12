@@ -379,9 +379,7 @@ func runProbe(args []string) error {
 // catalog, which — unlike the software-download page's API — is not gated.
 //
 // What this does today is list the catalog and download a verified ESD. What it
-// does NOT do yet is turn that ESD into a bootable ISO; see PLAN.md. Being
-// explicit about that beats a command that half-works and leaves somebody
-// holding a 4 GB file they cannot boot.
+// pairs with build-iso, which turns the .esd into bootable media.
 func runFetchISO(args []string) error {
 	fs := flag.NewFlagSet("fetch-iso", flag.ContinueOnError)
 	var (

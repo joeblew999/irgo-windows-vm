@@ -19,7 +19,6 @@ package utmvm
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -267,10 +266,11 @@ func HumanBytes(n int64) string {
 // missing. An empty Path would stat the working directory and report present,
 // which is the wrong answer stated confidently.
 func lookPath(name string) string {
-	p, err := exec.LookPath(name)
-	if err != nil || p == "" {
+	t := Tool{Name: name}
+	if !t.resolve() {
 		return filepath.Join("(not on PATH)", name)
 	}
+	p := t.Path
 	// Resolve symlinks: Homebrew's bin is a link farm, and the interesting
 	// answer is which install it actually points at.
 	if real, rErr := filepath.EvalSymlinks(p); rErr == nil {

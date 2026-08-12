@@ -1,293 +1,143 @@
-# Closing the gaps: seamless local Windows testing for irgo desktop apps
+# Seamless local Windows testing — status and plan
 
-## Context
+## Start here after a restart
 
-A developer on an Apple Silicon Mac should be able to build a Windows desktop
-app and actually run it — in Windows, on their own machine, in seconds. Today
-nobody can: Windows binaries get cross-compiled here and are never executed
-anywhere except a customer's machine.
+```sh
+cd ~/workspace/go/src/github.com/joeblew999/irgo-windows-vm
+go build ./... && go test ./utmvm/...      # should be clean
 
-The proving ground is **glaze**, standalone, with no irgo involvement. glaze is
-the more demanding case anyway — it drives WebView2 through an undocumented
-export and hand-written ARM64 ABI code, neither of which has ever run.
-
-`irgo-windows-vm` was built to close this and gets most of the way: a Go CLI
-generates a UTM bundle, and a Windows 11 ARM64 install completes unattended to a
-logged-in desktop. What it cannot yet do is the thing the developer wants — take
-a freshly built binary, run it in that VM, and hand back the output.
-
-The user's priority is **fast local iteration**: one-time setup may be slow and
-may touch the GUI; everything after must be quick and scripted.
-
-## The inner loop we are building toward
-
-```
-GOOS=windows GOARCH=arm64 go build -o app.exe ./cmd/app   # cgo-free, no toolchain
-irgo-winvm run -vm dev app.exe                            # new: push, run, stream back
+irgo-winvm status -vm irgo-win11           # the VM survives reboots; it will be off
+irgo-winvm boot -vm irgo-win11 -installed  # boot the installed Windows
+irgo-winvm status -vm irgo-win11           # wait for: agent: yes
 ```
 
-Two capabilities make this achievable without any GUI:
+Then rebuild the probes — they live in `/tmp` today and do **not** survive a
+restart (see "Next up", item 1):
 
-**Suspend/resume sidesteps the boot problem.** UTM exposes `suspend`; `start` on
-a suspended VM restores RAM instead of booting, so the UEFI shell is never
-reached. Boot driving becomes a one-time setup concern, not a per-run one.
-
-**File transfer and exec are already headless**, needing only the QEMU guest
-agent:
-
-```
-utmctl file push <vm> <guest-path>   # stdin -> guest file
-utmctl file pull <vm> <path>         # guest file -> stdout
-utmctl exec <vm> --cmd <c> --env K=V --input
+```sh
+mkdir -p /tmp/probes
+cd probe           && for a in arm64 amd64; do CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o /tmp/probes/nativeprobe-$a.exe .; done
+cd ../glaze-probes && for p in verify verifyevents; do for a in arm64 amd64; do CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o /tmp/probes/glaze-$p-$a.exe ./$p; done; done
 ```
 
-There is no snapshot verb (the remote protocol has one; the scriptable surface
-does not), so "reset to clean" means `duplicate` from a golden VM — slower, and
-only needed when a run dirties the machine.
+**The single next action** is one command. Everything it needs is committed:
 
-## The linchpin risk
+```sh
+irgo-winvm run -gui -timeout 3m -vm irgo-win11 /tmp/probes/glaze-verify-arm64.exe
+```
 
-**Everything depends on the QEMU guest agent, which has never once come up.**
-The answer file installs UTM's guest tools at first logon
-(`utmvm/assets/autounattend.xml`), but no VM has yet reached a state where
-`utmctl exec` works. If that install does not work, the headless story collapses
-and we are back to keystrokes.
+That is the last unmeasured claim in the project.
 
-So step 1 is to prove it, on a throwaway VM, before building anything on top.
+The Windows ISO is hardlinked at `.cache/win11-arm64.iso` (gitignored, zero
+extra bytes), so nothing depends on `~/Downloads` any more.
 
-## Gaps found
+## What is proven
 
-### Blocking the loop
+### The inner loop works
 
-| gap | evidence |
+```
+$ irgo-winvm run -vm irgo-win11 hello-arm64.exe alpha beta
+hello from windows/arm64
+args: [alpha beta]
+```
+
+**10.8 seconds**, no GUI, no keystrokes, no screen. Cross-compiled with plain
+`GOOS=windows GOARCH=arm64` and **no toolchain** — which is what cgo-free buys,
+and what irgo cannot do today because mingw pins it to amd64. Exit codes
+propagate: a binary exiting 3 fails the command.
+
+### Measured on Windows 11 ARM64
+
+| capability | result |
 |---|---|
-| `up` cannot complete its boot step | `runUp` passes a **name** to `BootAndWait` (`cmd/irgo-winvm/main.go:480`) but `assets/boot.applescript:12` is `virtual machine id %q`, which needs the UUID. `runBoot` passes `e.UUID` and works. This is why my `up` attempts failed. |
-| `run-all.cmd` does not exist | `runProbe` executes it (`main.go:305`) and `RESULTS.md:95` documents it, but it is **not in the repo**. It only ever existed in `/tmp`. |
-| No command builds the probes | `-probes` consumes a pre-built directory. Producing it means `GOOS=windows GOARCH=… go build` by hand in two separate modules. |
-| `probe/run-probe.cmd` ends in `pause` | Blocks forever under `utmctl exec`. |
-| No `run`, `suspend` or `resume` | The inner loop has no entry point at all. |
-| `exec -cmd` splits on `strings.Fields` | Any quoted argument or path with a space is mangled (`main.go:280`). |
+| `clipboard` write/read | **OK** — round trip verified |
+| `power.preventSleep` | **OK** |
+| `singleinstance.acquire` | **OK** — re-acquire correctly refused |
+| `mmap.map` | **OK** — wrote through |
 
-### Blocking the cross-platform claim
+Identical to macOS. Detail in `RESULTS.md`.
 
-**`utmvm` does not compile on Linux or Windows.** `inodeInfo`/`diskUsage` exist
-only in `inode_darwin.go`, and `diskspace.go` uses `syscall.Statfs_t`/`Stat_t`
-with no build tags anywhere. So `HostCoverage()`'s windows and linux branches
-are unreachable, the `targets` subcommand's entire premise is undeliverable, and
-`README.md:29`'s `go install …@latest` is false off a Mac.
+### Commands that work
 
-### The probes test the easy half, and overstate it
+`doctor` · `targets` · `verify` · `create` · `install` (unsupervised, **both**
+boot phases) · `boot` · `run` (+`-gui`) · `exec` · `status` (reports install
+phase with no agent) · `screenshot` · `list` · `delete` · `prune` · `up`
 
-Of `crgimenes/native`'s eight packages, `probe/main.go` genuinely exercises
-**four**: `clipboard` (write/read round trip, restoring the user's clipboard),
-`power.PreventSleep`, `singleinstance.Acquire`, `mmap.Map`. `openurl` is
-imported but only checked for symbol presence, never called.
+## Facts discovered the hard way
 
-**`tray`, `filedialog` and `nocapture` are not imported at all** — the "SKIPPED"
-rows the report prints for them are hardcoded string literals. They read as
-capability checks and are nothing of the kind. That is worse than omitting them,
-because the output implies they were considered.
+Each cost real time. None is guessable from documentation.
 
-**glaze's own native surface is untested on every platform**: the file dialogs
-(`OpenFile`/`SaveFile`/`OpenDirectory` — the one piece with full macOS, Windows
-*and* Linux coverage), `menu.Set`, and `SetAppIcon`.
+| finding | consequence |
+|---|---|
+| `%q` already escapes for AppleScript | an escaping helper double-escaped, and every Go-driven boot silently failed |
+| `cdboot_noprompt.efi` returns without booting from the shell | use `\efi\boot\bootaa64.efi` plus a keypress |
+| one keypress misses the ~5s CD prompt | 8 presses over ~6s — **bounded**, because surplus presses reach Setup's UI and destroyed an install |
+| `utmctl exec` never returns output and always exits 0 | capture to a file in the guest and pull it, or a suite that ran nothing looks like one that passed |
+| `cmd.exe` mangles quoted command lines through exec | write a batch file, push it, run it by path |
+| `utmctl start` is headless; UTM routes input via the display | keystrokes to a windowless VM are accepted and discarded — use `StartWithDisplay` |
+| the agent runs as **SYSTEM in session 0** | GUI apps fail with "webview2: environment/controller creation failed" — **not** a missing runtime; 151.0.4129.78 was installed and healthy |
+| `schtasks /it` + `/rp` are contradictory | registers the task, then "ERROR: Element not found", which reads like a missing session |
+| `C:\Windows\Temp` is not executable by the interactive user | task exits `Last Result: 1`; use `C:\Users\Public` |
+| Windows reboots itself (Windows Update) | the agent drops with "Port is not connected"; nothing may assume the VM is still reachable |
+| `BootInstalled` on `fs0:` is the install CD | the ESP is on NVMe at a varying fs number, so it must search |
 
-The gap is not random. The tested set is the half with no UI and no side
-effects; the untested set — **tray, menu, file dialogs, notifications** — is
-precisely what a desktop app needs. "Hard to test headlessly" is a fair reason
-to defer them, but it is not the same as tested, and the report should not read
-as though it were.
+## Next up, in order
 
-### Getting the ISO is still manual, and GUI-only
+1. **`probes build -o <dir>`** — cross-compile both probe modules. They are
+   hand-built into `/tmp` today, so a restart loses them. First job, because
+   everything else needs probes.
+2. **Run the glaze probes** (`-gui`) and record in `RESULTS.md`. One command;
+   see the top of this file. This closes the project's actual goal.
+3. **`suspend` / `resume`** — resuming restores RAM and never reaches firmware,
+   so it needs no keystrokes and works with the Mac locked. This makes the loop
+   genuinely fast and removes the boot problem from daily use.
+4. **`probe/gui`** — tray, menu, file dialog, app icon. Nothing currently tests
+   glaze's dialogs or menu on any platform.
+5. **Drop the fake `SKIPPED` rows** for `tray`/`filedialog`/`nocapture`, which
+   are not imported: the report implies checks that do not exist.
+6. **`fetch-iso`** — removes the CrystalFetch step. Microsoft serves the ARM64
+   image through the same gated API quickget automates; verified by fetching the
+   official page (HTTP 200, product edition `3324`, session-permit and SKU
+   endpoints present).
+7. **Build tags** — `utmvm` does not compile on Linux or Windows
+   (`inode_darwin.go`, `syscall.Statfs_t`), so `targets` cannot reach the
+   Windows developer it exists to inform.
+8. **Delete dead code** — `BuildFATImage`, `OpenDisplay`, `BootAssist`,
+   `SchemaConfigurationVersion`, `IfaceVirtIO`, and `GuestToolsInstallCommand`,
+   which still carries the `start`-wildcard bug already fixed in the XML.
+9. **`Prune` and `Delete` safety** — `Prune` removes any `*.img`/`*.dmg` in
+   `os.TempDir()` regardless of owner; `Delete` removes files after 30s whether
+   or not QEMU actually stopped.
 
-Nothing in this repo obtains Windows install media. Today that means installing
-CrystalFetch, clicking through it, and waiting on a ~5 GB UUP-dump build before
-`irgo-winvm` is any use at all. For a tool whose entire pitch is "one command",
-the first step being "install a GUI app and click around" is the largest
-remaining gap in the developer's path.
+## Scope
 
-It is avoidable. Microsoft publishes the ARM64 image through the **same gated
-download API** that quickget already automates for x64 — confirmed by fetching
-the official page, which returns HTTP 200 and contains:
+**No irgo integration until this works standalone with glaze.** Deliberate:
+integrating a tool that does not yet work makes the framework absorb its
+failures.
 
-```
-<option value="3324">Windows 11 (multi-edition ISO for Arm64)
-```
+Recorded for when that gate opens:
 
-along with the `vlscppe` session-permit and `GetSkuInformationByProductEdition`
-endpoints. So the flow is: scrape the product edition ID, permit a session,
-resolve the SKU for a language, request the download link, fetch it. That is
-roughly 150 lines of Go and needs no UUP dump, no CrystalFetch, no `aria2`, and
-no GUI.
-
-Worth knowing before relying on it: the resulting links are time-limited and
-tied to the requesting session, and Microsoft has changed this flow before —
-which is why quickget carries a comment about it being the one request Fido does
-not make. So it needs a clear failure message pointing at CrystalFetch as the
-manual fallback, rather than pretending it cannot break.
-
-### Correctness and safety
-
-- **`Prune` deletes every `*.img`/`*.dmg` in `os.TempDir()`** regardless of
-  owner (`cleanup.go:119`), while reclaiming nothing of its own — its actual
-  staging dirs are already removed by a `defer`.
-- **`Delete` waits 30 s then removes files regardless** of whether QEMU stopped —
-  precisely the "writing to deleted inodes" hazard its own comment warns about.
-- **`BootAssistOn` only ever uses `paths[0]`**; the `bootaa64.efi` fallback is
-  unreachable, so `HasNoPromptLoader` is reported by `verify` but never acted
-  on — media lacking it fails after the full 45-minute wait.
-- **`BootAssistWatched` discards its `diskPath`** argument; the contract is
-  fiction.
-- **Dead code**, including one copy of a bug we already fixed elsewhere:
-  `BuildFATImage`/`copyIntoFS`, `OpenDisplay`, `BootAssist`,
-  `SchemaConfigurationVersion`, `IfaceVirtIO`, and `GuestToolsInstallCommand`
-  which still emits the broken single-`for` `start` wildcard form.
-- **Doc-vs-code**: `payload.go` says probes land in `\probe`; the code puts them
-  at the root.
-
-## Scope: glaze standalone, irgo later
-
-**No irgo integration until this works end to end outside irgo, with glaze.**
-That is a deliberate gate, not a sequencing accident: integrating first would
-couple a tool that does not yet work to a framework that would then have to
-absorb its failures.
-
-This simplifies the architecture question, because the constraint that forced
-emulation was irgo's, not ours:
-
-- irgo hardcodes `GOARCH=amd64` and `CC=x86_64-w64-mingw32-gcc`
-  (`irgo/cmd/irgo/app_desktop_build.go:235`); `app_icons.go:124` says "we always
-  target windows/amd64". Its **cgo dependency on webview_go via mingw is exactly
-  what pins it to amd64.**
-- **glaze is cgo-free.** A glaze app cross-compiles to windows/arm64 with
-  nothing but `GOOS`/`GOARCH` — no toolchain, no mingw, no `CC`.
-
-So the primary target is **windows/arm64, native**. That is both the cheaper
-path and the more valuable one: `putbounds_arm64.go` hand-writes AAPCS64
-register passing, glaze's CI runs `windows-latest` (x64), and so **that code
-executes nowhere on earth today**. An ARM64 VM is the only place it can run.
-
-`amd64` stays available as a second build for deliberately probing emulation
-behaviour, but it is not the point. Real x64 fidelity belongs on a
-`windows-latest` CI runner, which is free and runs on actual x64 hardware.
-
-When this does eventually reach irgo, the finding above is the headline:
-adopting glaze would remove the mingw toolchain requirement *and* unlock native
-ARM64 Windows builds in one move.
-
-## Plan
-
-### Phase 1 — Prove the guest agent (do this first, alone)
-
-Nothing else is worth building until this works.
-
-1. Create a throwaway VM with defaults (guest tools attached), install
-   unattended, and confirm `utmctl exec` responds.
-2. If the tools do not install, diagnose from `C:\unattend-complete.txt` (the
-   marker written last, so its absence localises the failure) and from the
-   answer file's `FirstLogonCommands` ordering.
-
-**Exit criterion:** `irgo-winvm status -vm <x>` reports `agent: yes`.
-
-### Phase 2 — Build the inner loop
-
-3. Fix the `up` name/UUID bug — resolve via `utmvm.Find` and pass `e.UUID`, the
-   way `runBoot` already does.
-4. `utmvm/assets/run-all.cmd` as an **embedded asset**, staged by `BuildPayload`
-   like the other assets. No `pause`; exit code reflects failure.
-5. `irgo-winvm probes build -o <dir>` — cross-compiles both probe modules for
-   windows/arm64 and windows/amd64. Removes the hand-built `/tmp` step.
-6. `irgo-winvm run -vm <x> <local.exe> [args]` — `file push` to a temp path in
-   the guest, `exec`, stream stdout/stderr back, propagate the exit code. This
-   is the command the whole plan exists for.
-7. `suspend` / `resume` wrappers, and have `run` resume-if-suspended so a warm
-   VM answers in seconds.
-8. Fix `exec` argument splitting — take `[]string` args after `--` rather than
-   `strings.Fields`.
-9. **Make the native report honest**: drop every row for a package that is not
-   imported. A hardcoded "SKIPPED" for `tray`/`filedialog`/`nocapture` claims a
-   check that does not exist. Either link the package and probe it, or say
-   nothing.
-10. **Add `probe/gui`** — a second probe that takes glaze's run loop and drives
-    the capabilities a headless binary cannot: raise a tray icon and remove it,
-    install a menu via `menu.Set`, open a file dialog and cancel it
-    programmatically, call `SetAppIcon`, then exit non-interactively with a
-    status line per capability. These are the ones a desktop app actually
-    depends on, and the ones most likely to differ on Windows.
-
-**Exit criterion:** `irgo-winvm run -vm dev ./hello.exe` prints the program's
-output on the Mac, with no GUI interaction.
-
-### Phase 3 — Close the actual goal
-
-11. Run all four probes in the VM and record real results in `RESULTS.md`: the
-    `app://` origin capabilities, the Events bridge, the headless native matrix,
-    and the new GUI probe — the Windows column that has been empty from the
-    start.
-12. Re-run the same four on macOS so both columns come from the same build of
-    the same code, then note every divergence. A pass on one platform is not
-    evidence about the other.
-
-### Phase 3b — Remove the CrystalFetch step
-
-13. `irgo-winvm fetch-iso [-lang en-us] [-o <path>]` — drive Microsoft's gated
-    download API directly (product edition `3324`), verify the result with the
-    existing `InspectISO`, and fail with a message naming CrystalFetch as the
-    manual fallback if Microsoft changes the flow.
-14. Have `up` accept a missing `-iso` by fetching one, so a first run really is
-    a single command on a clean machine.
-
-### Phase 4 — Make the claims true
-
-11. Build-tag the darwin-only syscalls (`inode_darwin.go` +
-    `inode_other.go`, `diskspace_darwin.go` + `diskspace_other.go`) so the
-    binary builds on Linux and Windows and `targets` means something.
-12. Delete the dead code listed above — especially
-    `GuestToolsInstallCommand`, which carries a bug we already fixed in the XML.
-13. Make `Prune` remove only artefacts it created; make `Delete` fail rather
-    than delete under a still-running QEMU.
-14. Act on `HasNoPromptLoader` in `create`/`up` instead of only reporting it, and
-    either restore the `bootaa64.efi` fallback or drop the unreachable branch.
-15. Fix the `\probe` doc-vs-root mismatch.
-
-### Phase 5 — irgo integration: NOT NOW
-
-Explicitly gated. Nothing in irgo changes until a glaze app builds on the Mac,
-runs in the VM, and reports back — repeatably, from one command.
-
-Recorded so it is not rediscovered later:
-
-- `irgo`'s `verify` never builds a desktop target at all; `app build all` is
+- irgo's `verify` never builds a desktop target at all — `app build all` is
   iOS+Android only (`cmd_app_build.go:65`), so the mingw path it documents is
-  never exercised.
-- The precedent for artifact checking is `verifyAndroidArtifact`
-  (`cmd/irgo/app_android_verify.go`); there is no Windows equivalent.
+  never exercised
+- the artifact-check precedent is `verifyAndroidArtifact`
+  (`cmd/irgo/app_android_verify.go`); there is no Windows equivalent
 - `desktopTargets` (`cmd/irgo/cmd_project_ci_data.go:42`) is the single source
-  of truth for generated projects' CI, and has no arch field — that is where
-  windows/arm64 would be added.
+  of truth for generated projects' CI and has no arch field
 
-## Files
+**Architecture:** windows/arm64 native is the primary target. glaze is cgo-free
+so it costs nothing, and ARM64 is where the only never-executed code lives —
+`putbounds_arm64.go` hand-writes AAPCS64 register passing while glaze's CI runs
+x64. Real x64 fidelity belongs on a `windows-latest` runner, not on emulation.
 
-Primary: `cmd/irgo-winvm/main.go`, `utmvm/control.go`, `utmvm/bootassist.go`,
-`utmvm/payload.go`, `utmvm/cleanup.go`, plus new `utmvm/assets/run-all.cmd` and
-new build-tagged `inode_*.go` / `diskspace_*.go`.
-
-Reuse rather than re-add: `utmvm.Find` (name/UUID resolution), `VM.Exec`,
-`VM.WaitForAgent`, `BuildPayload`, `CheckSpace`, and the existing table-driven
-test style in `utmvm/config_test.go`.
+**When irgo does adopt glaze**, the headline is that it removes the mingw
+toolchain requirement *and* unlocks native ARM64 Windows builds in one move.
 
 ## Verification
 
 - `go build ./...`, `go vet ./...`, `go test -race ./utmvm/...`, and both fuzz
-  targets stay clean.
-- **Cross-compile check** — `GOOS=linux go build ./...` and
-  `GOOS=windows go build ./...` must succeed. They fail today; that is the test
-  for Phase 4.
-- New unit tests, following the existing style, for the pure logic currently
-  untested: `List`/`Find` parsing, `Prune` against a `t.TempDir()`,
-  `HostCoverage`, and an arity test for the `Sprintf` templates in
-  `boot.applescript` and `config.plist.tmpl` — a template edit silently ships
-  `%!q(MISSING)` today.
-- **End to end**, which is the only proof that counts: cross-compile a glaze app
-  for windows/arm64 with plain `GOOS`/`GOARCH`, `irgo-winvm run -vm dev app.exe`,
-  and see its output on the Mac. No irgo, no mingw, no GUI.
+  targets clean
+- `GOOS=linux go build ./...` and `GOOS=windows go build ./...` — **fail today**;
+  that is the test for item 7
+- End to end: cross-compile a glaze app for windows/arm64 with plain
+  `GOOS`/`GOARCH`, `irgo-winvm run -vm dev app.exe`, and see its output on the Mac

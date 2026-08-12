@@ -37,6 +37,7 @@ func usage() {
   boot     Start a VM and drive it past UTM's UEFI shell (one boot only)
   install  Drive an unattended install to completion, unsupervised
   run      Push a local binary into the VM, run it, print its output
+           (-gui for anything with a window: WebView2, tray, menus)
   status   Report a VM's state and IP
   screenshot  Capture the VM's screen (works with no guest agent)
   exec     Run a command inside a VM
@@ -598,6 +599,9 @@ func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
 	name := fs.String("vm", "", "VM name or UUID (required)")
+	gui := fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
+	user := fs.String("user", "dev", "guest account for -gui")
+	pass := fs.String("pass", "dev", "guest password for -gui")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -625,7 +629,15 @@ func runRun(args []string) error {
 	}
 
 	local := fs.Arg(0)
-	res, err := utmvm.RunLocalBinary(e.UUID, local, fs.Args()[1:], *timeout)
+	var res utmvm.Result
+	if *gui {
+		// The guest agent runs as SYSTEM in session 0, which has no window
+		// station, so a GUI app fails when it tries to create one. -gui routes
+		// through a scheduled task in the logged-in user's session instead.
+		res, err = utmvm.RunLocalBinaryInteractive(e.UUID, local, fs.Args()[1:], *user, *pass, *timeout)
+	} else {
+		res, err = utmvm.RunLocalBinary(e.UUID, local, fs.Args()[1:], *timeout)
+	}
 	if res.Stdout != "" {
 		fmt.Println(res.Stdout)
 	}

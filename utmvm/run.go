@@ -16,6 +16,16 @@ import (
 // does not depend on which account the agent runs as.
 const guestTemp = `C:\Windows\Temp`
 
+// guestPublic is where anything destined for the INTERACTIVE session lives.
+//
+// C:\Windows\Temp is fine for the agent, which runs as SYSTEM, but a scheduled
+// task running as the logged-in user cannot execute from there: the task
+// completes with "Last Result: 1" and no further explanation. C:\Users\Public
+// is readable, writable and executable by any interactive user. Verified by
+// running the same batch from both locations — Public produced output, Temp
+// did not.
+const guestPublic = `C:\Users\Public`
+
 // Push copies a local file into the guest.
 //
 // utmctl's file push reads the payload from stdin rather than taking a source
@@ -186,4 +196,112 @@ func quoteForCmd(argv []string) string {
 		parts = append(parts, a)
 	}
 	return strings.Join(parts, " ")
+}
+
+// RunInteractive runs a command in the guest's interactive desktop session.
+//
+// Necessary for anything with a window. The QEMU guest agent runs as
+// NT AUTHORITY\SYSTEM in session 0, which has no window station — a GUI app
+// launched through it fails at the point it tries to create one. glaze reports
+// this as "webview2: environment/controller creation failed", which reads like a
+// missing WebView2 runtime and is not: the runtime was present and healthy
+// (151.0.4129.78) while the failure persisted.
+//
+// A scheduled task with /it runs as the logged-in user in their session, which
+// has a desktop. The auto-login the answer file configures is what guarantees
+// such a session exists.
+func RunInteractive(vmRef, guestExe string, args []string, user, pass string, timeout time.Duration) (Result, error) {
+	var res Result
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
+	task := "irgo" + stamp
+	inner := guestPublic + `\irgo-i-` + stamp + `.bat`
+	outFile := guestPublic + `\irgo-io-` + stamp + `.txt`
+	rcFile := guestPublic + `\irgo-ir-` + stamp + `.txt`
+
+	// The task runs this; it captures output and exit code the same way the
+	// headless path does.
+	inner_script := "@echo off\r\n" +
+		quoteForCmd(append([]string{guestExe}, args...)) + " > \"" + outFile + "\" 2>&1\r\n" +
+		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
+	tmp, err := os.CreateTemp("", "irgo-i-*.bat")
+	if err != nil {
+		return res, err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(inner_script); err != nil {
+		return res, err
+	}
+	tmp.Close()
+	if err := Push(vmRef, tmp.Name(), inner); err != nil {
+		return res, err
+	}
+
+	vm := Named(vmRef)
+	// /it is the whole point: interactive, in the user's session.
+	// /it and /rp are contradictory: /it means interactive-only, which stores no
+	// password, and supplying one makes schtasks register the task but fail to
+	// run it with "ERROR: Element not found" — which reads like a missing
+	// session even when the user is logged in.
+	_ = pass
+	// The schtasks line goes through a pushed batch file for the same reason the
+	// command itself does: it contains quotes, and cmd.exe applies its own
+	// quote-stripping to a quoted string passed through exec, so the line
+	// silently fails.
+	launcher := "@echo off\r\n" +
+		"schtasks /delete /tn " + task + " /f >nul 2>&1\r\n" +
+		"schtasks /create /tn " + task + " /tr \"cmd /c " + inner + "\" /sc once /st 23:59 /ru " + user + " /it /f\r\n" +
+		"schtasks /run /tn " + task + "\r\n"
+	ltmp, lerr := os.CreateTemp("", "irgo-l-*.bat")
+	if lerr != nil {
+		return res, lerr
+	}
+	defer os.Remove(ltmp.Name())
+	if _, werr := ltmp.WriteString(launcher); werr != nil {
+		return res, werr
+	}
+	ltmp.Close()
+	launcherGuest := guestPublic + `\irgo-l-` + stamp + `.bat`
+	if perr := Push(vmRef, ltmp.Name(), launcherGuest); perr != nil {
+		return res, perr
+	}
+	if _, xerr := vm.Exec("cmd.exe", "/c", launcherGuest); xerr != nil {
+		return res, fmt.Errorf("launching interactive task: %w", xerr)
+	}
+
+	deadline := time.Now().Add(timeout)
+	var rcRaw []byte
+	for {
+		var perr error
+		rcRaw, perr = Pull(vmRef, rcFile)
+		if perr == nil && len(bytes.TrimSpace(rcRaw)) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
+			return res, fmt.Errorf("interactive command did not finish within %s", timeout)
+		}
+		time.Sleep(3 * time.Second)
+	}
+	if out, perr := Pull(vmRef, outFile); perr == nil {
+		res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+	}
+	if n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw))); cerr == nil {
+		res.ExitCode = n
+	}
+	_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
+	_, _ = vm.Exec("cmd.exe", "/c", "del /q "+inner+" "+outFile+" "+rcFile)
+	return res, nil
+}
+
+// RunLocalBinaryInteractive pushes a binary and runs it on the guest's desktop.
+func RunLocalBinaryInteractive(vmRef, localPath string, args []string, user, pass string, timeout time.Duration) (Result, error) {
+	// Public, not Windows\Temp: the interactive user must be able to execute it.
+	guestPath := guestPublic + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
+	if err := Push(vmRef, localPath, guestPath); err != nil {
+		return Result{}, err
+	}
+	return RunInteractive(vmRef, guestPath, args, user, pass, timeout)
 }

@@ -16,23 +16,31 @@ var (
 
 	//go:embed assets/startup.nsh
 	startupNSH []byte
+
+	// The probe runner ships with the tool rather than being supplied by the
+	// caller. It was previously expected to appear in the -probes directory,
+	// which meant `probe` could never work as shipped: nothing generated it.
+	//go:embed assets/run-all.cmd
+	runAllCmd []byte
 )
 
 // PayloadOptions describes what goes onto the unattend medium.
 type PayloadOptions struct {
-	// ProbeDir is an optional directory of files copied to \probe on the image.
-	// Typically the cross-compiled Windows test binaries.
+	// ProbeDir is an optional directory whose top-level files are copied to the
+	// image ROOT — not a subdirectory. go-diskfs mangles Joliet names inside
+	// nested directories into UCS-2 garbage; root entries survive.
 	ProbeDir string
 
 	// SizeMiB sizes the image. It must fit the probes with room to spare.
 	SizeMiB int
 }
 
-// BuildPayload writes the FAT image that makes the install unattended.
+// BuildPayload writes the ISO9660 medium that makes the install unattended.
 //
 // A single image, because three different readers each need part of it:
 // Windows Setup finds autounattend.xml at the root, the UEFI shell finds
-// startup.nsh at the root, and the installed Windows finds \probe. Splitting
+// startup.nsh at the root, and the installed Windows finds the probes and
+// run-all.cmd there too. Splitting
 // them across separate media was the earlier design and it meant two images
 // and an extra drive for no benefit.
 func BuildPayload(imagePath string, opts PayloadOptions) error {
@@ -53,6 +61,9 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(stage, "startup.nsh"), startupNSH, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stage, "run-all.cmd"), runAllCmd, 0o644); err != nil {
 		return err
 	}
 

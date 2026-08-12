@@ -475,9 +475,19 @@ func runUp(args []string) error {
 		return err
 	}
 
+	// Resolve to the UUID before booting. BootAndWait ultimately renders
+	// assets/boot.applescript, whose specifier is `virtual machine id %q` —
+	// AppleScript's id form does not accept a name, so passing *name here made
+	// every `up` run fail at the boot step while `boot` (which resolves first)
+	// worked.
+	e, err := utmvm.Find(*name)
+	if err != nil {
+		return err
+	}
+
 	diskPath := filepath.Join(bundle, "Data", "disk.img")
 	fmt.Println("starting and driving the UEFI shell...")
-	if err := utmvm.BootAndWait(*name, utmvm.BootInstaller, diskPath, *wait); err != nil {
+	if err := utmvm.BootAndWait(e.UUID, utmvm.BootInstaller, diskPath, *wait); err != nil {
 		return err
 	}
 	fmt.Printf("\nWindows Setup is running. It installs unattended from here.\n")

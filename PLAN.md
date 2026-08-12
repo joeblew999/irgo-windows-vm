@@ -98,6 +98,34 @@ precisely what a desktop app needs. "Hard to test headlessly" is a fair reason
 to defer them, but it is not the same as tested, and the report should not read
 as though it were.
 
+### Getting the ISO is still manual, and GUI-only
+
+Nothing in this repo obtains Windows install media. Today that means installing
+CrystalFetch, clicking through it, and waiting on a ~5 GB UUP-dump build before
+`irgo-winvm` is any use at all. For a tool whose entire pitch is "one command",
+the first step being "install a GUI app and click around" is the largest
+remaining gap in the developer's path.
+
+It is avoidable. Microsoft publishes the ARM64 image through the **same gated
+download API** that quickget already automates for x64 — confirmed by fetching
+the official page, which returns HTTP 200 and contains:
+
+```
+<option value="3324">Windows 11 (multi-edition ISO for Arm64)
+```
+
+along with the `vlscppe` session-permit and `GetSkuInformationByProductEdition`
+endpoints. So the flow is: scrape the product edition ID, permit a session,
+resolve the SKU for a language, request the download link, fetch it. That is
+roughly 150 lines of Go and needs no UUP dump, no CrystalFetch, no `aria2`, and
+no GUI.
+
+Worth knowing before relying on it: the resulting links are time-limited and
+tied to the requesting session, and Microsoft has changed this flow before —
+which is why quickget carries a comment about it being the one request Fido does
+not make. So it needs a clear failure message pointing at CrystalFetch as the
+manual fallback, rather than pretending it cannot break.
+
 ### Correctness and safety
 
 - **`Prune` deletes every `*.img`/`*.dmg` in `os.TempDir()`** regardless of
@@ -199,6 +227,15 @@ output on the Mac, with no GUI interaction.
 12. Re-run the same four on macOS so both columns come from the same build of
     the same code, then note every divergence. A pass on one platform is not
     evidence about the other.
+
+### Phase 3b — Remove the CrystalFetch step
+
+13. `irgo-winvm fetch-iso [-lang en-us] [-o <path>]` — drive Microsoft's gated
+    download API directly (product edition `3324`), verify the result with the
+    existing `InspectISO`, and fail with a message naming CrystalFetch as the
+    manual fallback if Microsoft changes the flow.
+14. Have `up` accept a missing `-iso` by fetching one, so a first run really is
+    a single command on a clean machine.
 
 ### Phase 4 — Make the claims true
 

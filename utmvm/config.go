@@ -38,9 +38,26 @@ type Config struct {
 	CPUCount   int
 	MACAddress string
 
+	// NoGPUAccel selects virtio-ramfb over virtio-ramfb-gl.
+	//
+	// Off by default, so the default is unchanged: accelerated. Turning it off
+	// removes ONE of the two devices that block a durable suspend, and on its
+	// own therefore buys nothing — the emulated NVMe blocks it too, and NVMe is
+	// not optional (Windows ARM64 Setup finds no drive without it). It is
+	// exposed so the experiment is repeatable, not because it is a fix.
+	NoGPUAccel bool
+
 	// Drives are emitted in order. Order matters: UTM assigns bootindex by
 	// position, so the install medium must precede anything optional.
 	Drives []Drive
+}
+
+// DisplayHardware is the display device this config will use.
+func (c Config) DisplayHardware() string {
+	if c.NoGPUAccel {
+		return displayRAMFB
+	}
+	return displayRAMFBAccel
 }
 
 // Drive is one entry in the VM's drive list.
@@ -70,14 +87,39 @@ const (
 	IfaceVirtIO DriveInterface = "VirtIO"
 )
 
-// displayHardware must be virtio-ramfb-gl for Windows on aarch64.
+// The display must be a RAMFB variant for Windows on aarch64.
 //
 // virtio-gpu-pci provides no framebuffer until a guest driver loads, and the
 // arm "virt" machine has no legacy VGA to fall back on. The guest then boots
 // with no output at all, which is indistinguishable from a hang — including
 // the "Press any key to boot from CD" prompt being invisible. UTM's own wizard
 // picks the ramfb variant for Windows guests for exactly this reason.
-const displayHardware = "virtio-ramfb-gl"
+//
+// The `-gl` suffix is a separate decision on top of that, and it is the one
+// that matters here:
+//
+//	virtio-ramfb      framebuffer, no host GPU acceleration, SNAPSHOTS WORK
+//	virtio-ramfb-gl   framebuffer, host GPU acceleration, snapshots REFUSED
+//
+// UTM says so outright when you try:
+//
+//	Failed to save VM snapshot. Usually this means at least one device does
+//	not support snapshots. Suspend is not supported when GPU acceleration
+//	is enabled.
+//
+// Without snapshots, every boot has to be driven through the UEFI shell by
+// typing a path and firing eight keypresses — which needs an unlocked Mac, a
+// visible display window, and about two minutes, and has destroyed an install
+// when surplus keypresses reached Setup's UI.
+//
+// With them, resuming restores RAM and never reaches firmware: no keystrokes,
+// works with the screen locked, and returns in seconds. For a machine whose
+// entire job is running console probes and a WebView2 window, host GPU
+// acceleration buys nothing worth that.
+const (
+	displayRAMFB      = "virtio-ramfb"
+	displayRAMFBAccel = "virtio-ramfb-gl"
+)
 
 // plistTemplate is the UTM v4 QEMU configuration.
 //
@@ -118,7 +160,7 @@ func (c Config) Plist() (string, error) {
 		xmlEscape(c.Name), c.UUID,
 		c.MemoryMiB, c.CPUCount,
 		drives.String(),
-		displayHardware,
+		c.DisplayHardware(),
 		c.MACAddress,
 	), nil
 }

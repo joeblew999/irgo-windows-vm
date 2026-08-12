@@ -1,6 +1,11 @@
-// A single program exercising every native capability available to a glaze
-// desktop app, because neither repo ships one. Reports OK / UNSUPPORTED /
-// MISSING per capability so the real coverage is visible on each platform.
+// A probe for every native capability that needs no window, because neither
+// repo ships one. Reports OK / UNSUPPORTED / MISSING per capability so the real
+// coverage is visible on each platform.
+//
+// Headless on purpose: this is what can run under the QEMU guest agent, which
+// executes as SYSTEM in session 0 where there is no window station at all. The
+// windowed half — tray, menus, file dialogs, app icon — is examples/nativeall,
+// which needs `irgo-winvm run -gui`.
 //
 // Side-effect policy: the clipboard is saved and restored; nothing opens a
 // browser, and no tray icon is left behind.
@@ -14,7 +19,6 @@ import (
 
 	"github.com/crgimenes/native/clipboard"
 	"github.com/crgimenes/native/mmap"
-	"github.com/crgimenes/native/openurl"
 	"github.com/crgimenes/native/power"
 	"github.com/crgimenes/native/singleinstance"
 )
@@ -122,13 +126,15 @@ func main() {
 	probeSingleInstance()
 	probeMmap()
 
-	// Deliberately not executed: side effects the user did not ask for.
-	results = append(results,
-		result{"openurl.Open", "SKIPPED", "would launch a browser (API present: " + fmt.Sprint(openurl.Open != nil) + ")"},
-		result{"tray.Run", "SKIPPED", "would add a status-bar icon; needs a run loop"},
-		result{"filedialog", "SKIPPED", "modal, needs a click; use glaze's dialogs (all 3 OSes)"},
-		result{"menu.Set", "SKIPPED", "needs a native run loop"},
-	)
+	// The windowed capabilities — openurl, tray, menu, file dialogs, app icon,
+	// no-capture — are covered by examples/nativeall, which has a run loop and
+	// a window and therefore can actually call them.
+	//
+	// They used to be listed here as SKIPPED rows, which was worse than saying
+	// nothing: a report naming a capability reads as coverage of it, and the
+	// only thing behind those rows was a `!= nil` on a function value that is
+	// never nil. `go vet` says so outright — "comparison of function Open != nil
+	// is always true" — so the check was not merely weak, it was no check.
 
 	// Not implemented anywhere in the ecosystem.
 	results = append(results,

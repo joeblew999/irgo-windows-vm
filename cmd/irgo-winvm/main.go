@@ -28,12 +28,15 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `irgo-winvm — create and inspect Windows 11 ARM64 VMs for UTM
 
+  setup    EVERYTHING, idempotently: media, VM, Windows. Start here.
   doctor   Check UTM, guest tools, and disk space
   list     List VMs UTM knows about
   delete   Stop and remove a VM, reporting space reclaimed
   prune    Remove generated payload images and staging leftovers
   targets  Show which desktop builds this machine can actually run
   start    Start a VM and wait until its guest agent answers
+  suspend  Pause a VM with its RAM intact (resume is ~1s, no keystrokes)
+  resume   Bring a suspended VM back
   boot     Start a VM and drive it past UTM's UEFI shell (one boot only)
   install  Drive an unattended install to completion, unsupervised
   run      Push a local binary into the VM, run it, print its output
@@ -45,6 +48,9 @@ func usage() {
   up       create + start + boot in one step, the usual entry point
   create   Generate a UTM bundle from a Windows ARM64 ISO  (Apple Silicon only)
   verify   Check an ISO is really ARM64 and can boot unattended
+  iso      Show every name the ISO has, and -protect it from being overwritten
+  fetch-iso   Download Windows media from Microsoft, SHA-1 verified
+  build-iso   Turn a downloaded .esd into a bootable ISO
 
 Run a subcommand with -h for its flags.
 `)
@@ -56,14 +62,26 @@ func run(args []string) error {
 		return fmt.Errorf("no subcommand given")
 	}
 	switch args[0] {
+	case "setup":
+		return runSetup(args[1:])
 	case "create":
 		return runCreate(args[1:])
+	case "iso":
+		return runISO(args[1:])
+	case "fetch-iso":
+		return runFetchISO(args[1:])
+	case "build-iso":
+		return runBuildISO(args[1:])
 	case "verify":
 		return runVerify(args[1:])
 	case "targets":
 		return runTargets()
 	case "start":
 		return runStart(args[1:])
+	case "suspend":
+		return runSuspend(args[1:])
+	case "resume":
+		return runResume(args[1:])
 	case "boot":
 		return runBoot(args[1:])
 	case "up":
@@ -104,6 +122,7 @@ func runCreate(args []string) error {
 		unattend = fs.String("unattend", "", "prebuilt answer medium; omit to generate one")
 		probeDir = fs.String("probes", "", "directory of Windows test binaries to embed")
 		noTools  = fs.Bool("no-guest-tools", false, "skip guest tools (utmctl exec will not work)")
+		noGPU    = fs.Bool("no-gpu", false, "drop GPU acceleration (one of two devices blocking disk snapshots)")
 		name     = fs.String("name", "Win11ARM", "VM name; also the bundle filename")
 		out      = fs.String("out", "", "parent directory (default: UTM's Documents folder)")
 		diskGiB  = fs.Int("disk", 64, "system disk size in GiB (sparse — costs nothing until used)")
@@ -141,6 +160,7 @@ func runCreate(args []string) error {
 		UnattendISO:  *unattend,
 		ProbeDir:     *probeDir,
 		NoGuestTools: *noTools,
+		NoGPUAccel:   *noGPU,
 		OutDir:       *out,
 		DiskGiB:      *diskGiB,
 		MemoryMiB:    *memMiB,
@@ -355,6 +375,409 @@ func runProbe(args []string) error {
 	return fmt.Errorf("could not find run-all.cmd on any of %v", letters)
 }
 
+// runFetchISO gets Windows install media from Microsoft's Media Creation Tool
+// catalog, which — unlike the software-download page's API — is not gated.
+//
+// What this does today is list the catalog and download a verified ESD. What it
+// does NOT do yet is turn that ESD into a bootable ISO; see PLAN.md. Being
+// explicit about that beats a command that half-works and leaves somebody
+// holding a 4 GB file they cannot boot.
+func runFetchISO(args []string) error {
+	fs := flag.NewFlagSet("fetch-iso", flag.ContinueOnError)
+	var (
+		catalog = fs.String("catalog", "", "an already-extracted products.xml (see -h notes on LZX)")
+		arch    = fs.String("arch", "ARM64", "architecture: ARM64 or x64")
+		lang    = fs.String("lang", "en-us", "language code, e.g. en-us, en-gb")
+		edition = fs.String("edition", "CLIENTCONSUMER", "edition substring to match in the filename")
+		list    = fs.Bool("list", false, "list matching images and stop")
+		out     = fs.String("o", "", "download the matching ESD to this path (default: under IRGO_CACHE_DIR)")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	all, src, err := loadCatalog(*catalog)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("catalog: %d images (%s)\n", len(all), src)
+
+	matches := utmvm.FilterCatalog(all, *arch, *lang, *edition)
+	if len(matches) == 0 {
+		return fmt.Errorf("nothing matched arch=%s lang=%s edition=%s", *arch, *lang, *edition)
+	}
+	for _, e := range matches {
+		fmt.Printf("\n  %s\n", e.FileName)
+		fmt.Printf("    build    %s\n", e.Build())
+		fmt.Printf("    size     %s\n", utmvm.HumanBytes(e.Size))
+		fmt.Printf("    sha1     %s\n", e.Sha1)
+	}
+
+	if *list || *out == "" {
+		fmt.Printf("\nThese are .esd archives, not bootable ISOs. The whole sequence is:\n\n")
+		fmt.Printf("  irgo-winvm fetch-iso -o win11.esd     # this, with a destination\n")
+		fmt.Printf("  irgo-winvm build-iso  -esd win11.esd  # -> a bootable ISO\n")
+		return nil
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("%d images matched; narrow it with -lang or -edition before downloading", len(matches))
+	}
+
+	e := matches[0]
+	fmt.Printf("\ndownloading to %s\n", *out)
+	err = utmvm.Download(e.FilePath, *out, e.Sha1, func(done, total int64) {
+		pct := 0.0
+		if total > 0 {
+			pct = float64(done) / float64(total) * 100
+		}
+		fmt.Printf("\r  %s / %s (%.1f%%)   ", utmvm.HumanBytes(done), utmvm.HumanBytes(total), pct)
+	})
+	fmt.Println()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("verified sha1 %s\n", e.Sha1)
+	fmt.Printf("\nnow build a bootable ISO from it:\n  irgo-winvm build-iso -esd %s\n", *out)
+	return nil
+}
+
+// loadCatalog prefers an explicit file, then the network, then a catalog some
+// other tool already extracted — in that order, because the first two are
+// reproducible and the third is whatever happens to be on this machine.
+func loadCatalog(explicit string) ([]utmvm.CatalogEntry, string, error) {
+	if explicit != "" {
+		b, err := os.ReadFile(explicit) //nolint:gosec // the user named this file
+		if err != nil {
+			return nil, "", err
+		}
+		all, err := utmvm.ParseCatalogXML(b)
+		return all, explicit, err
+	}
+
+	all, netErr := utmvm.FetchCatalog(2 * time.Minute)
+	if netErr == nil {
+		return all, utmvm.CatalogURL, nil
+	}
+
+	for _, p := range utmvm.CachedCatalogPaths() {
+		b, err := os.ReadFile(p) //nolint:gosec // a known cache location
+		if err != nil {
+			continue
+		}
+		parsed, pErr := utmvm.ParseCatalogXML(b)
+		if pErr != nil {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "note: %v\n      using a cached catalog instead: %s\n\n", netErr, utmvm.Home(p))
+		return parsed, p, nil
+	}
+	return nil, "", netErr
+}
+
+// runSuspend pauses a VM with its RAM intact.
+//
+// Measured: suspend, then resume, and the guest agent answers again in **one
+// second** — against about two minutes for a cold boot, which additionally has
+// to be DRIVEN through the UEFI shell with eight keypresses and therefore needs
+// an unlocked Mac and a visible display window.
+//
+// The catch, and it is the whole of PLAN item 3: the state is in MEMORY. Quit
+// UTM or reboot the Mac and it is gone. `-save` asks for the durable version
+// and is refused on this hardware; see the note it prints.
+func runSuspend(args []string) error {
+	fs := flag.NewFlagSet("suspend", flag.ContinueOnError)
+	ref, err := vmRef(fs, args)
+	if err != nil {
+		return err
+	}
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	vm := utmvm.Named(e.UUID)
+
+	if sErr := vm.Suspend(); sErr != nil {
+		return sErr
+	}
+	fmt.Printf("%s suspended (in memory — resume with: irgo-winvm resume -vm %s)\n", e.Name, e.Name)
+	fmt.Printf("  Do not quit UTM: the state is RAM, not a file.\n")
+	return nil
+}
+
+// runResume brings a suspended VM back, or boots a stopped one.
+func runResume(args []string) error {
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	wait := fs.Duration("wait", 2*time.Minute, "how long to wait for the guest agent")
+	ref, err := vmRef(fs, args)
+	if err != nil {
+		return err
+	}
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	vm := utmvm.Named(e.UUID)
+
+	// A stopped VM has no state to restore, so `start` would boot it — into the
+	// UEFI shell, where it would sit forever, because the firmware never
+	// auto-selects a boot entry. Saying so beats appearing to hang.
+	if !vm.IsPaused() {
+		return fmt.Errorf("%s is %q, not suspended — there is nothing to resume.\n"+
+			"  A stopped VM needs its firmware driven: irgo-winvm boot -vm %s -installed",
+			e.Name, e.Status, e.Name)
+	}
+
+	start := time.Now()
+	if rErr := vm.Resume(); rErr != nil {
+		return rErr
+	}
+	deadline := time.Now().Add(*wait)
+	for time.Now().Before(deadline) {
+		if vm.AgentReady() {
+			fmt.Printf("%s resumed in %s — no firmware, no keystrokes\n",
+				e.Name, time.Since(start).Round(time.Millisecond*100))
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	fmt.Printf("%s resumed, but the agent has not answered within %s\n", e.Name, *wait)
+	return nil
+}
+
+// runSetup is the one command a new developer runs.
+//
+// Everything it does was already possible as eight separate calls in an order
+// you had to know, with a UTM restart in the middle that nobody discovers
+// alone. Every stage is idempotent, so running it twice is safe and the second
+// run takes seconds — which matters because the two expensive stages are a
+// 4.2 GB download and a 45-minute install.
+func runSetup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	paths := utmvm.DefaultPaths()
+	var (
+		name    = fs.String("vm", "irgo-win11", "VM name")
+		iso     = fs.String("iso", "", "media to use (default: find one, or build with -fetch)")
+		probes  = fs.String("probes", "", "probe binaries to embed (default: the .bin directory)")
+		fetch   = fs.Bool("fetch", false, "download 4.2 GB from Microsoft if no media is present")
+		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
+		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *probes == "" {
+		if _, err := os.Stat(paths.Bin); err == nil {
+			*probes = paths.Bin
+		}
+	}
+
+	fmt.Printf("setting up %s\n\n", *name)
+	res, err := utmvm.Setup(utmvm.SetupOptions{
+		VMName:   *name,
+		ISO:      *iso,
+		ProbeDir: *probes,
+		Fetch:    *fetch,
+		Install:  *install,
+		Timeout:  *timeout,
+	}, paths, func(line string) { fmt.Println(line) })
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	if res.Ready {
+		fmt.Printf("%s is ready.\n\n", res.VM)
+		fmt.Printf("  irgo-winvm probe -vm %s          run the native capability probes\n", res.VM)
+		fmt.Printf("  irgo-winvm run -gui -vm %s <exe> run a windowed binary\n", res.VM)
+		return nil
+	}
+	fmt.Printf("%s is not ready yet — see the stages above for what remains.\n", res.VM)
+	return nil
+}
+
+// runBuildISO turns a downloaded ESD, or a directory of media, into a bootable
+// ISO — the half of replacing CrystalFetch that is not downloading.
+//
+// Measured working on 12 Aug 2026: a self-built ISO booted UTM straight into
+// Windows Setup, which then installed from it unattended. See RESULTS.md.
+func runBuildISO(args []string) error {
+	fs := flag.NewFlagSet("build-iso", flag.ContinueOnError)
+	paths := utmvm.DefaultPaths()
+	var (
+		esd   = fs.String("esd", "", "the .esd downloaded by fetch-iso")
+		from  = fs.String("from", "", "a directory of media already laid out (skips the .esd step)")
+		out   = fs.String("o", "", "the ISO to write (default: <cache>/win11-arm64-built.iso)")
+		label = fs.String("label", "", "volume label (default: taken from the media, else WINDOWS_ARM64)")
+		keep  = fs.Bool("keep", false, "keep the expanded media directory instead of removing it")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if (*esd == "") == (*from == "") {
+		fs.Usage()
+		return fmt.Errorf("give exactly one of -esd or -from")
+	}
+	if *out == "" {
+		*out = filepath.Join(paths.Cache, "win11-arm64-built.iso")
+	}
+
+	// Refuse before doing an hour of work, not after.
+	if err := paths.CheckWritable(*out); err != nil {
+		return err
+	}
+
+	dir := *from
+	if *esd != "" {
+		work, err := paths.EnsureWork(12 << 30) // media tree plus the ISO
+		if err != nil {
+			return err
+		}
+		dir = filepath.Join(work, "media")
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		fmt.Printf("expanding %s\n", filepath.Base(*esd))
+		if err := utmvm.ExpandESD(*esd, dir, func(step string) {
+			fmt.Printf("  %s\n", step)
+		}); err != nil {
+			return err
+		}
+		if !*keep {
+			// Deliberately after the ISO is written, not here.
+			defer func() {
+				fmt.Printf("removing %s (-keep to retain it)\n", dir)
+				_ = os.RemoveAll(dir)
+			}()
+		}
+	}
+
+	if *label == "" {
+		*label = "WINDOWS_ARM64"
+	}
+	return utmvm.BuildISO(utmvm.RemasterOptions{
+		Source:   dir,
+		Output:   *out,
+		Label:    *label,
+		NoPrompt: true,
+	}, paths)
+}
+
+// reportISOTools says whether this machine can build its own Windows media.
+//
+// Reported by doctor rather than discovered by build-iso, because the answer
+// changes what a new developer does first: with both tools they never touch
+// CrystalFetch, and without them they should not start a download they cannot
+// finish.
+//
+// Only two, and they are the two CrystalFetch bundles inside its own app —
+// which is why it appears to need nothing.
+func reportISOTools() {
+	wim := utmvm.WimTool()
+	master, candidates := utmvm.FindMasterer()
+
+	fmt.Printf("\nbuilding your own Windows ISO needs two tools:\n\n")
+
+	state := "MISSING — " + wim.Install()
+	if wim.Found() {
+		state = utmvm.Home(wim.Path)
+	}
+	fmt.Printf("  %-16s %s\n", wim.Name, state)
+
+	if master.Found() {
+		fmt.Printf("  %-16s %s\n", master.Name, utmvm.Home(master.Path))
+	} else {
+		fmt.Printf("  %-16s MISSING — %s\n", "an ISO masterer", candidates[0].Install())
+	}
+
+	if wim.Found() && master.Found() {
+		fmt.Printf("\n  both present: irgo-winvm fetch-iso, then build-iso.\n")
+	} else {
+		fmt.Printf("\n  until then, get the ISO with CrystalFetch —\n")
+		fmt.Printf("  `irgo-winvm fetch-iso -list` says which build and its SHA-1.\n")
+	}
+}
+
+// runISO reports and protects the working ISO.
+//
+// It exists because the ISO is hardlinked into UTM's bundle, so it is not the
+// spare copy it looks like: writing to the cached path truncates the media the
+// VM boots from, and the only way back is a 5 GB gated download. -protect
+// makes that impossible rather than merely unlikely, which matters most while
+// `fetch-iso` — a command whose entire job is writing an ISO — does not exist
+// yet and cannot be reviewed.
+func runISO(args []string) error {
+	fs := flag.NewFlagSet("iso", flag.ContinueOnError)
+	path := fs.String("iso", utmvm.DefaultPaths().ISO(), "the ISO to report on (IRGO_CACHE_DIR moves the default)")
+	protect := fs.Bool("protect", false, "make it immutable: no write, truncate, rename or delete")
+	unprotect := fs.Bool("unprotect", false, "clear the immutable flag (needed before `delete` can remove a VM using it)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *protect && *unprotect {
+		return fmt.Errorf("-protect and -unprotect are opposites; pick one")
+	}
+	switch {
+	case *protect:
+		if err := utmvm.ProtectISO(*path); err != nil {
+			return err
+		}
+	case *unprotect:
+		if err := utmvm.UnprotectISO(*path); err != nil {
+			return err
+		}
+	}
+
+	st, err := utmvm.ISOLinks(*path, utmvm.ISOSearchDirs())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s\n", st.Path)
+	fmt.Printf("  size       %s\n", utmvm.HumanBytes(st.Bytes))
+	if st.Protected {
+		fmt.Printf("  protected  YES — immutable; clear it with -unprotect before replacing or deleting\n")
+	} else {
+		fmt.Printf("  protected  no — anything writing this path truncates every name below\n")
+	}
+	fmt.Printf("  names      %d according to the filesystem; %d found:\n", st.Links, len(st.Found))
+	for _, p := range st.Found {
+		fmt.Printf("               %s\n", utmvm.Home(p))
+	}
+	if st.Links > len(st.Found) {
+		fmt.Printf("             (%d more exist outside ~/Downloads and UTM's bundles —\n", st.Links-len(st.Found))
+		fmt.Printf("              a Time Machine local snapshot, usually. Not a problem.)\n")
+	}
+	fmt.Printf("\n  These are ONE file with several names, not copies. 5 GB once.\n")
+
+	// Every other Windows image on the machine, and whether anything uses it.
+	//
+	// These are 5 GB each and are named after a Windows build rather than
+	// anything a person would recognise, so a second one downloaded months ago
+	// is invisible until the disk fills. "Which of these is the one that works"
+	// is not answerable from the filenames; "does it share blocks with a VM
+	// bundle" is, and that is what this reports.
+	const minWindowsISO = 1 << 30
+	found := utmvm.ScanISOs([]string{"."}, minWindowsISO)
+	if len(found) > 1 {
+		fmt.Printf("\nother Windows images on this machine:\n\n")
+		fmt.Printf("  %-9s %-7s %s\n", "SIZE", "USED", "WHERE")
+		var idle int64
+		for _, f := range found {
+			used := "no"
+			if f.InUse {
+				used = "yes"
+			} else {
+				idle += f.Bytes
+			}
+			fmt.Printf("  %-9s %-7s %s\n", utmvm.HumanBytes(f.Bytes), used, utmvm.Home(f.Path))
+		}
+		if idle > 0 {
+			fmt.Printf("\n  %s is in images no VM refers to. Check them before deleting —\n", utmvm.HumanBytes(idle))
+			fmt.Printf("  a different language or build is a deliberate spare, not litter.\n")
+		}
+	}
+	return nil
+}
+
 func runDoctor() error {
 	in, err := utmvm.EnsureUTM()
 	if err != nil {
@@ -378,7 +801,56 @@ func runDoctor() error {
 		}
 		fmt.Printf("disk       %s (%s)\n", sp, state)
 	}
+
+	reportExternals()
 	return nil
+}
+
+// reportExternals inventories everything the project needs that is not in git.
+//
+// It is here rather than in a document because a document cannot tell you
+// whether the file is actually on this machine, and that is the only question
+// worth asking. A clone of this repository is roughly 1 MB; running any of it
+// needs ~33 GB that git has never seen, and every one of them fails a long way
+// from its cause when absent — a missing guest-tools ISO presents as a VM with
+// no network rather than as a missing ISO.
+func reportExternals() {
+	root, err := os.Getwd()
+	if err != nil {
+		root = ""
+	}
+	ext := utmvm.Externals(root)
+
+	// "not in git" rather than "outside the repository": .cache and .bin sit
+	// inside the working tree and are still absent from a fresh clone, which
+	// is the property that matters.
+	fmt.Printf("\nwhat this needs that git does not have:\n\n")
+	fmt.Printf("  %-22s %-9s %-9s %s\n", "WHAT", "SIZE", "SHARED", "WHERE")
+	for _, e := range ext {
+		size, shared := "MISSING", ""
+		if e.Present {
+			size = utmvm.HumanBytes(e.Bytes)
+			if e.Shared > 0 {
+				shared = utmvm.HumanBytes(e.Shared)
+			}
+		}
+		fmt.Printf("  %-22s %-9s %-9s %s\n", e.Name, size, shared, utmvm.Home(e.Path))
+	}
+	fmt.Printf("\n  %-22s %s\n", "total on disk", utmvm.HumanBytes(utmvm.TotalBytes(ext)))
+	fmt.Printf("  SHARED is hardlinked blocks an earlier row already counted, not extra space.\n")
+
+	reportISOTools()
+
+	missing := utmvm.Missing(ext)
+	if len(missing) == 0 {
+		fmt.Printf("\nnothing missing.\n")
+		return
+	}
+	fmt.Printf("\n%d missing:\n", len(missing))
+	for _, e := range missing {
+		fmt.Printf("\n  %s — %s\n", e.Name, e.Why)
+		fmt.Printf("    get it: %s\n", e.Fix)
+	}
 }
 
 func runList() error {
@@ -548,9 +1020,20 @@ func runUp(args []string) error {
 // runScreenshot captures the guest's display. This is the only way to see a VM
 // that has no guest agent yet — during install, in the UEFI shell, or any time
 // exec is unavailable.
+// runScreenshot captures the VM's screen, defaulting into the documentation
+// directory rather than the working directory.
+//
+// The default matters more than it looks. This is the only way to show that any
+// of this works — a guest agent cannot photograph a machine that has not
+// finished installing, and a claim like "it boots straight into Setup" is worth
+// nothing without the picture. Landing shots in docs/screens by default means
+// the evidence is already where it belongs when somebody decides to keep it,
+// instead of scattered through the working directory under timestamps nobody
+// can match to anything afterwards.
 func runScreenshot(args []string) error {
 	fs := flag.NewFlagSet("screenshot", flag.ContinueOnError)
-	out := fs.String("o", "", "output PNG path (default: ./<vm>-<timestamp>.png)")
+	out := fs.String("o", "", "exact output path; overrides -name")
+	name := fs.String("name", "", "file name under the screens directory (default: <vm>-<timestamp>)")
 	ref, err := vmRef(fs, args)
 	if err != nil {
 		return err
@@ -559,14 +1042,28 @@ func runScreenshot(args []string) error {
 	if err != nil {
 		return err
 	}
-	path := *out
-	if path == "" {
-		path = fmt.Sprintf("%s-%d.png", e.Name, time.Now().Unix())
+
+	paths := utmvm.DefaultPaths()
+	target := *out
+	if target == "" {
+		n := *name
+		if n == "" {
+			// A timestamp, not a fixed name: an unnamed shot is a scratch shot,
+			// and overwriting the last one is how evidence goes missing.
+			n = fmt.Sprintf("%s-%d", e.Name, time.Now().Unix())
+		}
+		target, err = paths.Screenshot(n)
+		if err != nil {
+			return err
+		}
+	} else if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
+		return mkErr
 	}
-	if err := utmvm.Screenshot(e.Name, path); err != nil {
+
+	if err := utmvm.Screenshot(e.Name, target); err != nil {
 		return err
 	}
-	fmt.Println(path)
+	fmt.Println(target)
 	return nil
 }
 

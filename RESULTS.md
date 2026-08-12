@@ -1,10 +1,62 @@
 # Probe results
 
-The point of this repo is parity: the same probes, the same glaze version, on
-both platforms. A pass on one OS proves nothing on its own.
+## A self-built ISO installs Windows — verified 12 Aug 2026
 
-Probes are built from `probe/` (native capabilities) and `glaze-probes/`
-(glaze's `app://` scheme and its Events bridge).
+![Windows 11 installing from an ISO this repo built](docs/screens/self-built-iso-installing-windows.png)
+
+That is UTM, booted from an ISO mastered by `irgo-winvm build-iso`, installing
+unattended. It settles every open question about replacing CrystalFetch:
+
+| question | answer |
+|---|---|
+| can macOS master bootable Windows ARM64 media? | **yes**, with `xorriso` |
+| does `hdiutil` work? | **no.** Two images, one hiding everything from ISO9660 and one hiding nothing, both enumerate as `FS0: /CDROM(0x0)` and both refuse to boot |
+| is UDF required for the 4.099 GiB `install.wim`? | **no.** ISO9660 level 3 multi-extent is enough — Setup read it and installed |
+| so is `cdrtools` needed? | **no.** `xorriso` alone. One Homebrew formula |
+| does `efisys_noprompt.bin` skip "Press any key to boot from CD"? | **yes** — it went straight into Setup |
+
+The last row matters beyond convenience. Booting currently depends on typing
+`\efi\boot\bootaa64.efi` at the UEFI shell and firing eight keypresses over six
+seconds — a hack this README documents as costing hours and as having once
+destroyed an install when surplus presses reached Setup's UI. Media built with
+the no-prompt loader does not need it.
+
+Full detail, including the two failed attempts and why they failed, is in
+[PLAN-fetch-iso.md](PLAN-fetch-iso.md).
+
+---
+
+The point of this repo is parity: the same probes, the same glaze version, on
+both platforms. A pass on one OS proves nothing on its own. Probes are built
+from `probe/` (native capabilities) and `glaze-probes/` (glaze's `app://` scheme
+and its Events bridge).
+
+## Suspend and resume — 400 ms, verified 12 Aug 2026
+
+Three consecutive cycles on Windows 11 ARM64, each measured to a live guest
+agent, with the guest's own boot time as the fingerprint:
+
+```
+baseline  System Boot Time: 8/12/2026, 10:33:36 AM
+cycle 1   resumed in 400ms   boot time unchanged -> STATE PRESERVED
+cycle 2   resumed in 400ms   boot time unchanged -> STATE PRESERVED
+cycle 3   resumed in 400ms   boot time unchanged -> STATE PRESERVED
+```
+
+The boot time is the proof rather than the speed: it changes on a reboot and
+not on a resume, so an unchanged value means the guest genuinely continued
+rather than quietly restarting. A cold boot for comparison was **59 seconds**,
+and additionally has to be driven through the UEFI shell with eight keypresses —
+which needs an unlocked Mac and a visible display window.
+
+`irgo-winvm setup` resumes a suspended VM rather than rebooting it, so the
+idempotent path is the fast one.
+
+**The state is in memory** and does not survive quitting UTM. The durable
+version is not offered; `utmctl suspend --save-state` either refuses (naming GPU
+acceleration, then NVMe) or *reports success and power-cuts the guest* — exit 0,
+no state file, next boot through "Diagnosing your PC". See the trap table in
+[README.md](README.md).
 
 ## macOS — verified
 
@@ -18,7 +70,7 @@ Host: Apple M2 Pro, macOS 26.5, `glaze v0.0.47`, `CGO_ENABLED=0`.
 | `power.preventSleep` | OK — acquired and released |
 | `singleinstance.acquire` | OK — lock held, re-acquire correctly refused |
 | `mmap.map` | OK — mapped and wrote through |
-| `openurl` / `tray` / `filedialog` / `menu` | skipped — side effects or need a run loop |
+| `openurl` / `tray` / `filedialog` / `menu` / `nocapture` / app icon | covered by `examples/nativeall` — see the windows/arm64 table below, which lists both platforms |
 | `notifications`, `keychain`, `fswatch` | **missing from the ecosystem** (`native/notify` is planned, not built) |
 
 ### glaze `app://` scheme
@@ -82,18 +134,89 @@ silently.
 | `power.preventSleep` | **OK** — acquired and released |
 | `singleinstance.acquire` | **OK** — lock held, re-acquire correctly refused |
 | `mmap.map` | **OK** — mapped and wrote through |
-| `openurl` / `tray` / `filedialog` / `menu` | skipped (see the caveat in PLAN.md — three are not even linked) |
 | `notifications`, `keychain`, `fswatch` | missing from the ecosystem |
 
 Identical to the macOS column. Every capability that works on macOS works on
 Windows ARM64.
 
-### glaze probes — still outstanding
+### The windowed half — `examples/nativeall`, windows/arm64, `-gui`
 
-The two glaze probes open a WebView2 window, and that is where this stopped.
-The VM rebooted itself mid-session (Windows Update, disk grew 14 → 27 GB),
-dropping the agent with `Port is not connected`, and it has not been brought
-back yet.
+The rows that used to say *skipped* here. Run in the VM with
+`mise run vm:run .bin/nativeall-arm64.exe`, exit code 0:
+
+| capability | windows/arm64 | darwin/arm64 |
+|---|---|---|
+| `openurl.Open` (`file://`) | **OK** | **OK** |
+| `openurl.Open` refusing a custom scheme | **OK** | **OK** |
+| `openurl.Reveal` | **OK** | **OK** |
+| `menu.Set` (native menu bar) | **OK** | **OK** |
+| `tray.Run` (icon raised and removed) | **OK** | **OK** |
+| `glaze.OpenFile` (native file dialog) | **OK** | **OK** |
+| `nocapture.Protect` | **OK** | UNSUPPORTED — by design |
+| `glaze.SetAppIcon` | UNSUPPORTED — by design | **OK** |
+
+The last two rows are the interesting ones, and they are mirror images: each
+platform is missing exactly what the other has. `nocapture` on macOS is right
+to refuse — Apple removed the API — and Windows takes its app icon from the
+executable's resources, decided before the process starts. Neither is a
+failure, and getting the report to *say* so needed a fix in glaze and native
+themselves ([UPSTREAM.md](UPSTREAM.md) §2): every package defined its own
+`ErrUnsupported` without wrapping the standard one, so both rows read FAILED
+and a wholly correct run exited non-zero.
+
+This is the first time the whole native surface has been run together on
+Windows — not in this repo, not in glaze's examples, and not in
+`crgimenes/native`, all of which test one capability per binary.
+
+### glaze probes — MEASURED
+
+Both ran on Windows 11 ARM64 via `irgo-winvm run -gui`. This closes the
+project's stated goal: everything glaze does is now measured on both platforms.
+
+**Events bridge — fully working.**
+
+```
+PASS: JS -> Go   : "js-listener-installed"
+PASS: Go -> JS   : 3 unsolicited pushes delivered
+PASS: round trip : received=["tick:1","tick:2","tick:3"] domChildren=3
+```
+
+**`app://` scheme — works, with one serious caveat that is an upstream bug.**
+
+```
+origin:        https://app.localhost      (macOS reports app://home)
+secureContext: true
+relative sub-resources:  served
+absolute app:// sub-resources:  NEVER REQUESTED
+```
+
+The scheme handler works and the origin is secure, but **absolute `app://` URLs
+inside a page do not load on Windows** — silently, with no error. glaze emulates
+the scheme there with a virtual host, so the document loads from
+`https://app.localhost/` and an absolute `app://home/app.js` names a scheme
+WebView2 does not know.
+
+A glaze app that works on macOS therefore loses every stylesheet and script on
+Windows, with nothing to say why. Written up in
+[UPSTREAM.md](UPSTREAM.md) §1b, with the fix (WebView2's real custom-scheme
+registration). **Reference assets relatively and both platforms work** — which
+is what `verifyevents` now does, and why it passes.
+
+This is exactly the class of bug the project was built to find: invisible from a
+Mac, invisible in glaze's own CI (`windows-latest` is x64 and has no ARM64
+desktop), and silent when it happens.
+
+### The earlier blocker, for the record
+
+`verify` and `verifyevents` — the `app://` scheme and the Events bridge — have
+still not been run on Windows. Both open a WebView2 window, and that is where
+this originally stopped: the VM rebooted itself mid-session (Windows Update,
+disk grew 14 → 27 GB), dropping the agent with `Port is not connected`.
+
+The blocker itself is gone. `nativeall` above opens a WebView2 window in the
+VM and drives a native file dialog through it, so WebView2 works on ARM64 and
+`-gui` reaches the interactive session. What remains is to run the two probes
+and record what they print — `mise run vm:probe-gui` does all three.
 
 Two constraints learned in the attempt, both now understood rather than guessed:
 

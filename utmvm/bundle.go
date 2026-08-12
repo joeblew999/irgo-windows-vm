@@ -33,6 +33,11 @@ type Options struct {
 	DiskGiB      int    // system disk size, sparse
 	MemoryMiB    int
 	CPUCount     int
+
+	// NoGPUAccel drops host GPU acceleration. See the display comment in
+	// config.go: it removes one of the two devices that block a durable
+	// suspend, and does not on its own make one possible.
+	NoGPUAccel bool
 }
 
 func (o *Options) setDefaults() {
@@ -111,6 +116,7 @@ func Create(opts Options) (string, error) {
 		MemoryMiB:  opts.MemoryMiB,
 		CPUCount:   opts.CPUCount,
 		MACAddress: randomMAC(),
+		NoGPUAccel: opts.NoGPUAccel,
 	}
 
 	id1, _ := newUUID()

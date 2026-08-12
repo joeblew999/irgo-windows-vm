@@ -1,35 +1,26 @@
 # Seamless local Windows testing — status and plan
 
-## Start here after a restart
+## Start here
+
+One command, idempotent. It checks each stage and skips what is already done, so
+running it twice is safe and the second run takes seconds:
 
 ```sh
-cd ~/workspace/go/src/github.com/joeblew999/irgo-windows-vm
-go build ./... && go test ./utmvm/...      # should be clean
-
-irgo-winvm status -vm irgo-win11           # the VM survives reboots; it will be off
-irgo-winvm boot -vm irgo-win11 -installed  # boot the installed Windows
-irgo-winvm status -vm irgo-win11           # wait for: agent: yes
+irgo-winvm setup                    # media, VM, everything — from any state
+irgo-winvm setup -fetch -install    # ...including a 4.2 GB download and a 45-minute install
 ```
 
-Then rebuild the probes — they live in `/tmp` today and do **not** survive a
-restart (see "Next up", item 1):
+On a machine that already has a VM it prints six skipped stages and stops. After
+a restart the VM is simply off; `setup` starts it and waits for the agent.
 
 ```sh
-mkdir -p /tmp/probes
-cd probe           && for a in arm64 amd64; do CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o /tmp/probes/nativeprobe-$a.exe .; done
-cd ../glaze-probes && for p in verify verifyevents; do for a in arm64 amd64; do CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o /tmp/probes/glaze-$p-$a.exe ./$p; done; done
+mise run check     # build, vet and test all four modules
+mise run probes    # cross-compile every Windows probe into .bin/
+mise run doctor    # UTM, tools, and every file this needs that git does not have
 ```
 
-**The single next action** is one command. Everything it needs is committed:
-
-```sh
-irgo-winvm run -gui -timeout 3m -vm irgo-win11 /tmp/probes/glaze-verify-arm64.exe
-```
-
-That is the last unmeasured claim in the project.
-
-The Windows ISO is hardlinked at `.cache/win11-arm64.iso` (gitignored, zero
-extra bytes), so nothing depends on `~/Downloads` any more.
+The probes live in `.bin/` (gitignored) and survive a restart. Nothing depends
+on `~/Downloads`, and the ISO is immutable — see `irgo-winvm iso`.
 
 ## What is proven
 
@@ -81,33 +72,75 @@ Each cost real time. None is guessable from documentation.
 | Windows reboots itself (Windows Update) | the agent drops with "Port is not connected"; nothing may assume the VM is still reachable |
 | `BootInstalled` on `fs0:` is the install CD | the ESP is on NVMe at a varying fs number, so it must search |
 
+## Done since this list was written
+
+2. ~~**Run the glaze probes**~~ — both measured on Windows 11 ARM64. The Events
+   bridge passes completely. The `app://` scheme works, and exposed a serious
+   upstream bug: absolute `app://` URLs silently do not load on Windows, so a
+   glaze app that works on macOS loses every stylesheet and script there.
+   [UPSTREAM.md](UPSTREAM.md) §1b. **This was the project's stated goal.**
+6. ~~**`fetch-iso`**~~ — done, and verified end to end. Microsoft's Media
+   Creation Tool catalog (not the Sentinel-blocked download API) gives a direct
+   URL, a size and a SHA-1; `fetch-iso` downloads and verifies, `build-iso`
+   turns the .esd into a bootable ISO, and an ISO built that way **booted UTM
+   straight into Windows Setup and installed unattended**. Two external tools,
+   both what CrystalFetch bundles: `wimlib` and `xorriso`. Detail and the two
+   failed approaches are in [PLAN-fetch-iso.md](PLAN-fetch-iso.md).
+7. ~~**Build tags**~~ — `utmvm` now compiles for darwin, linux and windows on
+   both architectures, so `targets` can reach the Windows developer it exists to
+   inform. The macOS-only syscalls live behind `sysfile_darwin.go` /
+   `sysfile_other.go`, which report "unknown" rather than guessing — a wrong
+   answer about whether two files share blocks is worse than none.
+
+1. ~~**`probes build -o <dir>`**~~ — `mise run probes` cross-compiles all four
+   probe binaries for arm64 and amd64 into `.bin/`, which is gitignored and
+   survives a restart. Still worth folding into the CLI eventually; the task is
+   what unblocked everything else.
+4. ~~**`probe/gui`**~~ — `examples/nativeall` runs **every** native capability
+   in one windowed program: tray, menu, file dialogs, app icon, no-capture,
+   open-url. Measured on macOS **and** Windows 11 ARM64; see `RESULTS.md`.
+5. ~~**Drop the fake `SKIPPED` rows**~~ — gone. They were backed by
+   `openurl.Open != nil`, which `go vet` rejects because a function value is
+   never nil, so the report named capabilities nothing had checked.
+
+Two upstream bugs were found doing it, both fixed at crgimenes rather than
+worked around here — see [UPSTREAM.md](UPSTREAM.md).
+
 ## Next up, in order
 
-1. **`probes build -o <dir>`** — cross-compile both probe modules. They are
-   hand-built into `/tmp` today, so a restart loses them. First job, because
-   everything else needs probes.
-2. **Run the glaze probes** (`-gui`) and record in `RESULTS.md`. One command;
-   see the top of this file. This closes the project's actual goal.
-3. **`suspend` / `resume`** — resuming restores RAM and never reaches firmware,
-   so it needs no keystrokes and works with the Mac locked. This makes the loop
-   genuinely fast and removes the boot problem from daily use.
-4. **`probe/gui`** — tray, menu, file dialog, app icon. Nothing currently tests
-   glaze's dialogs or menu on any platform.
-5. **Drop the fake `SKIPPED` rows** for `tray`/`filedialog`/`nocapture`, which
-   are not imported: the report implies checks that do not exist.
-6. **`fetch-iso`** — removes the CrystalFetch step. Microsoft serves the ARM64
-   image through the same gated API quickget automates; verified by fetching the
-   official page (HTTP 200, product edition `3324`, session-permit and SKU
-   endpoints present).
-7. **Build tags** — `utmvm` does not compile on Linux or Windows
-   (`inode_darwin.go`, `syscall.Statfs_t`), so `targets` cannot reach the
-   Windows developer it exists to inform.
+3. ~~**`suspend` / `resume`**~~ — **done for the case that works, and the other
+   case turns out to be a trap.**
+
+   `irgo-winvm suspend` / `resume` pause to memory and restore. **Measured at
+   300–500 ms** to a live guest agent, against about two minutes for a cold
+   boot that additionally has to be driven through the UEFI shell with eight
+   keypresses — which needs an unlocked Mac and a visible display window.
+   That removes the boot problem from daily use, which was the point.
+
+   The state is in MEMORY, so it does not survive quitting UTM or rebooting the
+   Mac. The durable version, `utmctl suspend --save-state`, is **not offered**,
+   because it does one of two things and the caller cannot tell which:
+
+   - refuses honestly, naming a device — `Suspend is not supported when GPU
+     acceleration is enabled`, and once that is removed (`create -no-gpu`),
+     `...when an emulated NVMe device is active`. NVMe is not removable:
+     Windows ARM64 Setup has no inbox VirtIO storage driver and finds no drive
+     without it;
+   - **or reports success and power-cuts the guest** — exit 0, no state file,
+     VM left `stopped`, next boot through "Diagnosing your PC".
+
+   Making a durable suspend possible means switching the system disk to VirtIO
+   and injecting the driver into `boot.wim` — which is now actually reachable,
+   because `build-iso` already drives wimlib over the media. That is the
+   follow-up, and it belongs with the ISO builder rather than here.
 8. **Delete dead code** — `BuildFATImage`, `OpenDisplay`, `BootAssist`,
    `SchemaConfigurationVersion`, `IfaceVirtIO`, and `GuestToolsInstallCommand`,
    which still carries the `start`-wildcard bug already fixed in the XML.
-9. **`Prune` and `Delete` safety** — `Prune` removes any `*.img`/`*.dmg` in
-   `os.TempDir()` regardless of owner; `Delete` removes files after 30s whether
-   or not QEMU actually stopped.
+9. **`Delete` safety** — removes files after 30s whether or not QEMU actually
+   stopped. (`Prune` is fixed: it matched any `*.img`/`*.dmg` in the system temp
+   directory regardless of owner, which on a shared /tmp is somebody else's
+   half-built VM. It now matches only this project's own prefixes, guarded by a
+   test that asserts a `disk.img` and an `Xcode.dmg` survive.)
 
 ## Scope
 

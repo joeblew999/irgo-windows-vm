@@ -106,6 +106,35 @@ func Delete(ref string, force bool) (Removal, error) {
 // Prune removes generated artefacts that are not VMs: staged payload images and
 // probe builds. It never touches downloaded ISOs, which are expensive to
 // re-fetch and cheap to keep.
+// ourTempPrefixes are the names this package gives the things it leaves in the
+// system temp directory. Every os.CreateTemp/MkdirTemp call here uses one.
+//
+// Prune matches on these and nothing else. It used to remove any `*.img` or
+// `*.dmg` it found, which in a shared /tmp means somebody else's disk image —
+// a VM they were mid-way through building, or a downloaded installer. Deleting
+// files this project did not create, on the grounds that they look similar, is
+// not a cleanup command; it is a hazard with a friendly name.
+//
+// The cost of being strict is a stale file surviving. The cost of being loose
+// is unbounded, so the trade is not close.
+var ourTempPrefixes = []string{
+	"irgo-winvm-payload-", // staged payload trees
+	"irgo-catalog-",       // extracted Microsoft catalogs
+	"irgo-i-",             // interactive-run batch files
+	"irgo-l-",             // scheduled-task launchers
+	"irgo-",               // remaining batch files and images
+	"utmvm-windowid-",     // the AppleScript helper for screenshots
+}
+
+func isOurArtefact(name string) bool {
+	for _, p := range ourTempPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func Prune(dirs ...string) (int64, []string, error) {
 	var freed int64
 	var removed []string
@@ -116,10 +145,7 @@ func Prune(dirs ...string) (int64, []string, error) {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			isArtefact := strings.HasSuffix(name, ".img") ||
-				strings.HasSuffix(name, ".dmg") ||
-				strings.HasPrefix(name, "irgo-winvm-payload-")
-			if !isArtefact {
+			if !isOurArtefact(name) {
 				continue
 			}
 			p := filepath.Join(d, name)

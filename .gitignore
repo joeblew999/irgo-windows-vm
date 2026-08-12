@@ -7,3 +7,12 @@
 # Large downloaded media and generated payloads. fetch-iso will populate .cache/;
 # nothing here belongs in git.
 /.cache/
+
+# Probe binaries built by `mise run probes`. Rebuildable from source in seconds;
+# they exist so a restart does not lose them, not so they are committed.
+/.bin/
+
+# go.work files point at absolute paths on one machine. `mise run upstream:verify`
+# writes one to test against local glaze/native clones and removes it again.
+go.work
+go.work.sum

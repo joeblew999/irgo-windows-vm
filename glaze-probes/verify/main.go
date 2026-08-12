@@ -12,18 +12,62 @@ import (
 	"github.com/crgimenes/glaze"
 )
 
+// Two ways of naming the same sub-resources, deliberately.
+//
+// An ABSOLUTE app:// URL is the obvious way to reference an asset and the way
+// the scheme is documented. A RELATIVE one resolves against whatever origin the
+// document actually ended up on.
+//
+// On macOS both work, because WKWebView registers `app` as a real scheme. On
+// Windows they differ, and the difference is the whole finding: glaze emulates
+// the scheme with a virtual host, so the document loads from
+// https://app.localhost/ and an absolute `app://home/app.js` inside it names a
+// scheme WebView2 has never heard of. It fails silently — no error, no console
+// message, just a page with no stylesheet and no script.
+//
+// Loading both means the report says WHICH failed rather than "timed out".
 const indexHTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>verify</title>
-<link rel="stylesheet" href="app://home/app.css"></head>
+<link rel="stylesheet" href="app://home/app.css">
+<link rel="stylesheet" href="/rel.css"></head>
 <body><h1 id="h">checking…</h1>
 <script src="app://home/app.js"></script>
+<script src="/rel.js"></script>
 </body></html>`
+
+// relCSS and relJS are the same assets under relative names. If the absolute
+// pair never arrives, these still run and report that fact instead of leaving
+// the probe to time out with nothing to say.
+const relCSS = `body { margin-left: 3rem; }`
+
+const relJS = `
+window.__relLoaded = true;
+window.addEventListener('load', () => {
+  // Give the absolute-URL script a moment to win the race, then report if it
+  // never loaded at all.
+  setTimeout(() => {
+    if (!window.__absLoaded) {
+      report("ABSOLUTE-SUBRESOURCES-FAILED", -1, JSON.stringify(probeRel()));
+    }
+  }, 3000);
+});
+function probeRel() {
+  return {
+    origin: location.origin,
+    href: location.href,
+    secureContext: window.isSecureContext,
+    absoluteAppURLsLoaded: !!window.__absLoaded,
+    relativeURLsLoaded: true,
+    css: getComputedStyle(document.body).marginLeft,
+  };
+}`
 
 const appCSS = `body { font-family: system-ui; padding: 2rem; }`
 
 // Exercises a sub-resource load from the same origin, then probes the origin
 // capabilities that decide whether client-side routing works, then the binding.
 const appJS = `
+window.__absLoaded = true;
 function probe() {
   const r = {};
   r.origin = location.origin;
@@ -58,6 +102,10 @@ func main() {
 					body, mime = appJS, "text/javascript"
 				case strings.HasSuffix(req.URL, "app.css"):
 					body, mime = appCSS, "text/css"
+				case strings.HasSuffix(req.URL, "rel.js"):
+					body, mime = relJS, "text/javascript"
+				case strings.HasSuffix(req.URL, "rel.css"):
+					body, mime = relCSS, "text/css"
 				}
 				fmt.Println("  scheme handler served:", req.URL, "->", mime)
 				return &glaze.SchemeResponse{Body: []byte(body), MIMEType: mime}
@@ -101,9 +149,11 @@ func main() {
 		}
 		defer os.RemoveAll(dir)
 		for name, body := range map[string]string{
-			"index.html": strings.ReplaceAll(indexHTML, "app://home/", ""),
+			"index.html": strings.ReplaceAll(strings.ReplaceAll(indexHTML, "app://home/", ""), `href="/`, `href="`),
 			"app.css":    appCSS,
 			"app.js":     appJS,
+			"rel.css":    relCSS,
+			"rel.js":     relJS,
 		} {
 			if err := os.WriteFile(dir+"/"+name, []byte(body), 0o600); err != nil {
 				fmt.Println("FAIL: write:", err)

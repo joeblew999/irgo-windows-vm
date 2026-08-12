@@ -2,7 +2,7 @@ package utmvm
 
 import (
 	"fmt"
-	"syscall"
+	"os"
 )
 
 // A Windows 11 install consumes roughly this much once it settles. The sparse
@@ -37,11 +37,11 @@ func gb(b int64) float64 { return float64(b) / (1 << 30) }
 func CheckSpace(targetDir, isoPath string) (SpaceCheck, error) {
 	var s SpaceCheck
 
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(targetDir, &st); err != nil {
+	free, err := statfsAvailable(targetDir)
+	if err != nil {
 		return s, fmt.Errorf("checking free space on %s: %w", targetDir, err)
 	}
-	s.FreeBytes = int64(st.Bavail) * int64(st.Bsize)
+	s.FreeBytes = free
 	s.RequiredBytes = WindowsInstallBytes
 
 	if isoPath != "" && !sameVolume(targetDir, isoPath) {
@@ -57,18 +57,15 @@ func CheckSpace(targetDir, isoPath string) (SpaceCheck, error) {
 
 // sameVolume reports whether two paths live on one filesystem, in which case a
 // hardlink works and the ISO is free.
-func sameVolume(a, b string) bool {
-	var sa, sb syscall.Stat_t
-	if syscall.Stat(a, &sa) != nil || syscall.Stat(b, &sb) != nil {
-		return false
-	}
-	return sa.Dev == sb.Dev
-}
+//
+// A false answer only costs an over-estimate of the space needed, which is the
+// safe direction — so a platform that cannot tell says no.
+func sameVolume(a, b string) bool { return sameDevice(a, b) }
 
 func fileSize(p string) (int64, error) {
-	var st syscall.Stat_t
-	if err := syscall.Stat(p, &st); err != nil {
+	fi, err := os.Stat(p)
+	if err != nil {
 		return 0, err
 	}
-	return st.Size, nil
+	return fi.Size(), nil
 }

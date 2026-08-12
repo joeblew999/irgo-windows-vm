@@ -14,7 +14,17 @@ import (
 )
 
 const indexHTML = `<!doctype html><html><head><meta charset="utf-8"></head>
-<body><ul id="log"></ul><script src="app://home/app.js"></script></body></html>`
+<body><ul id="log"></ul><script src="/app.js"></script></body></html>`
+
+// The script is referenced RELATIVELY, not as app://home/app.js.
+//
+// That is not a style choice. On Windows glaze emulates the custom scheme with
+// a virtual host, so the document loads from https://app.localhost/ and an
+// absolute app:// URL inside it names a scheme WebView2 does not know — the
+// request never arrives and the page silently has no script. See UPSTREAM.md.
+//
+// Relative works on both platforms, so using it here means this probe measures
+// the Events bridge rather than re-measuring that bug, which verify/ covers.
 
 const appJS = `
 window.addEventListener('load', () => {

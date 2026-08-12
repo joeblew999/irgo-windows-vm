@@ -70,6 +70,66 @@ end tell`, v.Ref)
 // Stop requests a shutdown.
 func (v VM) Stop() error { _, err := v.run("stop"); return err }
 
+// Suspend pauses the VM with its RAM intact, so Resume returns it in seconds
+// without going near firmware.
+//
+// This is the fast path and the reason it matters: a cold boot on UTM's aarch64
+// firmware has to be DRIVEN — the firmware never auto-selects a boot entry, so
+// something must type a path at the UEFI shell and fire eight keypresses. That
+// needs an unlocked Mac and a visible display window, takes about two minutes,
+// and has destroyed an install when surplus keypresses reached Setup's UI.
+// Resuming reaches none of it.
+//
+// The state lives in memory, so it survives neither quitting UTM nor rebooting
+// the host. SuspendToDisk is the durable version — where it is permitted.
+func (v VM) Suspend() error { _, err := v.run("suspend"); return err }
+
+// SuspendToDisk is `utmctl suspend --save-state`, and it is NOT SAFE on this
+// hardware. It is exported only so the finding below is checkable; nothing in
+// this repository calls it, and the CLI does not expose it.
+//
+// It is supposed to write the VM's state to disk so it survives UTM quitting.
+// Measured on Windows 11 ARM64 under UTM 4.7.5, it does one of two things and
+// you do not get to choose which:
+//
+//  1. Refuses honestly, naming a device that cannot be snapshotted:
+//
+//     Suspend is not supported when GPU acceleration is enabled.
+//     Suspend is not supported when an emulated NVMe device is active.
+//
+//     Removing GPU acceleration (Options.NoGPUAccel) clears the first and
+//     reveals the second. NVMe is not removable: Windows ARM64 Setup has no
+//     inbox VirtIO storage driver and reports "no drive found" without it.
+//
+//  2. **Reports success and silently power-cuts the guest.** Exit status 0,
+//     "suspended to disk", no state file written anywhere in the bundle, VM
+//     left `stopped` — and the guest's next boot goes through "Diagnosing your
+//     PC", because what actually happened was a hard power-off.
+//
+// The second is the dangerous one: it looks like a clean suspend, it is
+// indistinguishable from one by exit code, and it risks whatever the guest had
+// in flight. A command that can do that must not be offered as a convenience.
+//
+// Use Suspend instead — in-memory, genuinely instant to resume (measured at
+// 300–500 ms to a live guest agent), and it does not lie. The only thing it
+// cannot do is survive UTM quitting.
+func (v VM) SuspendToDisk() error { _, err := v.run("suspend", "--save-state"); return err }
+
+// Resume brings a suspended VM back. It is the same utmctl verb as a cold
+// start, which is why there is no separate "resume" in UTM: a VM with saved
+// state resumes, one without boots.
+func (v VM) Resume() error { return v.Start() }
+
+// IsPaused reports whether the VM is suspended rather than stopped or running.
+//
+// Worth distinguishing because the three need different treatment and only one
+// of them is expensive: a paused VM is seconds from ready, a stopped one needs
+// its firmware driven, and a running one needs nothing.
+func (v VM) IsPaused() bool {
+	st, err := v.Status()
+	return err == nil && strings.TrimSpace(st) == "paused"
+}
+
 // IPAddress returns the guest's non-loopback addresses.
 //
 // This only works once the QEMU guest agent is installed, which on Windows

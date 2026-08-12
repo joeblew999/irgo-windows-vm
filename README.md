@@ -23,27 +23,97 @@ exists:
 - Windows is the best-covered platform for native capabilities: 7 of 8 packages,
   more than macOS or Linux.
 
-## Install
+## Start here
 
 ```sh
 go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest
-irgo-winvm doctor        # installs UTM via Homebrew if missing
+brew install wimlib xorriso        # only if you want it to build its own ISO
+
+irgo-winvm setup -fetch -install   # everything, from nothing
 ```
+
+That downloads Windows from Microsoft (SHA-1 verified), builds a bootable ISO,
+creates the VM, and installs Windows unattended. About an hour, mostly waiting.
+
+**It is idempotent.** Every stage checks whether it is already done, so running
+it again is safe and takes seconds — which matters, because the two expensive
+stages are a 4.2 GB download and a 45-minute install, and a setup command that
+redoes either is one nobody runs twice.
+
+```
+$ irgo-winvm setup
+setting up irgo-win11
+
+  · UTM — already done (4.7.5 at /Applications/UTM.app)
+  · guest tools — already done (utm-guest-tools-latest.iso)
+  · Windows media — already done (win11-arm64.iso)
+  · protect the media — already done (immutable)
+  · VM bundle — already done (irgo-win11 (started))
+  · Windows — already done (installed, agent answering)
+
+irgo-win11 is ready.
+```
+
+Neither `-fetch` nor `-install` is implied: a command that starts a
+multi-gigabyte download because you ran it in the wrong directory is a bad
+command. Without them it does everything cheap and tells you what remains.
+
+`irgo-winvm doctor` is the other thing to run on a new machine. A clone is about
+a megabyte; running any of this needs ~31 GB that git has never seen — UTM, the
+guest tools, a Windows ISO, the VM itself — and every one fails a long way from
+its cause when absent. A missing guest-tools ISO does not say so; it presents as
+a VM with no network.
+
+## Getting the Windows ISO
+
+Two routes. The second is the one being built, and it works.
+
+**Today:** [CrystalFetch](https://github.com/TuringSoftware/CrystalFetch), then
+hardlink it where this repo looks. `irgo-winvm fetch-iso -list` tells you
+exactly which build to expect and its SHA-1, so you can check what you got.
+
+**Building your own** — no GUI, no Microsoft account, verified against a
+published hash:
+
+```sh
+brew install wimlib xorriso        # the only two external tools, ever
+irgo-winvm fetch-iso -o win11.esd  # from Microsoft's catalog, SHA-1 checked
+irgo-winvm build-iso -esd win11.esd
+irgo-winvm iso -protect            # do this once; see below
+```
+
+This is **verified**: an ISO built this way boots UTM straight into Windows
+Setup and installs unattended — [RESULTS.md](RESULTS.md) has the screenshot.
+Media built here uses the `efisys_noprompt.bin` loader, so it skips the "Press
+any key to boot from CD" prompt that the rest of this repo works around with
+eight timed keypresses.
+
+Microsoft's catalog is an LZX-compressed CAB, which Go cannot read. It is
+extracted with `/usr/bin/bsdtar` — libarchive, which ships with macOS — so this
+needs nothing installed beyond the two tools above. Detail, and the two
+approaches that failed first, are in [PLAN-fetch-iso.md](PLAN-fetch-iso.md).
 
 ## Use
 
 ```sh
-irgo-winvm doctor                                # UTM version, guest tools, disk space
+irgo-winvm setup                                 # everything, idempotent — start here
+irgo-winvm doctor                                # UTM, tools, and every file outside git
 irgo-winvm targets                               # what this machine can test
-irgo-winvm verify -iso win11-arm64.iso           # ARM64? can it boot unattended?
 
-# The usual entry point: create, restart UTM, boot past the UEFI shell.
-irgo-winvm up -iso win11-arm64.iso -name dev-win -probes ./out
+irgo-winvm status -vm irgo-win11                 # state, IP, whether the agent answers
+irgo-winvm probe  -vm irgo-win11                 # run the probes, print the report
 
-irgo-winvm status -vm dev-win                    # state, IP, whether the agent answers
-irgo-winvm probe  -vm dev-win                    # run the probes, print the report
-irgo-winvm delete -vm dev-win -force             # stop and reclaim the space
+# Between runs, suspend instead of stopping: resume is ~400 ms and needs no
+# keystrokes, where a cold boot is ~2 minutes of driving the UEFI shell.
+irgo-winvm suspend -vm irgo-win11
+irgo-winvm resume  -vm irgo-win11
+
+irgo-winvm delete -vm irgo-win11 -force          # stop and reclaim the space
 ```
+
+`setup` covers what `up` did (create + restart UTM + boot) and everything either
+side of it, and skips whatever is already done. `up` and the individual steps
+remain, because each fails differently and is worth retrying alone.
 
 `up` is `create` + `RestartUTM` + `boot`. The steps stay separate underneath
 because each fails differently and is worth retrying alone.
@@ -91,18 +161,120 @@ config with one generic *"cannot import this VM"* that names no field.
 | Joliet disabled | `autounattend.xml` becomes `AUTOUNAT.XML`, which Setup never looks for |
 | `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs |
 | `utmctl start` then keystrokes | headless VM has no display, and UTM routes input through it — keystrokes vanish |
+| `utmctl suspend --save-state` | **reports success and power-cuts the guest.** Exit 0, "suspended to disk", no state file written, VM left `stopped`, and the guest's next boot goes through "Diagnosing your PC". Sometimes it refuses honestly instead (naming GPU acceleration, then NVMe) — you do not get to choose which. Use plain `suspend`: in-memory, resumes in ~400 ms, and does not lie |
+
+## A glaze or native bug is fixed at crgimenes, not here
+
+**Non-negotiable.** When a probe fails, the fix goes to
+[crgimenes/glaze](https://github.com/crgimenes/glaze) or
+[crgimenes/native](https://github.com/crgimenes/native) — never into a
+workaround in this repository.
+
+That is the whole point of the project. This repo exists to *find* what breaks
+in glaze and native on Windows, and a bug worked around in an example is a bug
+that is still shipped to everyone using those libraries. Worse, the workaround
+hides it: the probe goes green, the report says the capability works, and the
+next person to hit it starts from nothing.
+
+So, in order:
+
+1. **Decide whose bug it is.** Does a correct consumer, reading only the public
+   documentation, hit it? Then it is upstream. Did our code call the API wrongly
+   — a missing required option, a call on the wrong thread — then it is ours,
+   and it is fixed here.
+2. **Upstream ones are reported and fixed upstream**, with the smallest change
+   that fixes the cause. [UPSTREAM.md](UPSTREAM.md) tracks every one: what it
+   is, how to reproduce it, and where the fix stands.
+3. **Only then** does anything defensive appear here, and it is commented with
+   the upstream issue it is standing in for, so it can be deleted when the fix
+   lands rather than outliving the bug by years.
+
+A rule nobody can act on is a wish, so the loop is a set of tasks. Edit their
+code and ours together, and prove the fix on Windows without waiting for a
+release, a merge, or a reply:
+
+```sh
+mise run upstream:clone      # glaze and native, next to this repo
+mise run upstream:link       # every module now builds against those clones
+mise run check               # ... edit their code and ours ...
+mise run upstream:verify     # their tests, our tests, Windows binaries from the edit
+mise run vm:run .bin/nativeall-upstream-arm64.exe   # the actual proof
+mise run upstream:diff       # what you changed — this is the pull request
+mise run upstream:unlink     # back to the released modules
+```
+
+The switch is a gitignored `go.work`, never a `replace` in a `go.mod`: a
+`replace` is a tracked file, and one committed by accident points the whole
+project at a path on somebody's laptop. `mise run upstream:status` says which
+of the two you are currently building, because a fix that "works" against a
+stale module cache is worse than no fix at all.
+
+What is *not* a bug and must not be filed as one: a package returning its own
+`ErrUnsupported` on a platform it documents as unsupported. `nocapture` on
+macOS is the example — Apple removed the API, and refusing to set it is
+correct.
 
 ## Layout
 
 ```
-cmd/irgo-winvm/   CLI
-utmvm/            bundle generation, FAT images, UTM control, cleanup
-utmvm/assets/     embedded autounattend.xml and startup.nsh
-probe/            native capability probe (clipboard, power, mmap, …)
-glaze-probes/     glaze app:// origin and Events bridge proofs
+cmd/irgo-winvm/     CLI
+utmvm/              bundle generation, FAT images, UTM control, cleanup
+utmvm/assets/       embedded autounattend.xml and startup.nsh
+probe/              headless native capability probe — runs under the guest agent
+glaze-probes/       glaze app:// origin and Events bridge proofs
+examples/nativeall/ every native capability in one windowed program (`-gui`)
 ```
 
-See [RESULTS.md](RESULTS.md) for measured results per platform.
+## Where the big files go
+
+An ISO is 5 GB, a VM is 25 GB, and building an ISO needs room for a copy of one
+plus the result. A laptop cannot always host all of that, so none of it is
+hardcoded — every directory is overridable, and `irgo-winvm doctor` prints where
+each one currently resolves to:
+
+| variable | what | default |
+|---|---|---|
+| `IRGO_ROOT` | everything below defaults under this | the working directory |
+| `IRGO_CACHE_DIR` | ISOs and other large downloads | `<root>/.cache` |
+| `IRGO_BIN_DIR` | cross-compiled probe binaries | `<root>/.bin` |
+| `IRGO_WORK_DIR` | scratch for building images | `<root>/.work` |
+| `IRGO_VM_DIR` | UTM bundles | UTM's Documents folder |
+| `IRGO_UPSTREAM_DIR` | glaze and native clones | `~/workspace/go/src/github.com/crgimenes` |
+
+```sh
+IRGO_WORK_DIR=/Volumes/big/irgo-work irgo-winvm fetch-iso -o /Volumes/big/win11.iso
+```
+
+This is also a safety boundary. Writing an image refuses three things outright,
+because each is a different mistake and each costs a 4 GB re-download from a
+rate-limited source: a destination that is **immutable** (somebody protected it
+deliberately), one that is **hardlinked** (writing there empties every other
+name for the same file — usually including the media a VM boots from), and
+anything **inside a VM bundle** (UTM owns that layout).
+
+`irgo-winvm iso` shows every name the working ISO has, and `-protect` makes it
+immutable. Do that once; it is free and it is the difference between a slip and
+a re-download.
+
+`nativeall` has two modes, and the second is the one to reach for when you want
+to *see* any of this rather than read a table:
+
+```sh
+mise run example:try   # on the Mac
+mise run vm:try        # the same window, inside Windows
+```
+
+A tray icon you click, all four native file dialogs, a menu bar whose items
+report back, a Dock icon that changes colour, and a second copy of the program
+handing its arguments to the first. Default (no flags) is the unattended
+report, which is what the VM runs.
+
+Four Go modules, deliberately not one: glaze and native stay out of the CLI's
+dependency graph, which is what lets it cross-compile with nothing installed.
+`mise run check` walks all four; `mise tasks` lists the rest.
+
+See [RESULTS.md](RESULTS.md) for measured results per platform, and
+[UPSTREAM.md](UPSTREAM.md) for what this repo has found in glaze and native.
 
 ## Requirements
 

@@ -36,6 +36,7 @@ func usage() {
   start    Start a VM and wait until its guest agent answers
   boot     Start a VM and drive it past UTM's UEFI shell (needed every boot)
   status   Report a VM's state and IP
+  screenshot  Capture the VM's screen (works with no guest agent)
   exec     Run a command inside a VM
   probe    Run the bundled probes in a VM and print the report
   up       create + start + boot in one step, the usual entry point
@@ -66,6 +67,8 @@ func run(args []string) error {
 		return runUp(args[1:])
 	case "status":
 		return runStatus(args[1:])
+	case "screenshot":
+		return runScreenshot(args[1:])
 	case "exec":
 		return runExec(args[1:])
 	case "probe":
@@ -492,5 +495,30 @@ func runUp(args []string) error {
 	}
 	fmt.Printf("\nWindows Setup is running. It installs unattended from here.\n")
 	fmt.Printf("Watch with:  irgo-winvm status -vm %s\n", *name)
+	return nil
+}
+
+// runScreenshot captures the guest's display. This is the only way to see a VM
+// that has no guest agent yet — during install, in the UEFI shell, or any time
+// exec is unavailable.
+func runScreenshot(args []string) error {
+	fs := flag.NewFlagSet("screenshot", flag.ContinueOnError)
+	out := fs.String("o", "", "output PNG path (default: ./<vm>-<timestamp>.png)")
+	ref, err := vmRef(fs, args)
+	if err != nil {
+		return err
+	}
+	e, err := utmvm.Find(ref)
+	if err != nil {
+		return err
+	}
+	path := *out
+	if path == "" {
+		path = fmt.Sprintf("%s-%d.png", e.Name, time.Now().Unix())
+	}
+	if err := utmvm.Screenshot(e.Name, path); err != nil {
+		return err
+	}
+	fmt.Println(path)
 	return nil
 }

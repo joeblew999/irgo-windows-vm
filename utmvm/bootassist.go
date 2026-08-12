@@ -78,11 +78,16 @@ func BootAssistOn(vmRef string, target BootTarget, override string) error {
 	case BootInstalled:
 		paths = []string{`\efi\microsoft\boot\bootmgfw.efi`}
 	default:
-		// _noprompt first: it skips the keypress wait entirely. bootaa64.efi is
-		// the fallback for media that lacks it.
+		// bootaa64.efi, not cdboot_noprompt.efi.
+		//
+		// _noprompt looks like the better choice — it skips the "Press any key
+		// to boot from CD" wait — but invoked from the shell on this firmware it
+		// returns to the prompt immediately without booting and without an
+		// error. bootaa64.efi does boot, and the single Enter this script sends
+		// afterwards answers its prompt. Proven beats tidy.
 		paths = []string{
-			`\efi\microsoft\boot\cdboot_noprompt.efi`,
 			`\efi\boot\bootaa64.efi`,
+			`\efi\microsoft\boot\cdboot_noprompt.efi`,
 		}
 	}
 
@@ -109,7 +114,7 @@ func BootAssistOn(vmRef string, target BootTarget, override string) error {
 
 func typeBootCommand(vmRef, fsn, path string) error {
 	script := fmt.Sprintf(bootScript,
-		keystrokeDelay.Seconds(), vmRef, fsn, escapeAppleScript(path))
+		keystrokeDelay.Seconds(), vmRef, fsn, path)
 
 	cmd := exec.Command("osascript", "-e", script)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -118,11 +123,13 @@ func typeBootCommand(vmRef, fsn, path string) error {
 	return nil
 }
 
-// escapeAppleScript doubles backslashes, which matter here because every EFI
-// path is full of them.
-func escapeAppleScript(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`)
-}
+// NOTE: there is deliberately no escaping helper here.
+//
+// An earlier version doubled backslashes before handing the path to Sprintf's
+// %q. Go and AppleScript use the same backslash escape syntax, so %q alone is
+// already correct — doubling first produced \\efi\\microsoft\\... in the
+// guest and every Go-driven boot silently failed at the shell prompt, while
+// hand-written osascript worked. %q, once, is the whole answer.
 
 // OpenDisplay ensures the VM's display window exists.
 //

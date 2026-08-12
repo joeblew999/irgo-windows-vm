@@ -3,3 +3,7 @@
 *.dmg
 *.img
 /out/
+
+# Large downloaded media and generated payloads. fetch-iso will populate .cache/;
+# nothing here belongs in git.
+/.cache/

@@ -97,13 +97,22 @@ func copyIntoFS(fs filesystem.FileSystem, hostPath, target string) error {
 // generating one from a script. UTM downloads the ISO on first use; there is
 // no supported way to fetch it ourselves, so a missing file is reported rather
 // than worked around.
-func GuestToolsISO() (string, error) {
+// guestToolsPath is where UTM caches the guest tools, and therefore where a
+// download of our own has to land for UTM and every generated VM to find it.
+func guestToolsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data",
-		"Library", "Application Support", "GuestSupportTools", "utm-guest-tools-latest.iso")
+	return filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data",
+		"Library", "Application Support", "GuestSupportTools", "utm-guest-tools-latest.iso"), nil
+}
+
+func GuestToolsISO() (string, error) {
+	p, err := guestToolsPath()
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("UTM guest tools not downloaded yet: %w\n"+
 			"Open UTM once and let it fetch them, or the guest agent will be unavailable", err)

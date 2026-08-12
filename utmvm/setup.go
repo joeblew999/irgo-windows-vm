@@ -102,10 +102,16 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 
 	// 2. The guest tools. Skipped VMs boot fine and are then unreachable —
 	// no network, no exec, no IP — so this is checked before anything is built.
-	if gt, gErr := EnsureGuestTools(); gErr != nil {
-		return res, stage("guest tools", false, "", fmt.Errorf(
-			"%w\n     open UTM once and let it download them", gErr))
-	} else if err := stage("guest tools", true, filepath.Base(gt), nil); err != nil {
+	hadTools := true
+	if _, tErr := GuestToolsISO(); tErr != nil {
+		hadTools = false
+		say("  … downloading UTM guest tools (~120 MB)")
+	}
+	gt, gErr := EnsureGuestTools()
+	if gErr != nil {
+		return res, stage("guest tools", false, "", gErr)
+	}
+	if err := stage("guest tools", hadTools, filepath.Base(gt), nil); err != nil {
 		return res, err
 	}
 
@@ -173,7 +179,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		if rErr := vm.Resume(); rErr != nil {
 			return res, stage("resume", false, "", rErr)
 		}
-		if waitForAgent(vm, 2*time.Minute) {
+		if vm.WaitForAgentEvery(2*time.Minute, time.Second) == nil {
 			res.Ready = true
 			_ = stage("resume", false, "restored from suspend, agent answering", nil)
 			return res, nil
@@ -187,6 +193,13 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	}
 
 	// 7. The long one.
+	//
+	// RunInstall, not EnsureReady. They are not interchangeable and using the
+	// wrong one is a silent failure: EnsureReady RECOVERS a VM that has Windows
+	// on it already, while an install has TWO boot phases — Setup copies files,
+	// reboots, and lands back in the UEFI shell needing a different boot, off
+	// the ESP this time. EnsureReady does not know about the second phase, so a
+	// fresh VM would sit at a shell prompt until the timeout.
 	say("  … installing Windows unattended; this takes about 45 minutes")
 	e, fErr := Find(opts.VMName)
 	if fErr != nil {
@@ -196,27 +209,32 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	if dErr != nil {
 		return res, stage("install Windows", false, "", dErr)
 	}
-	if iErr := EnsureReady(e.UUID, filepath.Join(dir, e.Name+".utm"), opts.Timeout); iErr != nil {
+	bundle := filepath.Join(dir, e.Name+".utm")
+
+	// An installed VM that is merely off needs recovering, not reinstalling —
+	// and reinstalling would destroy it. The boot entry Setup registers is what
+	// distinguishes the two.
+	if Inspect(e.UUID, bundle).BootEntryWritten {
+		say("  … Windows is installed; booting it")
+		if rErr := EnsureReady(e.UUID, bundle, opts.Timeout); rErr != nil {
+			return res, stage("boot Windows", false, "", rErr)
+		}
+		res.Ready = true
+		_ = stage("boot Windows", false, "booted, agent answering", nil)
+		return res, nil
+	}
+
+	if iErr := RunInstall(InstallOptions{
+		VMRef:      e.UUID,
+		BundlePath: bundle,
+		Timeout:    opts.Timeout,
+		Log:        os.Stdout,
+	}); iErr != nil {
 		return res, stage("install Windows", false, "", iErr)
 	}
 	res.Ready = true
 	_ = stage("install Windows", false, "installed and answering", nil)
 	return res, nil
-}
-
-// waitForAgent polls until the guest agent answers, or gives up.
-//
-// Polling rather than a fixed sleep because the two cases differ by an order of
-// magnitude: a resumed VM answers in seconds, a cold-booted one takes minutes.
-func waitForAgent(vm VM, limit time.Duration) bool {
-	deadline := time.Now().Add(limit)
-	for time.Now().Before(deadline) {
-		if vm.AgentReady() {
-			return true
-		}
-		time.Sleep(3 * time.Second)
-	}
-	return false
 }
 
 // ensureMedia finds usable Windows media, or makes some.

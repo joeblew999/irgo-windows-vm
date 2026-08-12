@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -70,12 +71,12 @@ func DetectUTM() (Install, error) {
 	return in, nil
 }
 
-// EnsureUTM returns the installed UTM, installing it via Homebrew if missing.
+// EnsureUTM returns the installed UTM, installing it if missing.
 //
-// Follows the same shape as irgo's ensureOSPackage: a developer should not have
-// to read a prerequisites list before the tool works. Homebrew is the only
-// route attempted — UTM's other distribution is a notarised DMG that cannot be
-// installed unattended.
+// A developer should not have to read a prerequisites list before the tool
+// works. Homebrew is used when present; otherwise UTM's signed .dmg is
+// downloaded from its GitHub release and the app copied out, so nothing has to
+// be installed first.
 func EnsureUTM() (Install, error) {
 	in, err := DetectUTM()
 	if err == nil {
@@ -85,37 +86,92 @@ func EnsureUTM() (Install, error) {
 		return in, err
 	}
 
-	brew, lookErr := exec.LookPath("brew")
-	if lookErr != nil {
-		return in, fmt.Errorf("%w, and Homebrew is not available to install it.\n"+
-			"Install UTM from https://mac.getutm.app or `brew install --cask utm`", ErrUTMNotInstalled)
+	// Download it ourselves rather than requiring Homebrew.
+	//
+	// "Install Homebrew, then install UTM" is two prerequisites for a tool
+	// whose whole claim is that a single binary sets the machine up. UTM
+	// publishes a signed .dmg on its GitHub releases, so there is nothing to
+	// require: fetch it, mount it, copy the app out.
+	//
+	// Homebrew is still used when it is present, because a developer who
+	// manages their applications with it will want UTM in that inventory rather
+	// than dropped into /Applications behind its back.
+	if brew, lookErr := exec.LookPath("brew"); lookErr == nil {
+		fmt.Fprintln(os.Stderr, "UTM not found — installing with Homebrew...")
+		cmd := exec.Command(brew, "install", "--cask", "utm")
+		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		if runErr := cmd.Run(); runErr == nil {
+			return DetectUTM()
+		}
+		fmt.Fprintln(os.Stderr, "Homebrew could not install it; downloading the .dmg instead...")
 	}
 
-	fmt.Fprintln(os.Stderr, "UTM not found — installing with Homebrew (this takes a minute)...")
-	cmd := exec.Command(brew, "install", "--cask", "utm")
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	if runErr := cmd.Run(); runErr != nil {
-		return in, fmt.Errorf("installing UTM: %w", runErr)
+	if dlErr := InstallUTMFromRelease(nil); dlErr != nil {
+		return in, dlErr
 	}
 	return DetectUTM()
 }
 
-// EnsureGuestTools returns the guest tools ISO path, explaining how to get it
-// when absent.
+// GuestToolsURL is where UTM itself downloads the guest tools from.
 //
-// UTM downloads this itself on first use and exposes no supported way to fetch
-// it, so this cannot be auto-installed the way the app can. Without it the VM
-// still boots, but the QEMU guest agent is never installed and utmctl exec and
-// ip-address stay unavailable — so the failure is worth naming clearly rather
-// than letting the VM come up mysteriously undriveable.
+// Taken from the string table of UTM.app's own binary rather than guessed, so
+// it is the URL the application uses and not one that merely happens to work
+// today.
+//
+// Fetching it ourselves is what makes a one-command setup possible at all. The
+// alternative — and what this used to say — was to tell the developer to open
+// UTM, create a throwaway VM and pick "Install Windows guest tools" from a
+// menu. That is not a step a setup command can take, it is not discoverable,
+// and skipping it produces a VM that boots perfectly and is then unreachable:
+// no network, no `utmctl exec`, no IP, and nothing saying why.
+const GuestToolsURL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
+
+// EnsureGuestTools returns the guest tools ISO, downloading it if UTM has not
+// already cached one.
+//
+// It writes to UTM's own cache location, so UTM and every VM generated
+// afterwards pick it up exactly as if the GUI had fetched it.
 func EnsureGuestTools() (string, error) {
 	p, err := GuestToolsISO()
 	if err == nil {
 		return p, nil
 	}
-	return "", fmt.Errorf("%w\n\nTo fetch them: open UTM, create any VM, and choose "+
-		"\"Install Windows guest tools\" from the VM menu once. UTM caches the ISO "+
-		"and every VM generated afterwards will pick it up automatically", err)
+	return FetchGuestTools(nil)
+}
+
+// FetchGuestTools downloads the guest tools into UTM's cache and returns the
+// path. progress, if non-nil, is called as bytes arrive.
+func FetchGuestTools(progress func(done, total int64)) (string, error) {
+	dest, err := guestToolsPath()
+	if err != nil {
+		return "", err
+	}
+	if _, sErr := os.Stat(dest); sErr == nil {
+		return dest, nil
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(dest), 0o755); mkErr != nil {
+		return "", mkErr
+	}
+
+	// No SHA to check against: UTM publishes none, and the file it serves
+	// changes with every guest-tools release. The size check below is the only
+	// guard available — a truncated download here presents later as a VM with
+	// no network, which is a long way from the cause.
+	if dErr := Download(GuestToolsURL, dest, "", progress); dErr != nil {
+		return "", fmt.Errorf("downloading UTM guest tools: %w\n"+
+			"  Alternatively, open UTM once and choose \"Install Windows guest tools\" "+
+			"from any VM's menu; it caches the ISO in the same place", dErr)
+	}
+	fi, sErr := os.Stat(dest)
+	if sErr != nil {
+		return "", sErr
+	}
+	if fi.Size() < 10<<20 {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("guest tools download was only %s, which is too small to be the ISO",
+			HumanBytes(fi.Size()))
+	}
+	return dest, nil
 }
 
 // sameMajor compares leading version components. A patch or minor difference

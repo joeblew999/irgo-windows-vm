@@ -20,10 +20,8 @@ type SpaceCheck struct {
 }
 
 func (s SpaceCheck) String() string {
-	return fmt.Sprintf("%.1f GB free, ~%.1f GB needed", gb(s.FreeBytes), gb(s.RequiredBytes))
+	return fmt.Sprintf("%s free, ~%s needed", HumanBytes(s.FreeBytes), HumanBytes(s.RequiredBytes))
 }
-
-func gb(b int64) float64 { return float64(b) / (1 << 30) }
 
 // CheckSpace verifies there is room before a VM is created.
 //

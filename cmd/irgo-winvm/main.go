@@ -208,7 +208,7 @@ func runVerify(args []string) error {
 	} else {
 		fmt.Println("  autoboot     : cdboot_noprompt.efi MISSING — Setup will wait at \"Press any key\"")
 	}
-	fmt.Printf("  size         : %.1f GB\n", float64(info.SizeBytes)/(1<<30))
+	fmt.Printf("  size         : %s\n", utmvm.HumanBytes(info.SizeBytes))
 
 	if *want != "" {
 		// Edition names live inside install.wim behind WIM compression; this
@@ -531,16 +531,14 @@ func runResume(args []string) error {
 	if rErr := vm.Resume(); rErr != nil {
 		return rErr
 	}
-	deadline := time.Now().Add(*wait)
-	for time.Now().Before(deadline) {
-		if vm.AgentReady() {
-			fmt.Printf("%s resumed in %s — no firmware, no keystrokes\n",
-				e.Name, time.Since(start).Round(time.Millisecond*100))
-			return nil
-		}
-		time.Sleep(time.Second)
+	// 100ms: a resume is back in about 400ms, and this is the number the
+	// command reports, so the poll interval is the measurement's resolution.
+	if wErr := vm.WaitForAgentEvery(*wait, 100*time.Millisecond); wErr != nil {
+		fmt.Printf("%s resumed, but the agent has not answered within %s\n", e.Name, *wait)
+		return nil
 	}
-	fmt.Printf("%s resumed, but the agent has not answered within %s\n", e.Name, *wait)
+	fmt.Printf("%s resumed in %s — no firmware, no keystrokes\n",
+		e.Name, time.Since(start).Round(time.Millisecond*100))
 	return nil
 }
 
@@ -882,15 +880,15 @@ func runDelete(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("would remove %s (%.1f GB reclaimed, running=%v)\n",
-			r.Path, float64(r.TotalBytes)/(1<<30), r.Running)
+		fmt.Printf("would remove %s (%s reclaimed, running=%v)\n",
+			r.Path, utmvm.HumanBytes(r.TotalBytes), r.Running)
 		return nil
 	}
 	r, err := utmvm.Delete(ref, *force)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("removed %s — %.1f GB reclaimed\n", r.Path, float64(r.TotalBytes)/(1<<30))
+	fmt.Printf("removed %s — %s reclaimed\n", r.Path, utmvm.HumanBytes(r.TotalBytes))
 	return nil
 }
 

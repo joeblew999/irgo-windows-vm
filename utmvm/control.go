@@ -188,12 +188,22 @@ func (v VM) AgentReady() bool {
 // "started" the instant QEMU launches, long before Windows has booted — so
 // polling status tells you nothing about whether you can do anything with it.
 func (v VM) WaitForAgent(timeout time.Duration) error {
+	return v.WaitForAgentEvery(timeout, 10*time.Second)
+}
+
+// WaitForAgentEvery is WaitForAgent with the poll interval exposed.
+//
+// The interval matters more than it looks, because the two things worth waiting
+// for differ by two orders of magnitude: a cold boot takes about a minute, so
+// polling every ten seconds costs nothing, while a resume is back in ~400 ms
+// and a ten-second poll would report it as four hundred times slower than it is.
+func (v VM) WaitForAgentEvery(timeout, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if v.AgentReady() {
 			return nil
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(interval)
 	}
 	return fmt.Errorf("guest agent did not respond within %s — "+
 		"if the VM was created without guest tools it never will", timeout)

@@ -2,11 +2,14 @@
 
 ## Context
 
-An irgo developer on an Apple Silicon Mac should be able to build their Windows
-desktop app and actually run it — in Windows, on their own machine, in seconds.
-Today they cannot. irgo cross-compiles `build/desktop/windows/<app>.exe` via
-mingw-w64 and that binary has never been executed anywhere except a customer's
-machine.
+A developer on an Apple Silicon Mac should be able to build a Windows desktop
+app and actually run it — in Windows, on their own machine, in seconds. Today
+nobody can: Windows binaries get cross-compiled here and are never executed
+anywhere except a customer's machine.
+
+The proving ground is **glaze**, standalone, with no irgo involvement. glaze is
+the more demanding case anyway — it drives WebView2 through an undocumented
+export and hand-written ARM64 ABI code, neither of which has ever run.
 
 `irgo-windows-vm` was built to close this and gets most of the way: a Go CLI
 generates a UTM bundle, and a Windows 11 ARM64 install completes unattended to a
@@ -19,8 +22,8 @@ may touch the GUI; everything after must be quick and scripted.
 ## The inner loop we are building toward
 
 ```
-irgo app build desktop windows      # existing
-irgo-winvm run -vm dev <app>.exe    # new: push, execute, stream output back
+GOOS=windows GOARCH=arm64 go build -o app.exe ./cmd/app   # cgo-free, no toolchain
+irgo-winvm run -vm dev app.exe                            # new: push, run, stream back
 ```
 
 Two capabilities make this achievable without any GUI:
@@ -92,28 +95,35 @@ are unreachable, the `targets` subcommand's entire premise is undeliverable, and
 - **Doc-vs-code**: `payload.go` says probes land in `\probe`; the code puts them
   at the root.
 
-## Architecture decision (user deferred to me)
+## Scope: glaze standalone, irgo later
 
-Exploration settled this, and not as I first assumed.
+**No irgo integration until this works end to end outside irgo, with glaze.**
+That is a deliberate gate, not a sequencing accident: integrating first would
+couple a tool that does not yet work to a framework that would then have to
+absorb its failures.
 
-**irgo cannot produce a windows/arm64 build at all.** `buildDesktopWindows`
-(`irgo/cmd/irgo/app_desktop_build.go:235`) hardcodes `GOARCH=amd64` and
-`CC=x86_64-w64-mingw32-gcc`; `app_icons.go:124` says outright "we always target
-windows/amd64". There is no `aarch64-w64-mingw32` anywhere.
+This simplifies the architecture question, because the constraint that forced
+emulation was irgo's, not ours:
 
-So:
+- irgo hardcodes `GOARCH=amd64` and `CC=x86_64-w64-mingw32-gcc`
+  (`irgo/cmd/irgo/app_desktop_build.go:235`); `app_icons.go:124` says "we always
+  target windows/amd64". Its **cgo dependency on webview_go via mingw is exactly
+  what pins it to amd64.**
+- **glaze is cgo-free.** A glaze app cross-compiles to windows/arm64 with
+  nothing but `GOOS`/`GOARCH` — no toolchain, no mingw, no `CC`.
 
-- **The developer's app is tested as amd64 under Windows' x64 emulation** — the
-  only artifact irgo produces. The tool runs whatever irgo built rather than
-  imposing an arch.
-- **The glaze probes are tested as arm64 native**, because that is where the
-  unique risk is: `putbounds_arm64.go` hand-writes AAPCS64 register passing and
-  glaze's CI runs x64, so that code executes nowhere today.
+So the primary target is **windows/arm64, native**. That is both the cheaper
+path and the more valuable one: `putbounds_arm64.go` hand-writes AAPCS64
+register passing, glaze's CI runs `windows-latest` (x64), and so **that code
+executes nowhere on earth today**. An ARM64 VM is the only place it can run.
 
-Worth surfacing: **glaze is cgo-free, so a glaze-based app cross-compiles to
-windows/arm64 with nothing but `GOOS`/`GOARCH`.** The mingw dependency is exactly
-what pins irgo to amd64. Real x64 fidelity should come from a `windows-latest`
-CI runner, which generated projects already use.
+`amd64` stays available as a second build for deliberately probing emulation
+behaviour, but it is not the point. Real x64 fidelity belongs on a
+`windows-latest` CI runner, which is free and runs on actual x64 hardware.
+
+When this does eventually reach irgo, the finding above is the headline:
+adopting glaze would remove the mingw toolchain requirement *and* unlock native
+ARM64 Windows builds in one move.
 
 ## Plan
 
@@ -168,16 +178,21 @@ output on the Mac, with no GUI interaction.
     either restore the `bootaa64.efi` fallback or drop the unreachable branch.
 15. Fix the `\probe` doc-vs-root mismatch.
 
-### Phase 5 — irgo integration (separate decision)
+### Phase 5 — irgo integration: NOT NOW
 
-16. `irgo`'s `verify` task never builds a desktop target at all —
-    `app build all` is iOS+Android only (`cmd_app_build.go:65`). Adding
-    `app build desktop windows` to `mise.toml`'s `verify` is a one-line fix
-    worth doing regardless of the VM.
-17. Optionally add `app verify windows`, mirroring the existing
-    `verifyAndroidArtifact` precedent (`cmd/irgo/app_android_verify.go`).
+Explicitly gated. Nothing in irgo changes until a glaze app builds on the Mac,
+runs in the VM, and reports back — repeatably, from one command.
 
-Keeping the tool in its own repo for now, per the earlier decision.
+Recorded so it is not rediscovered later:
+
+- `irgo`'s `verify` never builds a desktop target at all; `app build all` is
+  iOS+Android only (`cmd_app_build.go:65`), so the mingw path it documents is
+  never exercised.
+- The precedent for artifact checking is `verifyAndroidArtifact`
+  (`cmd/irgo/app_android_verify.go`); there is no Windows equivalent.
+- `desktopTargets` (`cmd/irgo/cmd_project_ci_data.go:42`) is the single source
+  of truth for generated projects' CI, and has no arch field — that is where
+  windows/arm64 would be added.
 
 ## Files
 
@@ -201,7 +216,6 @@ test style in `utmvm/config_test.go`.
   `HostCoverage`, and an arity test for the `Sprintf` templates in
   `boot.applescript` and `config.plist.tmpl` — a template edit silently ships
   `%!q(MISSING)` today.
-- **End to end**, which is the only proof that counts:
-  `irgo app build desktop windows` in a scaffolded project, then
-  `irgo-winvm run -vm dev build/desktop/windows/<app>.exe`, and see the app's
-  output on the Mac.
+- **End to end**, which is the only proof that counts: cross-compile a glaze app
+  for windows/arm64 with plain `GOOS`/`GOARCH`, `irgo-winvm run -vm dev app.exe`,
+  and see its output on the Mac. No irgo, no mingw, no GUI.

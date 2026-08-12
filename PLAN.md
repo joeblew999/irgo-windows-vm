@@ -76,6 +76,28 @@ with no build tags anywhere. So `HostCoverage()`'s windows and linux branches
 are unreachable, the `targets` subcommand's entire premise is undeliverable, and
 `README.md:29`'s `go install …@latest` is false off a Mac.
 
+### The probes test the easy half, and overstate it
+
+Of `crgimenes/native`'s eight packages, `probe/main.go` genuinely exercises
+**four**: `clipboard` (write/read round trip, restoring the user's clipboard),
+`power.PreventSleep`, `singleinstance.Acquire`, `mmap.Map`. `openurl` is
+imported but only checked for symbol presence, never called.
+
+**`tray`, `filedialog` and `nocapture` are not imported at all** — the "SKIPPED"
+rows the report prints for them are hardcoded string literals. They read as
+capability checks and are nothing of the kind. That is worse than omitting them,
+because the output implies they were considered.
+
+**glaze's own native surface is untested on every platform**: the file dialogs
+(`OpenFile`/`SaveFile`/`OpenDirectory` — the one piece with full macOS, Windows
+*and* Linux coverage), `menu.Set`, and `SetAppIcon`.
+
+The gap is not random. The tested set is the half with no UI and no side
+effects; the untested set — **tray, menu, file dialogs, notifications** — is
+precisely what a desktop app needs. "Hard to test headlessly" is a fair reason
+to defer them, but it is not the same as tested, and the report should not read
+as though it were.
+
 ### Correctness and safety
 
 - **`Prune` deletes every `*.img`/`*.dmg` in `os.TempDir()`** regardless of
@@ -154,16 +176,29 @@ Nothing else is worth building until this works.
    VM answers in seconds.
 8. Fix `exec` argument splitting — take `[]string` args after `--` rather than
    `strings.Fields`.
+9. **Make the native report honest**: drop every row for a package that is not
+   imported. A hardcoded "SKIPPED" for `tray`/`filedialog`/`nocapture` claims a
+   check that does not exist. Either link the package and probe it, or say
+   nothing.
+10. **Add `probe/gui`** — a second probe that takes glaze's run loop and drives
+    the capabilities a headless binary cannot: raise a tray icon and remove it,
+    install a menu via `menu.Set`, open a file dialog and cancel it
+    programmatically, call `SetAppIcon`, then exit non-interactively with a
+    status line per capability. These are the ones a desktop app actually
+    depends on, and the ones most likely to differ on Windows.
 
 **Exit criterion:** `irgo-winvm run -vm dev ./hello.exe` prints the program's
 output on the Mac, with no GUI interaction.
 
 ### Phase 3 — Close the actual goal
 
-9. Run the glaze probes in the VM and record real results in `RESULTS.md`:
-   the `app://` origin capabilities, the Events bridge, and the native
-   capability matrix — the Windows column that has been empty since the start.
-10. Compare against the measured macOS column and note every divergence.
+11. Run all four probes in the VM and record real results in `RESULTS.md`: the
+    `app://` origin capabilities, the Events bridge, the headless native matrix,
+    and the new GUI probe — the Windows column that has been empty from the
+    start.
+12. Re-run the same four on macOS so both columns come from the same build of
+    the same code, then note every divergence. A pass on one platform is not
+    evidence about the other.
 
 ### Phase 4 — Make the claims true
 

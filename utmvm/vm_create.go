@@ -20,6 +20,7 @@ package utmvm
 
 import (
 	"crypto/rand"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -1209,3 +1210,55 @@ func ejectInstallMedia(bundlePath string) (bool, error) {
 	// would be iso-delete's business, not this.
 	return true, nil
 }
+
+// ---- the assets vm-create renders, in the file that renders them ----
+//
+// An embed belongs beside its only consumer. These were split across app.go and
+// vm.go while every user of them is here, so "where does the answer file come
+// from" needed two files to answer.
+
+// The answer file and boot script are embedded so the binary is self-contained:
+// a developer clones, builds, runs. Shipping them as loose files next to the
+// executable is how tools break when moved.
+var (
+	//go:embed assets/autounattend.xml
+	autounattendXML []byte
+
+	//go:embed assets/startup.nsh
+	startupNSH []byte
+
+	// The probe runner ships with the tool rather than being supplied by the
+	// caller. It was previously expected to appear in the -probes directory,
+	// which meant `probe` could never work as shipped: nothing generated it.
+	//go:embed assets/run-all.cmd
+	runAllCmd []byte
+)
+
+// Package utmvm generates UTM virtual machine bundles without the UTM GUI.
+//
+// A .utm is a directory holding config.plist plus a Data/ subdirectory. UTM
+// discovers bundles in its Documents folder at launch, so writing one there is
+// equivalent to clicking through the wizard — but repeatable, diffable and
+// runnable from CI.
+//
+// The plist is emitted as plain XML rather than through a plist library: the
+// document is a fixed shape, and the schema is version-specific enough that
+// being able to read the exact bytes we produce is worth more than the
+// abstraction. Every field below was verified against UTM's own Swift source
+// at the v4.7.5 tag, not main — main was two majors ahead and disagreed.
+// The plist templates live in assets/ as real files rather than inline Go
+// strings. They are XML that gets compared against UTM's own output when
+// something breaks, and diffing a file beats diffing a quoted constant.
+var (
+	//go:embed assets/config.plist.tmpl
+	plistTemplate string
+
+	//go:embed assets/drive.plist.tmpl
+	driveTemplate string
+)
+
+// The AppleScript lives in assets/ so it can be read and tested as a script,
+// not unpicked from a Go string literal full of escaped quotes.
+//
+//go:embed assets/boot.applescript
+var bootScript string

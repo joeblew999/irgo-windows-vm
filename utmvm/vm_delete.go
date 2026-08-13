@@ -1,7 +1,6 @@
 package utmvm
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"

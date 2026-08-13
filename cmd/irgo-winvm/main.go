@@ -306,7 +306,12 @@ func runAppCreate(args []string) error {
 		Timeout: *timeout,
 	})
 	if res.Stdout != "" {
-		fmt.Println(res.Stdout)
+		// Through the printer: what the guest printed is the result of the
+		// whole three-stage chain, and a log that records every step except
+		// the answer is missing the part somebody comes back for.
+		for _, line := range strings.Split(strings.TrimRight(res.Stdout, "\n"), "\n") {
+			say("%s", line)
+		}
 	}
 	if err != nil {
 		return err

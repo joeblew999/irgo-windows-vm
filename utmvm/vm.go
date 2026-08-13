@@ -3,7 +3,6 @@ package utmvm
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
 	"net"
 	"os"
@@ -41,6 +40,15 @@ const (
 	// finished installing.
 	utmctlTimeout = 20 * time.Second
 
+	// agentProbeCmd is the cheapest thing that proves the guest can execute.
+	// Its output is checked, because utmctl exec exits 0 either way.
+	agentProbeToken = "irgo-agent-ok"
+	agentProbeCmd   = "cmd.exe /c echo " + agentProbeToken
+
+	// agentProbeTimeout is short: this is asked in a loop, and a guest that
+	// cannot answer in a few seconds is not answering.
+	agentProbeTimeout = 10 * time.Second
+
 	// What goes inside a bundle we generate.
 	bundleExt   = ".utm"
 	bundleData  = "Data"
@@ -63,29 +71,6 @@ func DefaultVMDir() (string, error) {
 	}
 	return filepath.Join(utmContainerDir(home), utmDocuments), nil
 }
-
-// Package utmvm generates UTM virtual machine bundles without the UTM GUI.
-//
-// A .utm is a directory holding config.plist plus a Data/ subdirectory. UTM
-// discovers bundles in its Documents folder at launch, so writing one there is
-// equivalent to clicking through the wizard — but repeatable, diffable and
-// runnable from CI.
-//
-// The plist is emitted as plain XML rather than through a plist library: the
-// document is a fixed shape, and the schema is version-specific enough that
-// being able to read the exact bytes we produce is worth more than the
-// abstraction. Every field below was verified against UTM's own Swift source
-// at the v4.7.5 tag, not main — main was two majors ahead and disagreed.
-// The plist templates live in assets/ as real files rather than inline Go
-// strings. They are XML that gets compared against UTM's own output when
-// something breaks, and diffing a file beats diffing a quoted constant.
-var (
-	//go:embed assets/config.plist.tmpl
-	plistTemplate string
-
-	//go:embed assets/drive.plist.tmpl
-	driveTemplate string
-)
 
 // utmctl is UTM's CLI, shipped inside the app bundle and not on PATH.
 func utmctlPath() string { return filepath.Join(AppPath, utmBinDir, "utmctl") }
@@ -237,8 +222,24 @@ func (v VM) Exec(cmdline ...string) (string, error) {
 
 // AgentReady reports whether the guest agent is answering.
 func (v VM) AgentReady() bool {
-	_, err := v.IPAddress()
-	return err == nil
+	// Tests what callers actually need: the ability to RUN something.
+	//
+	// This used to ask for an IP address, and the two come up at different
+	// times. Measured minutes apart on one VM: ip-address answered while exec
+	// failed, and earlier exec worked while ip-address failed. So vm-create
+	// said "ready" for a guest app-create could not use, and waited on one it
+	// could — the same wrong answer in both directions.
+	//
+	// A network address is not the point. Nothing here needs the guest's IP;
+	// everything here needs to push a file and run it.
+	out, err := v.runFor(agentProbeTimeout, "exec", "--cmd", agentProbeCmd)
+	if err != nil {
+		return false
+	}
+	// utmctl exec exits 0 whatever happens in the guest, so the output is the
+	// only evidence. A working agent echoes the token back; a broken one
+	// returns its own complaint.
+	return strings.Contains(out, agentProbeToken)
 }
 
 // waitForAgent blocks until the guest agent answers or the timeout elapses.
@@ -369,12 +370,6 @@ func (p Progress) String() string {
 //     once it starts, activating whatever control has focus. That silently
 //     wrecked an install that had already partitioned the disk.
 const keystrokeDelay = 90 * time.Millisecond
-
-// The AppleScript lives in assets/ so it can be read and tested as a script,
-// not unpicked from a Go string literal full of escaped quotes.
-//
-//go:embed assets/boot.applescript
-var bootScript string
 
 // NOTE: there is deliberately no escaping helper here.
 //

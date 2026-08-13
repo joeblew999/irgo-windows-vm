@@ -2,7 +2,6 @@ package utmvm
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -192,20 +191,3 @@ func quoteForCmd(argv []string) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-// The answer file and boot script are embedded so the binary is self-contained:
-// a developer clones, builds, runs. Shipping them as loose files next to the
-// executable is how tools break when moved.
-var (
-	//go:embed assets/autounattend.xml
-	autounattendXML []byte
-
-	//go:embed assets/startup.nsh
-	startupNSH []byte
-
-	// The probe runner ships with the tool rather than being supplied by the
-	// caller. It was previously expected to appear in the -probes directory,
-	// which meant `probe` could never work as shipped: nothing generated it.
-	//go:embed assets/run-all.cmd
-	runAllCmd []byte
-)

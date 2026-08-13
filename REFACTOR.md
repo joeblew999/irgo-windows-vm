@@ -45,7 +45,7 @@ functions gaining side effects, and nothing objected when they did.
 
 ### The fix: separate the query from the action
 
-Every capability exposes exactly two entry points:
+Every capability exposes exactly three entry points:
 
 ```go
 Check()  (State,   error)   // pure. No installs, no downloads, no writes.
@@ -78,6 +78,46 @@ normal case.
 
 Everything below is a consequence of this: the idempotency contract, the thin
 `setup`, the single `VMState`, the primitives kept as a recovery toolkit.
+
+### Two verbs on top, the chain underneath
+
+What a developer actually wants is what an iOS developer wants from a simulator:
+**give me a machine, run my binary on it.** Nobody "sets up" a simulator. So the
+surface is two verbs, and `setup` is not a concept a developer ever meets — it
+*is* the first verb, named for what it does.
+
+```
+vm    →  EnsureHost → EnsureMedia → EnsureBundle → EnsureInstalled → EnsureRunning → EnsureAgent
+run   →  Ensure(vm ready)  then execute
+```
+
+The chain is **implicit to the developer and explicit in the code**. That is the
+whole design:
+
+- **Every node is also a primitive command.** That is what makes the chain
+  addressable, and it is why primitives are never trimmed for being low-level.
+- **`vm` is idempotent; `run` is not.** Already-ready is success. Running a
+  binary twice runs it twice — correct, and not to be "fixed" into caching.
+- **`doctor` is the sum of every `Check`. `nuke` is the sum of every `Clean`.**
+  Neither is a command to maintain separately; both fall out of the chain.
+
+**The AI and the developer call the same two verbs.** This matters more than it
+looks. When a stage fails the AI drops to that node, `Clean`s it, fixes the
+code, re-runs *that node* — and then goes back to typing `vm` and `run`, exactly
+as a developer would, until the next failure. So the developer-facing command
+*is* the integration test, and a stage is not done until the thing a developer
+types works.
+
+That also means the verification harness is not separate apparatus. It is these
+two verbs plus assertions on their output — which is why the harness needs
+`-json` on the same commands rather than commands of its own. Same verbs,
+machine-readable results.
+
+**`nuke` is load-bearing, not a convenience.** It is the only way back to
+nothing, and "a developer on a fresh machine" cannot be tested without it. It is
+also the fallback when `Clean` is incomplete, which during a refactor it will
+be. Note it **cannot work today**: the immutable-hardlink defect makes bundle
+removal fail with `EPERM`, so `nuke` depends on the phase 7 `Delete` fix.
 
 ## The second pattern: "cannot tell" silently means "allow"
 
@@ -243,7 +283,7 @@ to own that and does not.
 | guest temp-file naming | **2 schemes** | `run.go` builds them, `cleanup.go:121` lists them for `Prune` |
 | `win11-arm64.iso` | 5 | `paths.go:83`, `external.go:90,99`, `setup.go:257` |
 | default VM name `irgo-win11` | 3 | `setup.go:87`, `mise.toml`, `external.go:99` |
-| timeouts | **8 literals** | `10m×3, 45m×2, 2m×2, 60m, 15m, 5m, 10s` — no policy |
+| timeouts | **19 in `utmvm`, 29 with `cmd/`** | `10m×3, 45m×2, 2m×2, 60m, 15m, 5m, 10s` — no policy |
 
 The first is a live bug: add a guest-file prefix and `Prune` silently stops
 cleaning it.
@@ -721,18 +761,28 @@ the fix, and it is the checklist a phase closes against:
 | `CheckWritable` stat-error = writable; `isoguard` `Protected` on failure | 2 |
 | four progress mechanisms; `utmvm` writing to stdout; five byte formatters | 3 |
 | six retry loops; `Ensure` meaning five things; no `context`; one sentinel error | 4 |
+| **no timeout policy** — 19 duration literals in `utmvm`, 29 with `cmd/`, none carrying its reason | 4 |
 | `doctor` installs UTM; unverified `.dmg`, no `codesign`/`spctl`; guest-tools ISO unchecked | 5 |
-| download length/fsync/rename-clobber; `mkisofs` `-b`; `ExpandESD` appending; `iso` scanning `.` | 6 |
+| download length/fsync/rename-clobber; `mkisofs` `-b`; `iso` scanning `.` | 6 |
+| **`ExpandESD` appends** rather than replacing — re-running against a populated dir duplicates WIM images instead of failing | 6 |
+| **`BuildISO` verifies nothing it produced** — stats the output and prints its size; no readback, no mount, no El Torito check | 6 |
+| **`verified sha1 %s` printed unconditionally** — an empty hash prints "verified sha1 " having verified nothing | 6 |
+| **six files know where the Windows media lives**; `Paths` exists to own that and does not | 6 |
 | `ProtectISO` defeating its own hardlink; unprotect-before-delete | 6 + 7 |
-| `Delete` by display name not UUID; proceeding after a failed stop; `randomMAC` | 7 |
+| `Delete` by display name not UUID; proceeding after a failed stop | 7 |
+| **`randomMAC` discards `rand.Read`'s error** — every VM then gets `52:54:00:00:00:00`, an L2 collision on the shared network | 7 |
+| **`CanCreateVMs()` is bypassed** — `bundle.go:15` compares `runtime.GOOS` directly, against its own comment | 7 |
 | **`utmctl delete` exits 0 on failure**; a phantom entry is unrecoverable through `utmctl` | 7 |
 | **all six `Prune` defects**, including the `"irgo-"` catch-all and mis-counted `freed` | 7 |
 | `BundlePath(name)`; bundle layout concatenated in the CLI four times | 7 |
-| `RestartUTM` quitting with VMs running; `WaitForAgentEvery` never probing | 8 |
+| `RestartUTM` quitting with VMs running | 8 |
+| **`WaitForAgentEvery` never probes when `timeout <= 0`** — the deadline is already past on entry, so it returns "did not respond" without one `AgentReady()` call | 8 |
+| the five CLI defects — unreachable branch `main.go:331`, phantom `-o` default `:391`, `-replace` swallowing its error `:964`, stale `runISO` comment `:702`, garbled string `:935` | owning capability, as each command moves |
 | `BootAssistWatched`'s dead `diskPath`; `nil` after five failures; no `AgentReady` gate | 9 |
 | **`BootEntryWritten`** — the heuristic `setup` uses to choose recover vs reinstall | 9 |
 | the keypress / loader / FAT contradictions, settled by experiment | 9 |
 | **guest command injection** (`run.go:269`); `schtasks` failure invisible; guest litter | 10 |
+| **`RunInGuest` reports success when the output pull fails** — `ExitCode: 0`, `err == nil`, so a suite that ran nothing looks like a suite that passed. The harness runs through this path | 10 |
 | `setup` as a parallel implementation; `chflags` on a user-supplied `-iso` | 11 |
 | `ProbeDir` → `StageDir`; glaze/native/crgimenes out of `utmvm`; `module nativeprobe`; two Go versions | 12 |
 | twelve dead symbols; 134-symbol exported surface | 13 |
@@ -765,8 +815,12 @@ machine-readable mode, not new logic.
 plus a working VM the user cares about is the one combination that must not be
 governed by a sentence in a document:
 
-- Refuse to *mutate* any VM whose name does not match the disposable test
-  pattern. `irgo-win11` is unreachable by construction, not by discipline —
+- **The disposable pattern is `irgo-test-*`.** Named here because the interlock
+  is unimplementable without it, and because `-vm ""` is not a safe default:
+  `setup.go:87` turns an empty name into **`irgo-win11`**. So the harness passes
+  `-vm` explicitly, always, and refuses any invocation that would rely on the
+  default.
+- Refuse to *mutate* any VM whose name does not match `irgo-test-*`. `irgo-win11` is unreachable by construction, not by discipline —
   except for `suspend`/`resume`, which `RESULTS.md` measures against it and
   which change no persistent state. Reads are always allowed.
 - Never clear `uchg` on media the harness did not protect, and never leave it
@@ -825,8 +879,8 @@ rm  → bundle holding an immutable hardlink ⇒ EPERM, directory left behind
 
 So every VM created after protection costs ~35 GB rather than ~30, and any
 bundle created *before* it cannot be deleted at all — `cleanup.go` never calls
-`UnprotectISO`. With **49 GiB free** that is one test VM, while phase 8 wants
-twelve sequential trials. Teardown must unprotect-delete-reprotect around
+`UnprotectISO`. With **49 GiB free** that is one test VM at a time, which is why
+the run reuses one rather than accumulating them. Teardown must unprotect-delete-reprotect around
 teardown, and assert free space against the *copy* cost before each trial.
 
 **4. A run that dies between `upstream:link` and `unlink` poisons every later
@@ -847,7 +901,7 @@ unless it can state each one:
 
 | precondition | threshold today |
 |---|---|
-| free space | **≥ 45 GB** — one test VM at ~35 GB plus headroom. 49 GiB free now, so this is tight and must be checked, not assumed |
+| free space | **≥ 35 GB *when the test VM does not yet exist*; ≥ 8 GB once it does.** 49 GiB free today, and `irgo-win11` already accounts for 27 GB of what is used. A flat "≥ 45 GB" would refuse every phase after the test VM is built, deadlocking the run — the precondition is conditional for that reason |
 | no other VM started | `irgo-win11` runs; `snap-test` is a **phantom** — UTM lists it, its bundle is gone, which is the failure `cleanup.go` warns of |
 | TCC grants | probed, not assumed — the failure mode is a hang |
 | `go.work` | absent, or restored on exit including the failure path |
@@ -860,7 +914,7 @@ circular; building it black-box now is what lets phases 2–4 run unattended
 tonight.
 
 **And it makes the expensive experiments affordable for the first time.** Phase
-8 must settle three contradictions by experiment — how many keypresses the
+9 must settle three contradictions by experiment — how many keypresses the
 prompt needs, which EFI loader boots, whether Setup reads the answer file from
 FAT. Each costs a 45-minute install per trial, which is why nobody has run them
 and why the code asserts both answers. A human will not sit through twelve
@@ -978,7 +1032,7 @@ set only half supports it. Audited:
 | `prune` / `delete` | **none** — destructive by design |
 | `status`, `list`, `doctor`, `targets`, `verify`, `screenshot` | pure; nothing to undo |
 
-Three of twenty reverse cleanly. One inverse is missing outright and is a
+Three of the twenty reverse cleanly (`probe` is omitted below: phase 12 removes it from the CLI). One inverse is missing outright and is a
 recovery-toolkit gap by the plan's own rule: **you can power a VM on and not
 off**, in a CLI whose primitives exist precisely for standing at a failed stage
 and poking it. `delete -force` already calls `Stop` internally, so the
@@ -1013,8 +1067,8 @@ phase 7 fixes that, the harness must not call it with `os.TempDir()`.
 
 #### Every assertion needs a negative control
 
-The harness is the only thing standing between an unattended run and 17 phases
-merged green on nothing. So the harness itself has to be verified, and **this
+The harness is the only thing standing between an unattended run and fifteen
+phases merged green on nothing. So the harness itself has to be verified, and **this
 repository is the argument for why**:
 
 | check | what it actually does |
@@ -1197,7 +1251,7 @@ history:
 | `unparam` | **`BootAssistWatched`'s ignored `diskPath`** — a safety parameter that does nothing |
 | `dupl` | 3 wait-for-agent loops, 3 batch-file blocks, 5 byte formatters |
 | `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3, `win11-arm64-built.iso` ×3 |
-| `mnd` | the unexplained timeout literals (now counted at 15+) |
+| `mnd` | the unexplained timeout literals — 19 in `utmvm`, 29 with `cmd/` |
 | `funlen`, `gocognit` | `runUp` at 86 lines doing five things — deleted by phase 11, but the threshold stays |
 | `errcheck`, `gosec` | already clean; keep them clean |
 | `exhaustive` | `switch tool.Name` with no `default`, which would run `xorriso` with no arguments |
@@ -1276,8 +1330,8 @@ make it checkable, and most needs no VM (`Prune` twice, `Download` twice to an
 existing file, `BuildISO` twice against a fixture).
 
 ```sh
-irgo-winvm setup -vm "$TESTVM" && irgo-winvm setup -vm "$TESTVM"   # 2nd: all skipped
-irgo-winvm iso -protect -iso "$TESTISO" && irgo-winvm iso -protect -iso "$TESTISO"
+TESTVM=irgo-test-idem            # never empty: "" would resolve to irgo-win11
+irgo-winvm vm -vm "$TESTVM" && irgo-winvm vm -vm "$TESTVM"     # 2nd: all skipped
 ```
 
 **The VM-verified capabilities (6–11)** — a green build means "compiles", not
@@ -1285,8 +1339,8 @@ irgo-winvm iso -protect -iso "$TESTISO" && irgo-winvm iso -protect -iso "$TESTIS
 assertion with a negative control; until it exists they are run by hand:
 
 ```sh
-irgo-winvm run -timeout 3m -vm "$TESTVM" .bin/nativeprobe-arm64.exe
-irgo-winvm run -gui -timeout 4m -vm "$TESTVM" .bin/glaze-verifyevents-arm64.exe
+irgo-winvm run -timeout 3m -vm irgo-test-probe .bin/nativeprobe-arm64.exe
+irgo-winvm run -gui -timeout 4m -vm irgo-test-probe .bin/glaze-verifyevents-arm64.exe
 irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11   # read-only
 ```
 
@@ -1299,8 +1353,8 @@ observe. Everything before it runs against the one reused test VM, so this is
 the single *fresh* install outside phase 9's experiments:
 
 ```sh
-irgo-winvm setup -vm refactor-test -install     # ~45 min, unattended
-irgo-winvm delete -vm refactor-test -force
+irgo-winvm nuke -vm irgo-test-main             # back to nothing first
+irgo-winvm vm -vm irgo-test-main -install      # ~45 min, unattended
 ```
 
 Never against `irgo-win11`.

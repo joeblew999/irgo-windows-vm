@@ -736,69 +736,52 @@ FAT. Each costs a 45-minute install per trial, which is why nobody has run them
 and why the code asserts both answers. A human will not sit through twelve
 installs. A machine does not care.
 
-#### Never install Windows twice: the golden image
+#### Install Windows once, then use the commands you already have
 
-The 45-minute install is the plan's real cost, and the first draft spent it
-twelve times over in phase 8 alone. It does not have to be spent more than once.
+The 45-minute install is the plan's real cost, and an early draft of this
+section spent it twelve times in phase 8 and then proposed a new `clone`
+primitive to avoid that. Both were wrong, and wrong in the way this whole
+document is about: **reaching for new machinery instead of the commands that
+already exist.**
 
-**The VMs live on APFS, so a bundle clones copy-on-write.** Measured on this
-machine:
+`setup` is idempotent — re-running it against an existing VM skips every stage.
+And the phases do not each need their own Windows. They need *an* installed
+Windows that answers. So:
 
-```
-$ time cp -c big.img clone.img       # 3 GB
-0.003 total
+> **One test VM, created once, reused across all seventeen phases.**
 
-$ ls -lh                              3.0G big.img   3.0G clone.img
-$ du -sh .                            32K
-```
+That is the whole strategy. It requires no new code, and phase 10 is what makes
+the idempotency it leans on trustworthy.
 
-Two 3 GB files, 32 KB of disk, three milliseconds. A 30 GB installed Windows
-disk clones the same way. So:
+The work splits three ways, and only one part is expensive:
 
-- **Install Windows once** into a golden bundle. 45 minutes, paid a single time.
-- **Every test VM is a CoW clone of it** — near-instant, near-zero bytes. A
-  clone only consumes what it *writes*, so a boot-and-probe costs a few hundred
-  MB rather than 35 GB.
-- **Destroy the clone after each test.** Teardown is a directory removal, and
-  the golden image is untouched.
+| what a phase needs | what it costs |
+|---|---|
+| bundle operations — `create`, `delete`, `config`, `prune`, `iso` | an empty bundle. **Seconds.** No Windows involved |
+| guest operations — `run`, `exec`, `suspend`, `resume`, probes | **one** installed VM, reused. Paid once |
+| install operations — phase 8's three experiments | real installs, **aborted at first signal** |
 
-This is what makes the disk arithmetic work at all: 49 GiB free will not hold
-two full VMs, but it holds a golden image and as many clones as the run needs.
+Most of what looked like it needed cloning never needed Windows installed at
+all. And phase 8's experiments do not need the install to *finish*: boot success
+is observable in about two minutes from disk growth or the agent, so each trial
+stops once the answer is known. Twelve trials come in under an hour.
 
-**Clone the *suspended* state, and most preconditions disappear.** Resume is
-~400 ms and — per `setup.go:172` — works with the Mac's screen locked, because
-it restores RAM and never reaches firmware. A cold boot cannot: keystrokes route
-through UTM's display window. So a golden image saved **suspended** means the
-majority of phases need no display, no keystrokes, no Accessibility grant and no
-unlocked screen. The TCC and screen-lock preconditions then bind only on the
-phases that genuinely drive a boot.
+**Between phases, suspend rather than reinstall.** Resume is ~400 ms and — per
+`setup.go:172` — works with the Mac's screen locked, because it restores RAM and
+never reaches firmware. Keeping the test VM suspended between phases means the
+TCC and unlocked-screen preconditions bind only on the phases that genuinely
+drive a boot, instead of on the whole run.
 
-**Batch the clones, restart UTM once.** UTM enumerates its bundle directory only
-at launch, so each new bundle would otherwise cost a `RestartUTM` — which, per
-the interlocks above, is the operation that must not run while another VM is
-started. Creating a phase's clones up front and restarting once turns twelve
-hazardous restarts into one guarded one.
+**One snapshot, as insurance.** If a phase corrupts the test VM, the 45 minutes
+is lost. The VMs are on APFS, so a copy-on-write snapshot of the known-good
+bundle is effectively free — measured here, a 3 GB file clones in 0.003 s and
+both copies together occupy 32 KB. Take it once, after the install, and restore
+it only if a phase leaves the VM broken.
 
-Two things the clone must not inherit — both already solved in `bundle.go`, and
-both must be applied by the clone path rather than reimplemented:
-
-- a **fresh UUID**, or UTM sees duplicates;
-- a **fresh MAC**, or clones collide on the shared network. Note `randomMAC`
-  discards its `rand.Read` error, which yields `52:54:00:00:00:00` for every
-  clone — harmless once, an L2 collision at clone scale. Phase 4's tri-state
-  work covers it.
-
-**What still needs a real install**, and cannot be cloned past: phase 8's three
-experiments test *installation itself*. But they do not need it to **finish** —
-boot success is observable in about two minutes from disk growth or the agent,
-so each trial aborts at first signal instead of running 45 minutes to a
-conclusion already known. Twelve trials become well under an hour.
+That is a backup, not a mechanism. It adds one `cp -c` to the harness, not a new
+primitive and not a per-test lifecycle.
 
 One full unattended install stays as the final gate, once, at the end.
-
-> **`clone` is a new primitive**, and by the rule above it earns its place: no
-> existing primitive does this, and it is the difference between a run that
-> costs twelve hours and one that costs two.
 
 #### Every assertion needs a negative control
 

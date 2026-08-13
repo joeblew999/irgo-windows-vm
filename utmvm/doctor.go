@@ -254,7 +254,7 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }() // best effort; the download already succeeded or failed
 
 	dmg := filepath.Join(tmp, "UTM.dmg")
 	fmt.Fprintf(os.Stderr, "downloading UTM from %s\n", url)
@@ -293,7 +293,7 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 	cp := exec.Command("ditto", src, AppPath)
 	cp.Stdout, cp.Stderr = os.Stderr, os.Stderr
 	if cErr := cp.Run(); cErr != nil {
-		return fmt.Errorf("utmvm: copying UTM.app to /Applications: %w\n"+
+		return fmt.Errorf("utmvm: copying UTM.app to /Applications: %w\n"+ //nolint:staticcheck // ST1005: multi-line on purpose — these tell the user the next command to run
 			"  If this is a permissions error, /Applications may need admin rights;\n"+
 			"  download UTM from https://mac.getutm.app and drag it across instead.", cErr)
 	}
@@ -316,7 +316,7 @@ func latestUTMDMG() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("utmvm: asking GitHub for UTM's latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("utmvm: GitHub returned %s for UTM's releases", resp.Status)
 	}

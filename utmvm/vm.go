@@ -27,9 +27,6 @@ const (
 	// looked for by default.
 	vmStageDirName = "bin"
 
-	// vmScreensDirName is where screenshots land.
-	vmScreensDirName = "screens"
-
 	bundleExt   = ".utm"
 	bundleData  = "Data"
 	diskImage   = "disk.img"
@@ -124,7 +121,7 @@ func Create(opts Options) (string, error) {
 	ok := false
 	defer func() {
 		if !ok {
-			os.RemoveAll(bundle)
+			_ = os.RemoveAll(bundle) // cleanup of a failed create; the create error is the news
 		}
 	}()
 
@@ -223,8 +220,13 @@ func createSparse(path string, size int64) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return f.Truncate(size)
+	// Close checked: this creates the VM's 64 GB system disk, and a close
+	// error here is a disk that looks made and is not.
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func linkOrCopy(src, dst string) error {
@@ -253,16 +255,23 @@ func linkOrCopy(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }() // read-only
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	// Close is CHECKED, not deferred away. A deferred close on a file being
+	// written discards the error, and that error is where a full disk shows
+	// up — the copy reports success and the file is short.
 	if _, err := out.ReadFrom(in); err != nil {
+		_ = out.Close()
 		return err
 	}
-	return out.Sync()
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func newUUID() (string, error) {
@@ -433,7 +442,7 @@ func (c Config) Plist() (string, error) {
 		if d.ReadOnly {
 			ro = "true"
 		}
-		fmt.Fprintf(&drives, driveTemplate, d.ID, d.ImageName, d.Type, d.Interface, ro)
+		_, _ = fmt.Fprintf(&drives, driveTemplate, d.ID, d.ImageName, d.Type, d.Interface, ro)
 	}
 
 	return fmt.Sprintf(plistTemplate,
@@ -554,51 +563,6 @@ end tell`, v.Ref)
 
 // Stop requests a shutdown.
 func (v VM) Stop() error { _, err := v.run("stop"); return err }
-
-// suspend pauses the VM with its RAM intact, so Resume returns it in seconds
-// without going near firmware.
-//
-// This is the fast path and the reason it matters: a cold boot on UTM's aarch64
-// firmware has to be DRIVEN — the firmware never auto-selects a boot entry, so
-// something must type a path at the UEFI shell and fire eight keypresses. That
-// needs an unlocked Mac and a visible display window, takes about two minutes,
-// and has destroyed an install when surplus keypresses reached Setup's UI.
-// Resuming reaches none of it.
-//
-// The state lives in memory, so it survives neither quitting UTM nor rebooting
-// the host. suspendToDisk is the durable version — where it is permitted.
-func (v VM) suspend() error { _, err := v.run("suspend"); return err }
-
-// suspendToDisk is `utmctl suspend --save-state`, and it is NOT SAFE on this
-// hardware. It is exported only so the finding below is checkable; nothing in
-// this repository calls it, and the CLI does not expose it.
-//
-// It is supposed to write the VM's state to disk so it survives UTM quitting.
-// Measured on Windows 11 ARM64 under UTM 4.7.5, it does one of two things and
-// you do not get to choose which:
-//
-//  1. Refuses honestly, naming a device that cannot be snapshotted:
-//
-//     suspend is not supported when GPU acceleration is enabled.
-//     suspend is not supported when an emulated NVMe device is active.
-//
-//     Removing GPU acceleration (Options.NoGPUAccel) clears the first and
-//     reveals the second. NVMe is not removable: Windows ARM64 Setup has no
-//     inbox VirtIO storage driver and reports "no drive found" without it.
-//
-//  2. **Reports success and silently power-cuts the guest.** Exit status 0,
-//     "suspended to disk", no state file written anywhere in the bundle, VM
-//     left `stopped` — and the guest's next boot goes through "Diagnosing your
-//     PC", because what actually happened was a hard power-off.
-//
-// The second is the dangerous one: it looks like a clean suspend, it is
-// indistinguishable from one by exit code, and it risks whatever the guest had
-// in flight. A command that can do that must not be offered as a convenience.
-//
-// Use suspend instead — in-memory, genuinely instant to resume (measured at
-// 300–500 ms to a live guest agent), and it does not lie. The only thing it
-// cannot do is survive UTM quitting.
-func (v VM) suspendToDisk() error { _, err := v.run("suspend", "--save-state"); return err }
 
 // Resume brings a suspended VM back. It is the same utmctl verb as a cold
 // start, which is why there is no separate "resume" in UTM: a VM with saved
@@ -880,7 +844,7 @@ func RunInstall(opts InstallOptions) error {
 	}
 	logf := func(format string, a ...any) {
 		if opts.Log != nil {
-			fmt.Fprintf(opts.Log, format+"\n", a...)
+			_, _ = fmt.Fprintf(opts.Log, format+"\n", a...)
 		}
 	}
 
@@ -1090,3 +1054,51 @@ func typeBootCommand(vmRef, fsn, path string) error {
 
 // VMStageDir is where `vm` looks for binaries to stage onto the payload medium.
 func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
+
+// BundlePath is where UTM keeps the bundle for a VM of this display name.
+func BundlePath(name string) (string, error) {
+	dir, err := DefaultVMDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+bundleExt), nil
+}
+
+// DiskPath is the system disk inside a bundle. Its growth is how an install is
+// watched from the host, so it is asked for often.
+func DiskPath(bundle string) string { return filepath.Join(bundle, bundleData, diskImage) }
+
+// CheckAutomation reports whether this process may drive UTM through AppleScript.
+//
+// Booting needs it: UTM's aarch64 firmware drops to a UEFI shell and something
+// has to type the boot path, which goes through `osascript` into UTM's display
+// window. macOS gates that behind an Automation consent dialog that no script
+// can grant, and the failure arrives as a timeout with no mention of
+// permissions — after the install has already run for forty minutes.
+//
+// So it is asked FIRST, with a call that changes nothing.
+func CheckAutomation() error {
+	out, err := exec.Command("osascript", "-e", `tell application "UTM" to count virtual machines`).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("this process cannot control UTM: %s\n"+
+		"  macOS asks once, in a dialog. Grant it under System Settings ->\n"+
+		"  Privacy & Security -> Automation, then run this again.\n"+
+		"  Without it the boot cannot be driven and an install stops at a UEFI prompt",
+		strings.TrimSpace(string(out)))
+}
+
+// isoSearchDirs are the two places an ISO's other names can be: the one
+// directory media lives in, and UTM's bundles, which hardlink it.
+//
+// Two, and both fixed. It used to include ~/Downloads as well, which was a
+// third place a file could be and therefore a third answer to "where is the
+// media" — the permutation this layout exists to remove.
+func isoSearchDirs() []string {
+	dirs := []string{ISODir()}
+	if vmDir, err := DefaultVMDir(); err == nil {
+		dirs = append(dirs, vmDir)
+	}
+	return dirs
+}

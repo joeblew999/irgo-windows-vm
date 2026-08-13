@@ -62,7 +62,7 @@ func ISOFetchCatalog(timeout time.Duration) ([]ISOCatalogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("utmvm: fetching catalog: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("utmvm: catalog returned %s", resp.Status)
 	}
@@ -166,7 +166,7 @@ func isoExtractCABWithLibarchive(cab []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }() // scratch
 
 	cabPath := filepath.Join(dir, "products.cab")
 	if err := os.WriteFile(cabPath, cab, 0o600); err != nil {
@@ -383,7 +383,7 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 	if err != nil {
 		return fmt.Errorf("utmvm: downloading: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -414,7 +414,7 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 		n, rErr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, wErr := f.Write(buf[:n]); wErr != nil {
-				f.Close()
+				_ = f.Close() // already failing; the write error is the news
 				return wErr
 			}
 			done += int64(n)
@@ -427,7 +427,7 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 			break
 		}
 		if rErr != nil {
-			f.Close()
+			_ = f.Close() // already failing
 			return fmt.Errorf("utmvm: downloading: %w", rErr)
 		}
 	}
@@ -442,7 +442,7 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 	// mid-stream, which is indistinguishable from a clean end at this layer and
 	// is caught only by the SHA-1, when the caller supplies one.
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close() // already failing
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -473,8 +473,8 @@ func isoFileSHA1(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	h := sha1.New() //nolint:gosec // matching the catalog's published digest
+	defer func() { _ = f.Close() }() // read-only
+	h := sha1.New()                  //nolint:gosec // matching the catalog's published digest
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
@@ -507,7 +507,7 @@ func isoRefuseUnsafeDest(dest string) error {
 	if _, nlink, ok := inodeInfo(dest); ok && nlink > 1 {
 		msg += fmt.Sprintf("\n  and it is ONE file with %d names — writing here empties every one.", nlink)
 	}
-	return fmt.Errorf("%s\n  Move it aside, or choose another -o path. This will not overwrite it.", msg)
+	return fmt.Errorf("%s\n  Move it aside, or choose another -o path. This will not overwrite it.", msg) //nolint:staticcheck // ST1005: multi-line on purpose — these tell the user the next command to run
 }
 
 // isoInfo is what we can learn about Windows install media without mounting it.
@@ -578,7 +578,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 
 	say("          not there: %s", Home(esd))
 	if !opts.Fetch {
-		return "", "", false, fmt.Errorf(
+		return "", "", false, fmt.Errorf( //nolint:staticcheck // ST1005: multi-line on purpose — these tell the user the next command to run
 			"no Windows media found.\n"+
 				"     Put an ARM64 ISO at %s, or re-run with -fetch to download\n"+
 				"     %s from Microsoft and build one (needs wimlib and xorriso).",
@@ -626,7 +626,7 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 	if err := os.RemoveAll(media); err != nil {
 		return err
 	}
-	defer os.RemoveAll(media)
+	defer func() { _ = os.RemoveAll(media) }() // scratch
 
 	say("          expanding %s into %s", Home(esd), Home(media))
 	if err := isoExpandESD(esd, media, func(step string) { say("            %s", step) }); err != nil {

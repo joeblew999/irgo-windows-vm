@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -69,56 +68,6 @@ func run(args []string) error {
 	}
 }
 
-func runtimeGOOS() string   { return runtime.GOOS }
-func runtimeGOARCH() string { return runtime.GOARCH }
-
-// vmRef pulls the target VM from a flag set, so every VM-facing subcommand
-// takes the same -vm.
-func vmRef(fs *flag.FlagSet, args []string) (string, error) {
-	name := fs.String("vm", "", "VM name or UUID (required)")
-	if err := fs.Parse(args); err != nil {
-		return "", err
-	}
-	if *name == "" {
-		fs.Usage()
-		return "", fmt.Errorf("-vm is required")
-	}
-	return *name, nil
-}
-
-// loadCatalog prefers an explicit file, then the network, then a catalog some
-// other tool already extracted — in that order, because the first two are
-// reproducible and the third is whatever happens to be on this machine.
-func loadCatalog(explicit string) ([]utmvm.ISOCatalogEntry, string, error) {
-	if explicit != "" {
-		b, err := os.ReadFile(explicit) //nolint:gosec // the user named this file
-		if err != nil {
-			return nil, "", err
-		}
-		all, err := utmvm.ISOParseCatalog(b)
-		return all, explicit, err
-	}
-
-	all, netErr := utmvm.ISOFetchCatalog(2 * time.Minute)
-	if netErr == nil {
-		return all, utmvm.ISOCatalogURL, nil
-	}
-
-	for _, p := range utmvm.ISOCachedCatalogPaths() {
-		b, err := os.ReadFile(p) //nolint:gosec // a known cache location
-		if err != nil {
-			continue
-		}
-		parsed, pErr := utmvm.ISOParseCatalog(b)
-		if pErr != nil {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "note: %v\n      using a cached catalog instead: %s\n\n", netErr, utmvm.Home(p))
-		return parsed, p, nil
-	}
-	return nil, "", netErr
-}
-
 // runSetup is the one command a new developer runs.
 //
 // Everything it does was already possible as eight separate calls in an order
@@ -146,7 +95,7 @@ func runSetup(args []string) error {
 	}
 
 	fmt.Printf("setting up %s\n\n", *name)
-	res, err := utmvm.Setup(utmvm.SetupOptions{
+	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
 		VMName:   *name,
 		ISO:      *iso,
 		ProbeDir: *probes,
@@ -609,4 +558,18 @@ func stamped() func(string, ...any) {
 	return func(f string, a ...any) {
 		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
 	}
+}
+
+// vmRef pulls the target VM from a flag set, so every VM-facing subcommand
+// takes the same -vm.
+func vmRef(fs *flag.FlagSet, args []string) (string, error) {
+	name := fs.String("vm", "", "VM name or UUID (required)")
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if *name == "" {
+		fs.Usage()
+		return "", fmt.Errorf("-vm is required")
+	}
+	return *name, nil
 }

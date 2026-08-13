@@ -48,9 +48,9 @@ func pushScript(vmRef, guestPath, script string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }() // scratch
 	if _, err := tmp.WriteString(script); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // already failing
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -76,7 +76,7 @@ func Push(vmRef, localPath, guestPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only
 
 	cmd := exec.Command(utmctlPath(), "file", "push", vmRef, guestPath)
 	cmd.Stdin = f
@@ -434,7 +434,7 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }() // scratch
 
 	if err := os.WriteFile(filepath.Join(stage, "autounattend.xml"), autounattendXML, 0o644); err != nil {
 		return err
@@ -473,16 +473,23 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }() // read-only
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	// Close is CHECKED, not deferred away. A deferred close on a file being
+	// written discards the error, and that error is where a full disk shows
+	// up — the copy reports success and the file is short.
 	if _, err := out.ReadFrom(in); err != nil {
+		_ = out.Close()
 		return err
 	}
-	return out.Sync()
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // AnswerFile exposes the embedded answer file so callers can inspect or

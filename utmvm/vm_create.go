@@ -7,7 +7,7 @@ package utmvm
 // obvious and a UTM restart in the middle that is not discoverable at all. That
 // is a tool for the person who wrote it.
 //
-// Setup is the same work as one idempotent step. Every stage asks whether it is
+// VMCreate is the same work as one idempotent step. Every stage asks whether it is
 // already done and skips if so, which means:
 //
 //   - running it twice is safe, and the second run is seconds rather than an hour;
@@ -25,8 +25,8 @@ import (
 	"time"
 )
 
-// SetupOptions configures Setup.
-type SetupOptions struct {
+// VMCreateOptions configures VMCreate.
+type VMCreateOptions struct {
 	VMName   string
 	ISO      string // media to use; empty means "find or build one"
 	ProbeDir string // Windows probe binaries to embed
@@ -42,29 +42,29 @@ type SetupOptions struct {
 	Install bool
 }
 
-// SetupStage is one step, and what happened to it.
-type SetupStage struct {
+// VMCreateStage is one step, and what happened to it.
+type VMCreateStage struct {
 	Name    string
 	Skipped bool // already satisfied
 	Detail  string
 	Err     error
 }
 
-// SetupResult is the whole run.
-type SetupResult struct {
-	Stages []SetupStage
+// VMCreateResult is the whole run.
+type VMCreateResult struct {
+	Stages []VMCreateStage
 	ISO    string
 	VM     string
 	Ready  bool // the guest agent answered
 }
 
-// Setup takes a machine from wherever it is to a Windows VM that answers.
+// VMCreate takes a machine from wherever it is to a Windows VM that answers.
 //
 // It returns the stages it went through, including the ones it skipped, because
 // "nothing to do" is the most valuable thing an idempotent command can tell you
 // and is indistinguishable from "did nothing" unless it says so.
-func Setup(opts SetupOptions, log func(string)) (SetupResult, error) {
-	var res SetupResult
+func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
+	var res VMCreateResult
 	began := time.Now()
 	say := func(f string, a ...any) {
 		if log != nil {
@@ -78,7 +78,7 @@ func Setup(opts SetupOptions, log func(string)) (SetupResult, error) {
 		if took > 200*time.Millisecond {
 			detail = fmt.Sprintf("%s  [%s]", detail, took.Round(time.Millisecond))
 		}
-		res.Stages = append(res.Stages, SetupStage{name, skipped, detail, err})
+		res.Stages = append(res.Stages, VMCreateStage{name, skipped, detail, err})
 		switch {
 		case err != nil:
 			say("✗ %s: %v", name, err)

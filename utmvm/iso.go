@@ -73,11 +73,6 @@ const (
 	// isoBuildNeedsBytes is the scratch an ISO build wants: the expanded tree
 	// plus the image written beside it, with room to spare.
 	isoBuildNeedsBytes = 12 << 30
-
-	// minWindowsISOBytes separates Windows media from the small ISOs that share
-	// a directory with it: the generated answer file is 32 MB and UTM's guest
-	// tools are 121 MB, and neither will ever install an operating system.
-	minWindowsISOBytes = 1 << 30
 )
 
 type isoInfo struct {
@@ -164,7 +159,7 @@ func isoInspectSlow(path string) (isoInfo, error) {
 	if err != nil {
 		return info, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: nothing to lose on close
 
 	st, err := f.Stat()
 	if err != nil {
@@ -375,7 +370,7 @@ func ISOFindMasterer() (ISOTool, []ISOTool) {
 //	image 3      Windows Setup, MARKED BOOT  -> sources/boot.wim
 //	images 4..N  the Windows editions        -> sources/install.wim
 //
-// Image 3 must be exported with --boot. Without it Setup fails, and it fails
+// Image 3 must be exported with --boot. Without it VMCreate fails, and it fails
 // late, after the disc has booted and looked fine.
 //
 // boot.wim is LZX because Windows PE's loader reads it before anything that
@@ -430,7 +425,7 @@ func isoExpandESD(esd, dir string, progress func(step string)) error {
 		"export", esd, "2", bootWim, "--compress=LZX", "--chunk-size", "32K"); err != nil {
 		return err
 	}
-	// --boot is the one that bites: Setup fails without it, long after boot.
+	// --boot is the one that bites: VMCreate fails without it, long after boot.
 	if err := run("exporting Windows Setup (image 3, marked bootable)",
 		"export", esd, "3", bootWim, "--compress=LZX", "--chunk-size", "32K", "--boot"); err != nil {
 		return err
@@ -592,13 +587,13 @@ func isoBuild(opts isoRemasterOptions) error {
 // The answer file must be on an ISO9660 CD, not a FAT disk. This is not a
 // preference — it was established by regression. An earlier version shipped the
 // payload as a FAT removable disk, on the reasoning that Windows Setup scans
-// removable drives and the UEFI shell can read FAT from the same image. Setup
+// removable drives and the UEFI shell can read FAT from the same image. VMCreate
 // did not pick up autounattend.xml from it, and the install fell back to
-// interactive with no error explaining why. Attached as a CD it works: Setup
+// interactive with no error explaining why. Attached as a CD it works: VMCreate
 // applied the DiskConfiguration and partitioned the disk exactly as specified.
 //
 // Joliet is enabled so long filenames survive; plain ISO9660 would truncate
-// autounattend.xml to 8.3 and Setup would never find it.
+// autounattend.xml to 8.3 and VMCreate would never find it.
 func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	if sizeMiB < 16 {
 		sizeMiB = 16
@@ -611,7 +606,7 @@ func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	if err != nil {
 		return fmt.Errorf("create image: %w", err)
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	fs, err := d.CreateFilesystem(disk.FilesystemSpec{
 		Partition:   0,
@@ -678,7 +673,7 @@ func isoTrimToVolumeSize(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: nothing to lose on close
 
 	var b [4]byte
 	if _, err := f.ReadAt(b[:], 0x8050); err != nil {
@@ -705,7 +700,7 @@ func isoCopyInto(fs filesystem.FileSystem, hostPath, target string) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }() // read-only
 
 	dst, err := fs.OpenFile(target, os.O_CREATE|os.O_RDWR)
 	if err != nil {

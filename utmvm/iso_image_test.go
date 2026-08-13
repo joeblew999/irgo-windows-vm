@@ -40,7 +40,7 @@ func TestISOIsTrimmedToVolumeSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var b [4]byte
 	if _, err := f.ReadAt(b[:], 0x8050); err != nil {
@@ -78,7 +78,7 @@ func TestISOKeepsLongFilenames(t *testing.T) {
 	for _, name := range []string{"autounattend.xml", "nativeprobe-arm64.exe"} {
 		if !bytes.Contains(data, isoEncode16be(name)) {
 			t.Errorf("%q not present as a Joliet (UTF-16BE) name; "+
-				"without Joliet Setup sees only the 8.3 form and ignores the answer file", name)
+				"without Joliet VMCreate sees only the 8.3 form and ignores the answer file", name)
 		}
 	}
 }

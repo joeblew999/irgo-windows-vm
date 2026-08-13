@@ -7,7 +7,7 @@ import (
 )
 
 // The answer file is the whole reason the install is unattended, and every
-// failure mode below is silent: Setup ignores what it cannot use and falls back
+// failure mode below is silent: VMCreate ignores what it cannot use and falls back
 // to an interactive install with no error explaining why. Each check here is a
 // mistake that was actually made.
 func TestAnswerFileIsValidAndARM64(t *testing.T) {
@@ -22,19 +22,19 @@ func TestAnswerFileIsValidAndARM64(t *testing.T) {
 	s := string(x)
 
 	// An x64 answer file is not rejected — every component is silently ignored
-	// and Setup runs interactively, which looks like the file being missing.
+	// and VMCreate runs interactively, which looks like the file being missing.
 	if n := strings.Count(s, `processorArchitecture="arm64"`); n < 8 {
-		t.Errorf("only %d arm64 components; every component must be arm64 or Setup ignores them all", n)
+		t.Errorf("only %d arm64 components; every component must be arm64 or VMCreate ignores them all", n)
 	}
 	// Comments deliberately mention amd64 as the failure to avoid, so they must
 	// be stripped before checking — otherwise the warning trips its own test.
 	if strings.Contains(stripXMLComments(s), `processorArchitecture="amd64"`) {
-		t.Error("an amd64 component is present; on ARM64 Setup ignores every component silently")
+		t.Error("an amd64 component is present; on ARM64 VMCreate ignores every component silently")
 	}
 
 	for _, want := range []struct{ frag, why string }{
 		{"<Value>Windows 11 Pro</Value>",
-			"Home cannot host RDP, and a name absent from the image stops Setup on the edition picker"},
+			"Home cannot host RDP, and a name absent from the image stops VMCreate on the edition picker"},
 		{"BypassTPMCheck", "Windows 11 refuses to install without it unless bypassed"},
 		{"<WillWipeDisk>true</WillWipeDisk>", "a re-run must not stop on an existing partition layout"},
 		{"<SkipMachineOOBE>true</SkipMachineOOBE>", "OOBE would wait for a human"},
@@ -66,7 +66,7 @@ func TestGuestToolsInstallExpandsWildcard(t *testing.T) {
 }
 
 // The UEFI shell runs startup.nsh, and the order inside it matters: booting the
-// installer first would restart Setup forever once Windows is installed.
+// installer first would restart VMCreate forever once Windows is installed.
 func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 	// Comments explain both loaders, so compare only executable lines.
 	s := stripNSHComments(string(StartupScript()))
@@ -77,7 +77,7 @@ func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 	}
 	if installed > installer {
 		t.Error("installed Windows must be tried before the installer, " +
-			"or every reboot restarts Setup in a loop")
+			"or every reboot restarts VMCreate in a loop")
 	}
 	if strings.Contains(s, `\efi\boot\bootaa64.efi`) {
 		t.Error("bootaa64.efi waits for a keypress that nobody sends; use cdboot_noprompt.efi")

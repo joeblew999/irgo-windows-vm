@@ -60,7 +60,7 @@ func TestDisplayIsRamfbForAarch64(t *testing.T) {
 }
 
 // Windows ARM64 has no inbox VirtIO storage driver, so a VirtIO system disk is
-// invisible to Setup and it reports that no drive can be found.
+// invisible to VMCreate and it reports that no drive can be found.
 func TestSystemDiskIsNVMe(t *testing.T) {
 	got, err := testConfig().Plist()
 	if err != nil {

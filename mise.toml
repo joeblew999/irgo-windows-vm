@@ -3,6 +3,21 @@
 # The iso:* tasks are the CLI commands and nothing else. If a task here does
 # more than call the binary, that logic belongs in the binary.
 
+[tasks.lint]
+description = "The analysers, with everything they found already fixed"
+run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
+
+[tasks.check]
+description = "Build, vet, test, and cross-compile every target"
+run = [
+  "go build ./...",
+  "go vet ./...",
+  "go test ./utmvm/...",
+  "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./...",
+  "GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
+]
+
 [tasks."iso:create"]
 description = "irgo-winvm iso-create"
 run = "go run ./cmd/irgo-winvm iso-create"

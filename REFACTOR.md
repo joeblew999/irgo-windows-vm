@@ -119,92 +119,6 @@ fail. Two implementations is how that bug returns.
 **Target:** `utmctl(...)`, `osascriptRun(...)` — each the only place that knows
 how to quote for its tool. `brew` and the ISO tools are already consolidated.
 
----
-
-## Phases
-
-Each is one commit, independently verifiable. Ordered so the properties land
-before the file moves, and the VM-dependent work comes last.
-
-**Phase 0 — delete.** Eight symbols verified to have no caller: `BuildFATImage`,
-`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed in
-the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
-`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is
-kept today only so its finding is checkable — and the finding is that calling it
-can silently power-cut the guest. Do not ship a footgun; the measurement lives in
-`RESULTS.md`.
-
-**Phase 1 — one source of truth for facts.** `guestFile()` shared by `run.go`
-and `Prune`; named timeout constants; ISO name and default VM name declared once
-in `paths.go`. Fixes the live prune bug.
-
-**Phase 2 — one retry primitive.** Collapse the six loops.
-
-**Phase 3 — idempotency contract.** `Ensure*` semantics on `Create`, `BuildISO`,
-`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skips
-completed images. `Setup` should shrink substantially as its subsystems start
-answering for themselves.
-
-**Phase 4 — cut the command surface.** Delete `up` (86 lines duplicating
-`setup`, the largest remaining duplication) and `start` (powers a VM on
-headlessly, yielding a UEFI prompt nobody can type at — a footgun with a
-friendly name). Update `mise.toml`'s `vm:up` and `vm:iso-test` in the same
-commit.
-
-**Phase 5 — split the CLI.** 1144 lines → `main.go` (dispatch only) plus
-`cmd_{setup,vm,boot,guest,media}.go`. Pure movement. Then collapse the boilerplate:
-18 flagsets and 10 copies of *resolve-find-handle* behind one helper, so an
-unknown VM reads the same from every command — which it currently does not.
-
-**Phase 6 — group `utmvm` by subject** with `git mv` so history follows:
-`media_*`, `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are
-genuinely coupled and splitting would force most of the 134 symbols to stay
-exported, defeating Phase 7.
-
-**Phase 7 — shrink the exported surface.** 134 exported symbols for one
-consumer. Grep `cmd/` for each; unexport what is absent. Expect 40–60 to go.
-
----
-
-## Verification
-
-Every phase:
-
-```sh
-mise run check
-for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
-  GOOS=${t%%/*} GOARCH=${t##*/} CGO_ENABLED=0 go build -o /dev/null ./...
-done
-```
-
-**Idempotency is verified by running things twice.** This is the check the repo
-does not currently have, and Phase 3 should add it as a test:
-
-```sh
-irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
-irgo-winvm iso -protect && irgo-winvm iso -protect
-irgo-winvm build-iso -esd X -o Y && irgo-winvm build-iso -esd X -o Y   # must succeed
-irgo-winvm probes && irgo-winvm probes
-```
-
-A unit test can cover most of it without a VM: `Prune` twice, `Download` twice
-to an existing file, `BuildISO` twice against a fixture directory.
-
-**The prune bug gets a regression test in Phase 1** — generate a guest filename
-through `guestFile()` and assert `isOurArtefact` recognises it, so the two
-cannot drift again.
-
-Phases 4 and 5 need the real VM:
-
-```sh
-irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
-irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
-irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
-```
-
-The last must still report **~400 ms**. Seconds means a poll interval was lost —
-exactly how the bug happened the first time.
-
 ### 6. The CLI and `mise.toml` are two interfaces to one thing, with no rule
 
 There is no source of truth today, and it has already drifted. Measured:
@@ -251,17 +165,190 @@ surface. They go.
 Go code reads those variables directly and a maintainer wants them defaulted;
 a user sets them or accepts the defaults without mise existing at all.
 
-The README must change with it: every `mise run …` shown to a *user* becomes the
-`irgo-winvm` command it wraps. Right now the README tells people to install the
-binary and then hands them mise tasks, which is the same inconsistency in
-documentation form.
+The README must change with it — and further: **it should not list CLI commands
+at all.** Every command and flag written into prose is a copy that will fall
+behind the code, exactly as `mise run vm:up` already has. The binary's own
+`-h` output is generated from the flag definitions and cannot drift.
+
+So the README explains *why the project exists*, the concepts a newcomer needs
+(the ISO is hardlinked; every boot needs driving; UTM rescans only at launch),
+and the one command to discover the rest:
+
+```sh
+irgo-winvm -h
+```
+
+Worked examples that must stay accurate — the `setup` flow, the suspend/resume
+timing — belong in `RESULTS.md`, where they are recorded as *measurements with a
+date* rather than as instructions. A measurement that goes stale is a fact about
+the past; an instruction that goes stale is a lie.
 
 **Enforced**, because a convention this specific will not survive on trust: a
 test parses `mise.toml` and fails if a task name matches the CLI's subcommand
 list, or if a task outside the maintainer allowlist exists at all. Drift becomes
 a red build rather than a discovery six weeks later.
 
+### 7. Architectural gaps the duplication was hiding
+
+Deduplication is the shallow layer. These are structural, and several explain
+*why* the bugs happened rather than merely recording that they did.
+
+**No `context.Context` anywhere — zero occurrences.** Operations here run for 45
+minutes (install), 4.2 GB (download), and poll for minutes (boot). None can be
+cancelled, none carries a deadline, and Ctrl-C leaves a half-written ISO or a VM
+mid-boot. For a tool whose unit of work is an hour, this is the largest missing
+piece. Every long-running exported function should take a `ctx` and honour it.
+
+**Nothing VM-related is unit-testable, and that is structural.** 22
+`exec.Command` calls are made directly against `utmctl`, `osascript`, `plutil`,
+`hdiutil`, `ditto`, `bsdtar`, `wimlib-imagex` and `xorriso`. There is no seam, so
+the only way to exercise any of it is a real VM — which is why coverage is thin.
+It is not laziness. One narrow interface (`type runner interface { run(ctx,
+name string, args ...string) (string, error) }`) makes most of the package
+testable with a fake, and Phase 5's consolidation is the natural moment to
+introduce it.
+
+**Errors are strings, so callers cannot branch.** One sentinel exists
+(`ErrUTMNotInstalled`). Everything else is `fmt.Errorf`, so nothing can
+distinguish *VM not found* from *agent not ready* from *UTM not running* from
+*out of space*. `Setup` therefore cannot decide anything on failure — it aborts.
+Typed errors for the handful of states that matter would let `setup` recover
+rather than stop.
+
+**Four progress mechanisms, and a library that prints.** `progress func(done,
+total int64)`, `progress func(step string)`, `Log io.Writer`, `log
+func(string)`, plus direct `fmt.Printf` and `os.Stderr` writes *inside* `utmvm`.
+A library writing to stdout cannot be used by anything but this CLI, and rules
+out machine-readable output for CI. One reporting interface; the CLI decides the
+format.
+
+**`Ensure*` means five different things, and that caused a real bug.**
+`EnsureUTM` installs an app, `EnsureGuestTools` downloads a file, `EnsureReady`
+boots a VM and waits, `EnsureWork` makes a directory and checks free space,
+`EnsureISOTools` installs two binaries. `setup` called `EnsureReady` where it
+needed `RunInstall` precisely because the name promises "make it ready" — which
+is what the caller wanted, and not what it does. Verbs need fixed meanings:
+`Ensure` = idempotent make-it-so, `Fetch` = network, `Build` = produce an
+artefact, `Run` = drive something to completion.
+
+**No concurrency safety at all — zero locks.** Two `irgo-winvm` processes can
+create, boot or delete the same VM simultaneously. `setup` is idempotent but not
+re-entrant, and its checks are classic time-of-check-to-time-of-use. A lockfile
+per VM bundle is cheap and honest.
+
+**Config precedence is implicit, undocumented and untested.** `IRGO_*`
+environment variables, flags and defaults interact with no stated order — and
+`mise.toml` *sets* those variables, so the same command behaves differently
+under `mise run` than run directly. That is a footgun the maintainer-only rule
+above reduces but does not remove: precedence needs stating and a test.
+
+**The platform guard is applied inconsistently.** `CanCreateVMs()` exists and
+its own comment says callers should prefer it over comparing `runtime.GOOS` —
+and `bundle.go:15` compares `runtime.GOOS` anyway.
+
 ---
+
+## Phases
+
+Each is one commit, independently verifiable. Ordered so the properties land
+before the file moves, and the VM-dependent work comes last.
+
+**Phase 0 — delete.** Eight symbols verified to have no caller: `BuildFATImage`,
+`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed in
+the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
+`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is
+kept today only so its finding is checkable — and the finding is that calling it
+can silently power-cut the guest. Do not ship a footgun; the measurement lives in
+`RESULTS.md`.
+
+**Phase 1 — one source of truth for facts.** `guestFile()` shared by `run.go`
+and `Prune`; named timeout constants; ISO name and default VM name declared once
+in `paths.go`. Fixes the live prune bug.
+
+**Phase 2 — one retry primitive.** Collapse the six loops.
+
+**Phase 3 — idempotency contract.** `Ensure*` semantics on `Create`, `BuildISO`,
+`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skips
+completed images. `Setup` should shrink substantially as its subsystems start
+answering for themselves.
+
+**Phase 4 — cut the command surface.** Delete `up` (86 lines duplicating
+`setup`, the largest remaining duplication) and `start` (powers a VM on
+headlessly, yielding a UEFI prompt nobody can type at — a footgun with a
+friendly name). Update `mise.toml`'s `vm:up` and `vm:iso-test` in the same
+commit.
+
+**Phase 4b — one reporting seam and a `runner` interface.** Replace the four
+progress mechanisms with one; move every `fmt.Printf`/`os.Stderr` write out of
+`utmvm` and into the CLI. Introduce the `runner` seam at the same time, since
+both are about who is allowed to talk to the outside world. This is what makes
+the package testable without a VM.
+
+**Phase 4c — `context.Context` through the long operations.** `Download`,
+`ExpandESD`, `BuildISO`, `RunInstall`, `EnsureReady`, `WaitForAgent*` and
+`Setup`. Ctrl-C should stop a 45-minute install cleanly rather than leaving
+partial state.
+
+**Phase 5 — split the CLI.** 1144 lines → `main.go` (dispatch only) plus
+`cmd_{setup,vm,boot,guest,media}.go`. Pure movement. Then collapse the boilerplate:
+18 flagsets and 10 copies of *resolve-find-handle* behind one helper, so an
+unknown VM reads the same from every command — which it currently does not.
+
+**Phase 6 — group `utmvm` by subject** with `git mv` so history follows:
+`media_*`, `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are
+genuinely coupled and splitting would force most of the 134 symbols to stay
+exported, defeating Phase 7.
+
+**Phase 6b — fix the verbs, then the errors.** Give `Ensure`/`Fetch`/`Build`/
+`Run` fixed meanings and rename accordingly — `EnsureReady` becomes
+`BootInstalled`, which is what it does and would not have been mistaken for
+`RunInstall`. Add typed errors for the states `setup` should be able to act on.
+Add a lockfile per VM bundle. Route the last `runtime.GOOS` comparison through
+`CanCreateVMs`.
+
+**Phase 7 — shrink the exported surface.** 134 exported symbols for one
+consumer. Grep `cmd/` for each; unexport what is absent. Expect 40–60 to go.
+
+---
+
+## Verification
+
+Every phase:
+
+```sh
+mise run check
+for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
+  GOOS=${t%%/*} GOARCH=${t##*/} CGO_ENABLED=0 go build -o /dev/null ./...
+done
+```
+
+**Idempotency is verified by running things twice.** This is the check the repo
+does not currently have, and Phase 3 should add it as a test:
+
+```sh
+irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
+irgo-winvm iso -protect && irgo-winvm iso -protect
+irgo-winvm build-iso -esd X -o Y && irgo-winvm build-iso -esd X -o Y   # must succeed
+irgo-winvm probes && irgo-winvm probes
+```
+
+A unit test can cover most of it without a VM: `Prune` twice, `Download` twice
+to an existing file, `BuildISO` twice against a fixture directory.
+
+**The prune bug gets a regression test in Phase 1** — generate a guest filename
+through `guestFile()` and assert `isOurArtefact` recognises it, so the two
+cannot drift again.
+
+Phases 4 and 5 need the real VM:
+
+```sh
+irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
+irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
+irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
+```
+
+The last must still report **~400 ms**. Seconds means a poll interval was lost —
+exactly how the bug happened the first time.
 
 ## Phase 8 — make the mess impossible to repeat
 

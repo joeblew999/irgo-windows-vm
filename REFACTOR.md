@@ -804,6 +804,51 @@ primitive and not a per-test lifecycle.
 
 One full unattended install stays as the final gate, once, at the end.
 
+#### Going backwards: which commands have an inverse
+
+An unattended run needs to step back when a phase goes wrong, and the command
+set only half supports it. Audited:
+
+| forward | inverse |
+|---|---|
+| `create` | `delete` |
+| **`start`** | **missing — `VM.Stop()` exists in `utmvm` and no CLI command exposes it** |
+| `suspend` | `resume` |
+| `iso -protect` | `iso -unprotect` |
+| `boot` | **none possible** — the keystrokes are already in the guest |
+| `install` | **none** — delete and recreate |
+| `exec` / `run` | **none** — guest state has changed |
+| `fetch-iso` / `build-iso` | **none** — overwrites its output |
+| `prune` / `delete` | **none** — destructive by design |
+| `status`, `list`, `doctor`, `targets`, `verify`, `screenshot` | pure; nothing to undo |
+
+Four of twenty reverse cleanly. One inverse is missing outright and is a
+recovery-toolkit gap by the plan's own rule: **you can power a VM on and not
+off**, in a CLI whose primitives exist precisely for standing at a failed stage
+and poking it. `delete -force` already calls `Stop` internally, so the
+capability exists and is simply not exposed. **Add `stop`** — it is not new
+machinery, it is an unexported one.
+
+The rest cannot be given inverses, so they get the other kind of reversibility:
+
+> **Snapshot before every irreversible command, not just after the install.**
+
+This is what the APFS copy-on-write measurement actually buys — 0.003 s and ~0
+bytes per snapshot means "take one before anything one-way" is affordable as a
+blanket rule rather than a judgement call the harness has to make correctly at
+3 a.m.
+
+Two axes of reversibility, and the plan needs both:
+
+- **code** — a branch per phase, `--no-ff`, so any phase is one `git revert -m 1`
+- **VM state** — a CoW snapshot before each irreversible command, so a bad
+  `boot` or `run` costs seconds instead of 45 minutes
+
+`prune` deserves its own note: it is irreversible, operates on the shared system
+temp directory, and its prefix list contains `"irgo-"`, which matches every
+other entry including files a concurrently running `pushScript` has open. Until
+phase 2 fixes that, the harness must not call it with `os.TempDir()`.
+
 #### Every assertion needs a negative control
 
 The harness is the only thing standing between an unattended run and 17 phases

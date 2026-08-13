@@ -403,6 +403,20 @@ func runISO(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// The two external programs building an ISO needs. Installed here, and
+	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
+	// takes off.
+	for _, t := range utmvm.ISOTools() {
+		if t.Found() {
+			fmt.Printf("  · %s at %s\n", t.Name, utmvm.Home(t.Path))
+			continue
+		}
+		if err := t.Ensure(); err != nil {
+			return err
+		}
+		fmt.Printf("  ✓ installed %s\n", t.Name)
+	}
+
 	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
 	// ESD expansion; a hypervisor is not involved, and this used to run the
 	// whole setup chain — so fetching an ISO required UTM to be installed first.
@@ -429,33 +443,40 @@ func runISODelete(args []string) error {
 	}
 
 	// One path. The media lives where `iso` puts it and nowhere else.
-	//
-	// This used to hunt through ~/Downloads and UTM's bundle directory for
-	// other names, then decide what to do based on how many it found. That made
-	// the simplest command in the tool the hardest to predict: what it deleted
-	// depended on what happened to be sitting in an unrelated folder.
 	iso := utmvm.DefaultPaths().ISO()
 	fmt.Printf("media: %s\n", utmvm.Home(iso))
 
-	fi, err := os.Stat(iso)
-	if err != nil {
-		fmt.Println("nothing there; nothing to delete")
-		return nil
-	}
-	if !*force {
+	fi, statErr := os.Stat(iso)
+	if statErr == nil && !*force {
 		return fmt.Errorf("this deletes %s that costs 4.2 GB to re-fetch from a\n"+
 			"  source that rate-limits. Pass -force if you mean it",
 			utmvm.HumanBytes(fi.Size()))
 	}
-
-	// uchg lives on the inode and blocks unlink, so it is cleared first. Any
-	// other name for these bytes keeps them alive, which is correct: a VM
-	// holding this ISO still needs it, and vm-delete owns that copy.
-	_ = utmvm.UnprotectISO(iso)
-	if err := os.Remove(iso); err != nil {
-		return err
+	if statErr == nil {
+		// uchg lives on the inode and blocks unlink, so it is cleared first.
+		_ = utmvm.UnprotectISO(iso)
+		if err := os.Remove(iso); err != nil {
+			return err
+		}
+		_ = os.Remove(iso + ".scan")
+		fmt.Printf("  · removed the media (%s)\n", utmvm.HumanBytes(fi.Size()))
+	} else {
+		fmt.Println("  · no media there")
 	}
-	_ = os.Remove(iso + ".scan")
-	fmt.Printf("removed %s (%s)\n", utmvm.Home(iso), utmvm.HumanBytes(fi.Size()))
+
+	// The tools go whether or not the media was there. Undo runs to completion
+	// from any starting point — stopping early because one half was already
+	// gone would leave the other half behind for good.
+	for _, t := range utmvm.ISOTools() {
+		where, err := t.Remove()
+		switch {
+		case err != nil:
+			fmt.Printf("  · %s left in place: %v\n", t.Name, err)
+		case where != "":
+			fmt.Printf("  · removed %s (%s)\n", t.Name, utmvm.Home(where))
+		default:
+			fmt.Printf("  · %s not installed\n", t.Name)
+		}
+	}
 	return nil
 }

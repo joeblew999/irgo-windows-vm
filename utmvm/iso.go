@@ -49,6 +49,11 @@ const (
 	// every command until the answer was kept.
 	scanSuffix = ".scan"
 
+	// brewBin is where Homebrew puts executables on Apple Silicon. Named here
+	// because the ISO tools are the only thing this project installs, and
+	// PATH alone cannot answer "was this installed by us and where".
+	brewBin = "/opt/homebrew/bin"
+
 	// minWindowsISOBytes separates Windows media from the small ISOs that share
 	// a directory with it: the generated answer file is 32 MB and UTM's guest
 	// tools are 121 MB, and neither will ever install an operating system.
@@ -702,3 +707,78 @@ func copyIntoISO(fs filesystem.FileSystem, hostPath, target string) error {
 // inside UTM's container that this repo never mentions.
 
 // ISOStatus is what is known about one ISO and every other name for it.
+
+// Ensure makes the tool available, installing it with Homebrew if it is not.
+//
+// Building an ISO is the only thing in this project that needs software it
+// cannot ship, so this is the only place that installs any. It is paired with
+// Remove: whatever `iso` puts on the machine, `iso-delete` takes off again.
+func (t *Tool) Ensure() error {
+	if t.resolve() {
+		return nil
+	}
+	brew, err := exec.LookPath("brew")
+	if err != nil {
+		return fmt.Errorf("%s is needed to %s, and Homebrew is not here to install it.\n"+
+			"  Install it yourself: %s", t.Name, t.Why, t.Install())
+	}
+	fmt.Fprintf(os.Stderr, "installing %s…\n", t.Formula)
+	cmd := exec.Command(brew, "install", t.Formula) //nolint:gosec // from this package's own table
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if rErr := cmd.Run(); rErr != nil {
+		return fmt.Errorf("installing %s: %w\n  Try it by hand: %s", t.Name, rErr, t.Install())
+	}
+	if !t.resolve() {
+		// Homebrew's bin is not always on the PATH this process inherited.
+		if _, sErr := os.Stat(filepath.Join(brewBin, t.Name)); sErr == nil {
+			t.Path = filepath.Join(brewBin, t.Name)
+			return nil
+		}
+		return fmt.Errorf("%s installed but %s is not on PATH", t.Formula, t.Name)
+	}
+	return nil
+}
+
+// Remove uninstalls the tool, and reports whether it actually went.
+//
+// Only Homebrew installs are removed. A binary somewhere else was put there by
+// somebody for their own reasons, and a command called iso-delete has no
+// business deciding it knows better — so it says where it is and leaves it.
+func (t *Tool) Remove() (string, error) {
+	if !t.resolve() {
+		return "", nil // not here; nothing to undo
+	}
+	where := t.Path
+	brew, err := exec.LookPath("brew")
+	if err != nil {
+		return "", fmt.Errorf("%s is at %s and Homebrew is not here to remove it", t.Name, where)
+	}
+	out, uErr := exec.Command(brew, "uninstall", t.Formula).CombinedOutput() //nolint:gosec // own table
+	if uErr != nil {
+		return "", fmt.Errorf("uninstalling %s: %w: %s", t.Formula, uErr, strings.TrimSpace(string(out)))
+	}
+	return where, nil
+}
+
+// ISOTools are the external programs building an ISO needs: the WIM expander,
+// and ONE masterer.
+//
+// One, not both. isoMasterers lists xorriso and cdrtools in preference order
+// because either will do — returning the whole list made `iso` install the
+// fallback as well, which is 200 MB of cdrtools nobody asked for on a machine
+// that already had xorriso.
+//
+// In one place so `iso` and `iso-delete` cannot disagree about what they are.
+func ISOTools() []Tool {
+	tools := []Tool{WimTool()}
+	masterers := isoMasterers()
+	for i := range masterers {
+		if masterers[i].resolve() {
+			return append(tools, masterers[i])
+		}
+	}
+	if len(masterers) > 0 {
+		return append(tools, masterers[0]) // none present: install the preferred one
+	}
+	return tools
+}

@@ -356,23 +356,6 @@ func latestUTMDMG() (string, error) {
 // A developer running one binary should not be handed a shopping list. If the tool
 // is there, use it; if it is not, say so once, in one voice.
 
-// Ensure reports whether the tool is available, and says what to install if not.
-//
-// It does NOT install anything. Reaching into somebody's machine and running a
-// package manager is not this tool's business — and the two tools that need
-// this are only wanted when building an ISO from scratch, which most people
-// never do.
-//
-// The error names the tool, what it is for, and the one command that fixes it,
-// because "executable file not found in $PATH" tells a developer nothing about
-// which of three tools is missing or why this project wants it.
-func (t *Tool) Ensure() error {
-	if t.resolve() {
-		return nil
-	}
-	return fmt.Errorf("%s is needed to %s.\n  Install it: %s", t.Name, t.Why, t.Install())
-}
-
 // Target is a desktop build a developer might need to run.
 type Target string
 

@@ -13,6 +13,25 @@ by someone reading the code later.
 These rules exist to make that failure mode expensive up front instead of
 expensive later.
 
+## Three consumers, one source of truth
+
+Every capability here is consumed three ways, and nearly every bug this repo has
+had is two of them re-deriving the other's knowledge:
+
+- **DO** — the primitive command (`create`, `boot`, `fetch-iso`)
+- **SEQUENCE** — the orchestration (`setup`)
+- **REPORT** — the diagnosis (`doctor`, `status`, `targets`, `verify`)
+
+So each capability exposes exactly two entry points: **`Check()` is pure** — no
+installs, no downloads, no writes — and **`Ensure()` acts**, built on `Check`.
+
+DO and SEQUENCE both call `Ensure`, which is what makes reproducing a `setup`
+failure by hand actually reproduce it. **REPORT calls `Check` only.** A
+diagnostic that mutates is not a hypothetical: `doctor` once called `EnsureUTM`
+and so installed UTM and downloaded 120 MB of guest tools when asked merely to
+report. Nobody wrote that on purpose — the functions gained side effects later
+and nothing objected.
+
 ## When you find a bug, name the structure that allowed it
 
 "Used the wrong function" is not a finding; it is a symptom. `setup` called

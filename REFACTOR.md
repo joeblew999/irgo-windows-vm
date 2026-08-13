@@ -76,6 +76,61 @@ So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
 
 ---
 
+## The pattern underneath every bug in this repo
+
+Each of the defects found so far looked unrelated. They are one thing.
+
+**Every capability has three consumers**, and each has been re-deriving the
+others' knowledge:
+
+| | consumer | commands |
+|---|---|---|
+| **DO** | the primitive | `create`, `boot`, `fetch-iso`, `build-iso`, `suspend` |
+| **SEQUENCE** | the orchestration | `setup` |
+| **REPORT** | the diagnosis | `doctor`, `status`, `targets`, `verify`, `list` |
+
+Now the defects, sorted by which pair drifted:
+
+| defect | what happened |
+|---|---|
+| `EnsureReady` used for `RunInstall` | **SEQUENCE re-implemented DO** — and picked the wrong one |
+| `Prune` missing new guest files | **REPORT re-implemented DO's naming** in a second list |
+| nine ways to decide "is this VM usable" | **all three**, in five combinations, two disagreeing on case |
+| **`doctor` installs UTM** | **REPORT called DO's function** — a diagnostic that mutates |
+
+That last one is live and was introduced during this session's own work:
+`runDoctor` calls `EnsureUTM` and `EnsureGuestTools`, both of which install. On
+a machine without UTM, *"let me check what is wrong"* silently installs an
+application and downloads 120 MB. Nobody wrote that intentionally — `doctor`
+predates those functions gaining side effects, and nothing objected when they
+did.
+
+### The fix: separate the query from the action
+
+Every capability exposes exactly two entry points:
+
+```go
+Check()  (State,   error)   // pure. No installs, no downloads, no writes.
+Ensure() (Outcome, error)   // acts — and is built on Check
+```
+
+Then the three consumers stop drifting by construction:
+
+- **DO** calls `Ensure`
+- **SEQUENCE** calls the *same* `Ensure` — which is what makes `setup` thin and
+  makes reproducing its failures by hand actually reproduce them
+- **REPORT** calls `Check` **only** — so a diagnostic *cannot* mutate, rather
+  than merely being trusted not to
+
+This is the organising principle the rest of this document serves. The
+idempotency contract, the thin `setup`, the single `VMState`, the primitives as
+a recovery toolkit — all of them are consequences of it.
+
+**Enforced:** a test asserts no `REPORT` command reaches an `Ensure*`, `Fetch*`
+or `Install*` function. `doctor` mutating is not a mistake anyone would make on
+purpose, which is exactly why it needs a mechanical check rather than a
+convention.
+
 ## The properties, and where they are violated today
 
 ### 1. Idempotency is a bolted-on layer, not a property of operations
@@ -354,6 +409,7 @@ it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
 | 3 | One retry primitive | S | CI | no dependencies |
 | 4 | Decide probe distribution | S | decision | blocks 10 |
 | 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
+| 5b | Split `Check` from `Ensure`; make `doctor` pure | M | CI | fixes a live bug: `doctor` installs UTM |
 | 6 | Idempotency contract | M | CI + twice-run test | needs 5's tests to be safe |
 | 7 | `context.Context` through long operations | M | **VM** | signature change, after 5 and 6 settle |
 | 8 | One `VMState`; verbs, typed errors, locking | M | CI | last API change before the CLI is written |
@@ -471,6 +527,12 @@ The `runner` seam lands here because both are about who may talk to the outside
 world. **This is the phase that makes the package testable without a VM**, which is
 why it comes before idempotency, `context` and the renames rather than after:
 every phase from here on can be verified by a test instead of by hand.
+
+**5b — Split `Check` from `Ensure`.** Every capability gets a pure `Check` and
+an acting `Ensure` built on it. `doctor`, `status`, `targets` and `verify` are
+rewired to `Check` only — fixing the live bug where `doctor` installs UTM and
+downloads the guest tools. Add the test that no REPORT command reaches an
+`Ensure*`/`Fetch*`/`Install*`.
 
 **6 — Idempotency contract, and `setup` becomes thin.** `Ensure` semantics on
 `Create`, `BuildISO`, `Download`; the `Outcome` type lifted out of `setup.go`;

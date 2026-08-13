@@ -57,6 +57,21 @@ and cheap.
   and has destroyed an install. Idempotent there means *detecting it need not
   act*, never repeating the action.
 
+## The binary is the product; mise is for maintainers only
+
+A person using the tool never installs mise. A developer on a project that
+*uses* this tool never installs mise. Only someone changing **this** repository
+does — to build, test, lint and work on the upstream clones.
+
+So: if a user or developer needs it, it is a **CLI subcommand**. `mise.toml`
+holds maintainer tasks and the `IRGO_*` defaults, and nothing else.
+
+This has already gone wrong once. Cross-compiling the Windows probes lived as 13
+lines of shell in a mise task, so anyone who followed the README's
+`go install …` could not build probes at all — the binary was incomplete and the
+task runner hid it. If you find yourself writing shell logic in `mise.toml` that
+a user would want, it belongs in the CLI.
+
 ## One fact, one declaration
 
 Names, paths, prefixes and timeouts get declared once. The failure mode is not

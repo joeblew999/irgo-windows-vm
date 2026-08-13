@@ -205,6 +205,62 @@ irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 The last must still report **~400 ms**. Seconds means a poll interval was lost —
 exactly how the bug happened the first time.
 
+### 6. The CLI and `mise.toml` are two interfaces to one thing, with no rule
+
+There is no source of truth today, and it has already drifted. Measured:
+
+| | count |
+|---|---|
+| mise tasks that are **thin wrappers** over a CLI command | 20 |
+| mise tasks containing **real shell logic** | 7 (`probes` 13 lines, `upstream:link` 24, `vm:iso-test` 10, …) |
+| already broken | `vm:up` (line 227) calls `irgo-winvm up`, which Phase 4 deletes |
+
+The thin wrappers are drift surface: 20 places that restate a command's name and
+flags, each free to fall behind.
+
+Worse, the logic tasks hide a **product gap**. `probes` is 13 lines that
+cross-compile every Windows probe binary — and it exists *only* in mise. A
+developer who runs `go install github.com/…/irgo-winvm@latest`, exactly as the
+README tells them to, **cannot build probes at all**. The CLI has `probe` (run
+them in the VM) and no way to produce them. The task runner has been quietly
+carrying product functionality, so the binary is incomplete and nothing said so.
+
+**The rule:**
+
+> **`mise` is a maintainer tool for this repository. Nothing else.**
+>
+> A person using the binary never installs mise. A developer working on a
+> project that *uses* this tool never installs mise. Only someone changing this
+> repository does — to build, test, lint, and work on the upstream clones.
+>
+> Everything else is a CLI subcommand, because the binary is the product.
+
+This deletes most of the file. Of 30 tasks, **~20 are wrappers that exist for
+people who already have the binary** — `mise run vm:status` over
+`irgo-winvm status -vm irgo-win11` buys a default VM name and costs a drift
+surface. They go.
+
+| task | becomes |
+|---|---|
+| `probes` (13 lines) | **`irgo-winvm probes build -o <dir>`** — product functionality that was hiding in the task runner |
+| `vm:iso-test` (10 lines) | deleted — it is `setup` with a throwaway name |
+| `vm:*`, `iso:*`, `setup*`, `doctor`, `example*` | deleted — all are CLI commands already |
+| `check`, `fuzz`, `lint`, `upstream:*` | **kept** — these are maintainer work and belong nowhere else |
+
+`mise.toml` ends up around eight tasks. The `IRGO_*` env block stays, since the
+Go code reads those variables directly and a maintainer wants them defaulted;
+a user sets them or accepts the defaults without mise existing at all.
+
+The README must change with it: every `mise run …` shown to a *user* becomes the
+`irgo-winvm` command it wraps. Right now the README tells people to install the
+binary and then hands them mise tasks, which is the same inconsistency in
+documentation form.
+
+**Enforced**, because a convention this specific will not survive on trust: a
+test parses `mise.toml` and fails if a task name matches the CLI's subcommand
+list, or if a task outside the maintainer allowlist exists at all. Drift becomes
+a red build rather than a discovery six weeks later.
+
 ---
 
 ## Phase 8 — make the mess impossible to repeat

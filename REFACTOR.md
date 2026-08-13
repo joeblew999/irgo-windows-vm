@@ -723,6 +723,27 @@ build**, invisibly, because `go.work` is gitignored and absent from
 `git status`. Phase 0 restores it on exit, including the failure path, and
 asserts it is absent before merging anything.
 
+**Pin the harness to the surface that survives phase 15.** The harness is
+black-box over the CLI, and phase 15 rewrites the CLI — so an assertion written
+against a convenient flag breaks two-thirds of the way through the run, at the
+point where the code is least verified. This is safe only because the plan
+already guarantees the surface: **primitives are removed only when another
+primitive does the same thing**, and just `up` and `probe` go. So the harness
+uses primitives and `setup`, never `up`, never `probe`, and never a flag the
+plan does not name. Phase 15 keeps the harness green by construction rather than
+by repair.
+
+**Preconditions are numbers, not adjectives.** The harness refuses to start
+unless it can state each one:
+
+| precondition | threshold today |
+|---|---|
+| free space | **≥ 45 GB** — one test VM at ~35 GB plus headroom. 49 GiB free now, so this is tight and must be checked, not assumed |
+| no other VM started | `irgo-win11` and `snap-test` both exist; `RestartUTM` must not run while either is up |
+| TCC grants | probed, not assumed — the failure mode is a hang |
+| `go.work` | absent, or restored on exit including the failure path |
+| screen | unlocked and awake **only** for boot-driving phases |
+
 **This is black-box only, deliberately** — end-to-end assertions over the real
 CLI. The white-box checks (*was any keystroke sent while the agent was up?*)
 need the phase 6 seam, which does not exist yet. Building phase 0 on it would be

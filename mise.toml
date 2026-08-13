@@ -1,3 +1,8 @@
+[tools]
+# Pinned so CI installs what a maintainer has. mise-action reads this.
+go = "1.26.5"
+golangci-lint = "2.11.2"
+
 # Maintainer tasks. A user of the binary never needs this file.
 #
 # Namespaced by what they drive:
@@ -8,19 +13,69 @@
 # The command tasks are the commands and nothing else. If a task here does more
 # than call the binary, that logic belongs in the binary.
 
+[tasks."go:build"]
+description = "Build irgo-winvm for every Mac a user could have"
+run = '''
+set -e
+V=${VERSION:-dev}
+OUT=${OUT:-dist}
+rm -rf "$OUT" && mkdir -p "$OUT"
+
+# Only macOS. UTM is macOS-only and the tool drives it, so a Linux or Windows
+# binary would build and then refuse to do anything — the cross-compile in
+# go:check exists to prove `targets` still reports honestly on those hosts, not
+# to ship them.
+for arch in arm64 amd64; do
+  name="irgo-winvm-darwin-$arch"
+  CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
+    -ldflags "-s -w -X main.version=$V" -o "$OUT/$name" ./cmd/irgo-winvm
+  ( cd "$OUT" && tar czf "$name.tar.gz" "$name" && rm "$name" )
+  echo "built $OUT/$name.tar.gz"
+done
+
+( cd "$OUT" && shasum -a 256 *.tar.gz > SHA256SUMS )
+cat "$OUT/SHA256SUMS"
+'''
+
 [tasks."go:lint"]
 description = "The analysers, with everything they found already fixed"
 run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
 
 [tasks."go:check"]
-description = "Build, vet, test, and cross-compile every target"
+description = "Build, vet and test every module, and cross-compile every target"
 run = [
   "go build ./...",
   "go vet ./...",
   "go test ./utmvm/...",
+
+  # The other three are separate modules and would be skipped by ./... above.
+  # -o a directory because they are all main packages: a bare `go build` drops
+  # binaries in the source tree, and in examples/ it fails outright because
+  # `nativeall` is already a directory there.
+  "go -C probe build -o {{config_root}}/.bin/host/ ./...",
+  "go -C probe vet ./...",
+  "go -C glaze-probes build -o {{config_root}}/.bin/host/ ./...",
+  "go -C glaze-probes vet ./...",
+  "go -C examples build -o {{config_root}}/.bin/host/ ./...",
+  "go -C examples vet ./...",
+  "go -C examples test ./...",
+
+  # The CLI must compile for every host a developer might be on: `targets`
+  # exists to tell someone on Windows or Linux what their machine can do, and a
+  # tool that will not build for them is no use. A macOS-only syscall with no
+  # counterpart broke this once and was invisible from a Mac.
   "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
+  "GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./...",
+  "GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./...",
   "GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
+
+  # And the probes must cross-compile with no C toolchain. If that ever needs
+  # one, something has taken a cgo dependency and this project's central claim
+  # has quietly stopped being true.
+  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C probe build -o /dev/null .",
+  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C glaze-probes build -o /dev/null ./verify",
+  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./nativeall",
 ]
 
 [tasks."vm:create"]

@@ -905,6 +905,8 @@ func RunInstall(opts InstallOptions) error {
 			// a dialog — the picture can.
 			if shot, sErr := Shot(opts.VMRef, string(p.Phase)); sErr == nil {
 				logf("   %s", Home(shot))
+			} else {
+				logf("   (no screenshot: %v)", sErr)
 			}
 			lastPhase = p.Phase
 		}
@@ -971,6 +973,8 @@ func RunInstall(opts InstallOptions) error {
 			// this is the only record of where they went.
 			if shot, sErr := Shot(opts.VMRef, fmt.Sprintf("stalled-%d", assists)); sErr == nil {
 				logf("   %s", Home(shot))
+			} else {
+				logf("   (no screenshot: %v)", sErr)
 			}
 			if err := BootAssistOn(opts.VMRef, target, ""); err != nil {
 				return err

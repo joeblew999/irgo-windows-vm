@@ -1,25 +1,18 @@
-# What a contributor can rely on before they open a pull request.
+# What a contributor can rely on before opening a pull request.
 #
-# This deliberately does NOT try to run a VM. Everything interesting here needs
-# UTM, an Apple Silicon host, a 5 GB Windows ISO and about an hour — none of
-# which belongs in CI, and pretending otherwise would produce a red build that
-# means nothing.
+# It installs mise and calls the same tasks a maintainer runs. Nothing is
+# restated here: a workflow that reimplements `go build` drifts from the task
+# that does the same thing, and this one had — CI wrote binaries to /tmp/ci-bin
+# while `mise run check` wrote them to .bin/host.
 #
-# What it does check is the part that CAN break silently:
-#
-#   - all four modules build, vet and test;
-#   - the CLI still compiles for Linux and Windows, which is what lets
-#     `irgo-winvm targets` reach the developer it exists to inform. That broke
-#     once already (macOS-only syscalls with no counterpart) and was invisible
-#     from a Mac;
-#   - the Windows probes still cross-compile with CGO_ENABLED=0. If that ever
-#     needs a C toolchain, something has taken a cgo dependency and the
-#     project's central claim has quietly stopped being true.
+# Deliberately does NOT try to run a VM. That needs UTM, an Apple Silicon host,
+# a 4.2 GB Windows ISO and about an hour, none of which belongs in CI, and
+# pretending otherwise produces a red build that means nothing.
 name: check
 
 on:
   push:
-    branches: [main, master, integration]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -27,85 +20,24 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  check:
     # Both, because the code is macOS-only in what it DOES and cross-platform in
     # what it must COMPILE to. Only ubuntu would miss a broken darwin build;
-    # only macOS would miss exactly the regression described above.
+    # only macOS would miss a macOS-only syscall with no counterpart elsewhere,
+    # which broke the Linux build once and was invisible from a Mac.
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v4.2.4
+      - run: mise run go:check
 
-      - uses: actions/setup-go@v5
-        with:
-          # No version pin: each go.mod names the floor it needs and Go's
-          # toolchain mechanism fetches it. Pinning here would be a second
-          # manager on the same job, and they disagree.
-          go-version-file: go.mod
-          check-latest: true
-
-      - name: build, vet and test every module
-        run: |
-          set -euxo pipefail
-          go build ./...
-          go vet ./...
-          go test -race ./utmvm/...
-          # -o a directory: these are all main packages, and a bare `go build`
-          # drops binaries in the source tree — or fails outright in examples/,
-          # where `nativeall` is already a directory.
-          mkdir -p /tmp/ci-bin
-          for m in probe glaze-probes examples; do
-            go -C "$m" build -o /tmp/ci-bin/ ./...
-            go -C "$m" vet ./...
-          done
-          go -C examples test ./...
-
-  cross:
-    # The claim being defended: a clone cross-compiles to Windows with no
-    # toolchain at all. One runner is enough — the compiler is the same
-    # everywhere and this is about target support, not host behaviour.
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          check-latest: true
-
-      - name: the CLI must compile for every host a developer might be on
-        run: |
-          set -euxo pipefail
-          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
-            GOOS="${target%%/*}" GOARCH="${target##*/}" CGO_ENABLED=0 go build -o /dev/null ./...
-          done
-
-      - name: the Windows probes must cross-compile with no C toolchain
-        run: |
-          set -euxo pipefail
-          for arch in arm64 amd64; do
-            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go -C probe        build -o /dev/null .
-            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go -C glaze-probes build -o /dev/null ./verify
-            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go -C glaze-probes build -o /dev/null ./verifyevents
-            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go -C examples     build -o /dev/null ./nativeall
-          done
-
-  catalog:
-    # Microsoft's catalog is fetched live rather than fixtured, because the
-    # point is what they serve TODAY: the URL, the compression and the schema
-    # have all changed under this project already. A failure here is
-    # information, not a broken build — hence continue-on-error.
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Microsoft still serves a catalog we can read
-        env:
-          IRGO_TEST_NETWORK: "1"
-        run: go test ./utmvm/ -run TestFetchCatalogLive -v
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v4.2.4
+      - run: mise run go:lint

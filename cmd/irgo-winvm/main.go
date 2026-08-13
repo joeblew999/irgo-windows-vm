@@ -17,6 +17,9 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
 
+// version is set at build time by go:build. 'dev' when built by hand.
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -74,6 +77,9 @@ func run(args []string) error {
 		return runISODelete(args[1:])
 	case "vm-screen":
 		return runVMScreen(args[1:])
+	case "version":
+		fmt.Println(version)
+		return nil
 	case "doctor":
 		return runDoctor()
 	case "-h", "--help", "help":

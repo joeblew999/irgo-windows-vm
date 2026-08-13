@@ -135,7 +135,15 @@ func ShotDir() string { return filepath.Join(appRoot(), shotDirName) }
 // while the stage is still on screen, which is the whole point — a stuck boot
 // is invisible from the host, and "here is what it looks like right now" is the
 // only answer.
-func Shot(vmName, stage string) (string, error) {
+func Shot(vmRef, stage string) (string, error) {
+	// Resolved to the display name, because UTM titles the window with the name
+	// and callers hold a UUID. Every screenshot during an install silently
+	// failed on this: RunInstall works in UUIDs, windowID matches on the title,
+	// and the error was being discarded by the caller.
+	vmName := vmRef
+	if e, err := Find(vmRef); err == nil {
+		vmName = e.Name
+	}
 	if err := os.MkdirAll(ShotDir(), 0o755); err != nil {
 		return "", err
 	}

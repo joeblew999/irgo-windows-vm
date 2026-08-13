@@ -285,3 +285,34 @@ func latestUTMDMG() (string, error) {
 	return "", fmt.Errorf("utmvm: UTM release %s has no UTM.dmg among its %d assets",
 		rel.TagName, len(rel.Assets))
 }
+
+// VerifiedVersion is the UTM release this package's config schema was read
+// from — not guessed, but taken from utmapp/UTM at that tag.
+//
+// This matters more than it looks. UTM's config.plist is decoded by Swift
+// Codable with non-optional fields, and a schema mismatch surfaces as a single
+// generic "cannot import this VM" with no indication of which field is wrong.
+// Reading `main` instead of the matching tag is how an afternoon disappears:
+// at the time of writing main was v5.0.4 while the installed app was v4.7.5,
+// and they disagreed.
+const VerifiedVersion = "4.7.5"
+
+// GuestToolsURL is where UTM itself downloads the guest tools from.
+//
+// Taken from the string table of UTM.app's own binary rather than guessed, so
+// it is the URL the application uses and not one that merely happens to work
+// today.
+//
+// Fetching it ourselves is what makes a one-command setup possible at all. The
+// alternative — and what this used to say — was to tell the developer to open
+// UTM, create a throwaway VM and pick "Install Windows guest tools" from a
+// menu. That is not a step a setup command can take, it is not discoverable,
+// and skipping it produces a VM that boots perfectly and is then unreachable:
+// no network, no `utmctl exec`, no IP, and nothing saying why.
+const GuestToolsURL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
+
+// utmReleaseAPI is the GitHub release the .dmg comes from. Latest rather than a
+// pin: UTM's schema version is checked separately at DetectUTM, so a mismatch
+// is reported rather than silently accepted, and pinning here would install a
+// version older than the one a developer would get by hand.
+const utmReleaseAPI = "https://api.github.com/repos/utmapp/UTM/releases/latest"

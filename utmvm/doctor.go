@@ -2,45 +2,12 @@ package utmvm
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 )
-
-// VerifiedVersion is the UTM release this package's config schema was read
-// from — not guessed, but taken from utmapp/UTM at that tag.
-//
-// This matters more than it looks. UTM's config.plist is decoded by Swift
-// Codable with non-optional fields, and a schema mismatch surfaces as a single
-// generic "cannot import this VM" with no indication of which field is wrong.
-// Reading `main` instead of the matching tag is how an afternoon disappears:
-// at the time of writing main was v5.0.4 while the installed app was v4.7.5,
-// and they disagreed.
-const VerifiedVersion = "4.7.5"
-
-// SchemaConfigurationVersion is the value UTM v4 accepts. UTM rejects anything
-// higher outright, so a major-version jump is a real compatibility signal
-// rather than cosmetic drift.
-const SchemaConfigurationVersion = 4
 
 // ErrUTMNotInstalled is returned when UTM is absent and could not be installed.
 var ErrUTMNotInstalled = errors.New("UTM is not installed")
-
-// GuestToolsURL is where UTM itself downloads the guest tools from.
-//
-// Taken from the string table of UTM.app's own binary rather than guessed, so
-// it is the URL the application uses and not one that merely happens to work
-// today.
-//
-// Fetching it ourselves is what makes a one-command setup possible at all. The
-// alternative — and what this used to say — was to tell the developer to open
-// UTM, create a throwaway VM and pick "Install Windows guest tools" from a
-// menu. That is not a step a setup command can take, it is not discoverable,
-// and skipping it produces a VM that boots perfectly and is then unreachable:
-// no network, no `utmctl exec`, no IP, and nothing saying why.
-const GuestToolsURL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
 
 // Installing UTM from nothing.
 //
@@ -58,12 +25,6 @@ const GuestToolsURL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
 // is about generating disk images, which this repo does do in Go; reading
 // somebody else's signed installer is a different problem with no Go answer.
 
-// utmReleaseAPI is the GitHub release the .dmg comes from. Latest rather than a
-// pin: UTM's schema version is checked separately at DetectUTM, so a mismatch
-// is reported rather than silently accepted, and pinning here would install a
-// version older than the one a developer would get by hand.
-const utmReleaseAPI = "https://api.github.com/repos/utmapp/UTM/releases/latest"
-
 // ---- external tools ----
 // Installing the things this project needs, in one place.
 //
@@ -75,25 +36,6 @@ const utmReleaseAPI = "https://api.github.com/repos/utmapp/UTM/releases/latest"
 //
 // A developer running one binary should not be handed a shopping list. If the tool
 // is there, use it; if it is not, say so once, in one voice.
-
-// Target is a desktop build a developer might need to run.
-type Target string
-
-const (
-	TargetMacOS   Target = "macos"
-	TargetWindows Target = "windows"
-	TargetLinux   Target = "linux"
-)
-
-// Coverage describes how — or whether — the current host can run a target.
-type Coverage struct {
-	Target Target
-	How    string // "native", "vm", or "" when unavailable
-	Note   string
-}
-
-// Runnable reports whether the target can actually be exercised here.
-func (c Coverage) Runnable() bool { return c.How != "" }
 
 // Everything this project depends on that does not live in the repository.
 //
@@ -294,115 +236,6 @@ func TotalBytes(list []External) int64 {
 	return n
 }
 
-// HumanBytes formats a byte count the way the rest of the CLI does.
-func HumanBytes(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
-	case n == 0:
-		return "—"
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
-}
-
-// lookPath resolves a tool on PATH, or returns a name that will read as
-// missing. An empty Path would stat the working directory and report present,
-// which is the wrong answer stated confidently.
-func lookPath(name string) string {
-	t := ISOTool{Name: name}
-	if !t.resolve() {
-		return filepath.Join("(not on PATH)", name)
-	}
-	p := t.Path
-	// Resolve symlinks: package-manager bin dirs are link farms, and the interesting
-	// answer is which install it actually points at.
-	if real, rErr := filepath.EvalSymlinks(p); rErr == nil {
-		return real
-	}
-	return p
-}
-
-// Home shortens a path for display, so the inventory is readable rather than
-// three lines of container path per row.
-func Home(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" || runtime.GOOS == "windows" {
-		return p
-	}
-	if strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
-
-// A Windows 11 install consumes roughly this much once it settles. The sparse
-// disk starts near zero, so the free-space figure at creation time is
-// misleading — the cost arrives later, during install, when failing is most
-// expensive.
-const WindowsInstallBytes = 30 << 30
-
-// SpaceCheck reports whether a target directory can host an install.
-type SpaceCheck struct {
-	FreeBytes     int64
-	RequiredBytes int64
-	ISOBytes      int64 // 0 when the ISO is hardlinked and therefore free
-	OK            bool
-}
-
-func (s SpaceCheck) String() string {
-	return fmt.Sprintf("%s free, ~%s needed", HumanBytes(s.FreeBytes), HumanBytes(s.RequiredBytes))
-}
-
-// CheckSpace verifies there is room before a VM is created.
-//
-// Worth doing up front because the failure mode is so bad: the sparse disk and
-// hardlinked ISO make a new bundle look almost free, then Windows Setup runs
-// out of space mid-install and leaves a corrupt VM that has to be rebuilt from
-// scratch — after a 20-minute wait.
-//
-// The ISO costs nothing when it can be hardlinked into the same volume, so it
-// is only counted when a copy would be needed.
-func CheckSpace(targetDir, isoPath string) (SpaceCheck, error) {
-	var s SpaceCheck
-
-	free, err := statfsAvailable(targetDir)
-	if err != nil {
-		return s, fmt.Errorf("checking free space on %s: %w", targetDir, err)
-	}
-	s.FreeBytes = free
-	s.RequiredBytes = WindowsInstallBytes
-
-	if isoPath != "" && !sameVolume(targetDir, isoPath) {
-		if n, err := fileSize(isoPath); err == nil {
-			s.ISOBytes = n
-			s.RequiredBytes += n
-		}
-	}
-
-	s.OK = s.FreeBytes >= s.RequiredBytes
-	return s, nil
-}
-
-// sameVolume reports whether two paths live on one filesystem, in which case a
-// hardlink works and the ISO is free.
-//
-// A false answer only costs an over-estimate of the space needed, which is the
-// safe direction — so a platform that cannot tell says no.
-func sameVolume(a, b string) bool { return sameDevice(a, b) }
-
-func fileSize(p string) (int64, error) {
-	fi, err := os.Stat(p)
-	if err != nil {
-		return 0, err
-	}
-	return fi.Size(), nil
-}
-
 // mustVMDir is UTM's bundle directory, or empty when it cannot be resolved.
 // Only for the inventory, which reports rather than acts.
 func mustVMDir() string {
@@ -411,35 +244,6 @@ func mustVMDir() string {
 		return ""
 	}
 	return d
-}
-
-// FreeBytes is the space available to this user on the filesystem holding path.
-func FreeBytes(path string) (int64, error) {
-	// Walk up until something exists: the directory being asked about is often
-	// the one about to be created.
-	probe := path
-	for {
-		if _, err := os.Stat(probe); err == nil {
-			break
-		}
-		parent := filepath.Dir(probe)
-		if parent == probe {
-			return 0, fmt.Errorf("utmvm: no existing parent of %s", path)
-		}
-		probe = parent
-	}
-	return statfsAvailable(probe)
-}
-
-// appRoot is the one directory this tool owns. vm, iso and run each hang their
-// own locations off it, so there is a single answer to "where does anything
-// go" without any of the three owning the others' paths.
-func appRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, "Library", "Application Support", "irgo-winvm")
 }
 
 // mustGuestToolsPath is where UTM caches its guest tools, or empty when it

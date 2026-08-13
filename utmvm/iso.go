@@ -88,6 +88,16 @@ type isoInfo struct {
 	// makes hands-off installation possible.
 	HasNoPromptLoader bool
 
+	// SelfBooting reports that this medium boots with no keypress, because its
+	// El Torito entry points at efisys_noprompt.bin.
+	//
+	// It cannot be read back off the disc: HasNoPromptLoader finds
+	// cdboot_noprompt.efi, which every Windows ISO contains whether or not it
+	// is the one being booted. Only the build knows, so the build writes it
+	// down — and driving the UEFI shell at a medium that does not need it types
+	// into Setup's own dialog.
+	SelfBooting bool
+
 	// SizeBytes is the image size, useful for a sanity check: a Windows 11
 	// image is several GB, and a few hundred MB means a truncated download.
 	SizeBytes int64
@@ -119,14 +129,14 @@ func isoCachedVerdict(path string) (isoInfo, bool) {
 		return isoInfo{}, false
 	}
 	var size, mod int64
-	var arm int
-	if _, sErr := fmt.Sscanf(string(b), "%d %d %d", &size, &mod, &arm); sErr != nil {
+	var arm, self int
+	if _, sErr := fmt.Sscanf(string(b), "%d %d %d %d", &size, &mod, &arm, &self); sErr != nil {
 		return isoInfo{}, false
 	}
 	if size != fi.Size() || mod != fi.ModTime().UnixNano() {
 		return isoInfo{}, false
 	}
-	return isoInfo{SizeBytes: fi.Size(), IsARM64: arm == 1}, true
+	return isoInfo{SizeBytes: fi.Size(), IsARM64: arm == 1, SelfBooting: self == 1}, true
 }
 
 func isoStoreVerdict(path string, info isoInfo) {
@@ -134,11 +144,14 @@ func isoStoreVerdict(path string, info isoInfo) {
 	if err != nil {
 		return
 	}
-	arm := 0
+	arm, self := 0, 0
 	if info.IsARM64 {
 		arm = 1
 	}
-	_ = os.WriteFile(path+scanSuffix, []byte(fmt.Sprintf("%d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm)), 0o644)
+	if info.SelfBooting {
+		self = 1
+	}
+	_ = os.WriteFile(path+scanSuffix, []byte(fmt.Sprintf("%d %d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm, self)), 0o644)
 }
 
 func isoInspect(path string) (isoInfo, error) {
@@ -861,3 +874,22 @@ func ISOWorkDir() string { return filepath.Join(ISODir(), isoWorkDirName) }
 // ISODownloadSize is what a fresh download costs, for messages that need to
 // say so. One number, so a refusal and the help text cannot disagree.
 func ISODownloadSize() string { return HumanBytes(isoDownloadBytes) }
+
+// isoIsSelfBooting reports whether this file is media this tool built, which
+// boots without a keypress.
+//
+// Compared by inode: a VM bundle hardlinks the media rather than copying it, so
+// the bundle's install.iso is the same file under another name — and the scan
+// verdict is stored beside the original, where that name cannot find it.
+func isoIsSelfBooting(path string) bool {
+	ino, _, ok := inodeInfo(path)
+	if !ok {
+		return false
+	}
+	built, _, bok := inodeInfo(isoBuiltPath())
+	if !bok || ino != built {
+		return false
+	}
+	info, err := isoInspect(isoBuiltPath())
+	return err == nil && info.SelfBooting
+}

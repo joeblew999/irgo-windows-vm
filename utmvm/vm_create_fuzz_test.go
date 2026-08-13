@@ -49,18 +49,6 @@ func FuzzPlistWellFormed(f *testing.F) {
 	})
 }
 
-// FuzzMajorOf checks version parsing never panics. Version strings come from
-// an app bundle we do not control and may be absent, localised or malformed.
-func FuzzMajorOf(f *testing.F) {
-	for _, s := range []string{"4.7.5", "5.0.0", "", "x", "4", "..", "-1", "999999999999999999999", "4.7.5-beta"} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, v string) {
-		_ = majorOf(v) // must not panic
-		_ = sameMajor(v, VerifiedVersion)
-	})
-}
-
 func hasXMLIllegalRune(s string) bool {
 	for _, r := range s {
 		if r == 0x09 || r == 0x0A || r == 0x0D {

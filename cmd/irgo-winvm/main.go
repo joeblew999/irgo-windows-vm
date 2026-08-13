@@ -102,7 +102,7 @@ func runVMCreate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	say := stamped()
+	say := utmvm.Printer("vm-create")
 
 	// Same shape as iso-create: name every location first, then narrate each
 	// step before doing it. This is the command that can take 45 minutes, so
@@ -116,7 +116,7 @@ func runVMCreate(args []string) error {
 		VMName:  *name,
 		Install: *install,
 		Timeout: *timeout,
-	}, func(line string) { fmt.Println(line) })
+	}, func(line string) { say("%s", line) })
 	if err != nil {
 		return err
 	}
@@ -164,19 +164,20 @@ func reportISOTools() {
 }
 
 func runDoctor() error {
+	out := utmvm.Reporter("doctor")
 	in, err := utmvm.EnsureUTM()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("UTM        %s at %s\n", in.Version, in.Path)
+	out("UTM        %s at %s", in.Version, in.Path)
 	if !in.Compatible {
-		fmt.Printf("           WARNING: schema verified against %s; a major difference\n", utmvm.VerifiedVersion)
-		fmt.Printf("           is the usual cause of \"cannot import this VM\"\n")
+		out("           WARNING: schema verified against %s; a major difference", utmvm.VerifiedVersion)
+		out("           is the usual cause of \"cannot import this VM\"")
 	}
 	if gt, err := utmvm.EnsureGuestTools(); err == nil {
-		fmt.Printf("guest tools present (%s)\n", gt)
+		out("guest tools present (%s)", gt)
 	} else {
-		fmt.Printf("guest tools MISSING — utmctl exec will not work\n  %v\n", err)
+		out("guest tools MISSING — utmctl exec will not work\n  %v", err)
 	}
 	home, _ := os.UserHomeDir()
 	if sp, err := utmvm.CheckSpace(home, ""); err == nil {
@@ -184,7 +185,7 @@ func runDoctor() error {
 		if !sp.OK {
 			state = "LOW"
 		}
-		fmt.Printf("disk       %s (%s)\n", sp, state)
+		out("disk       %s (%s)", sp, state)
 	}
 
 	reportExternals()
@@ -245,7 +246,7 @@ func runVMDelete(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	say := stamped()
+	say := utmvm.Printer("vm-delete")
 
 	b, _ := utmvm.BundlePath(*name)
 	say("STEP 1/2  the VM")
@@ -343,26 +344,28 @@ func bundleOf(e utmvm.Entry) string {
 // runRunDelete removes what `run` put on the guest: the binaries it pushed and
 // any scratch files a run that did not finish left behind.
 func runAppDelete(args []string) error {
+	say := utmvm.Printer("app-delete")
 	fs := flag.NewFlagSet("app-delete", flag.ExitOnError)
 	name := fs.String("vm", "", "VM name or UUID (required)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *name == "" {
-		return fmt.Errorf("run-delete needs -vm")
+		return fmt.Errorf("app-delete needs -vm")
 	}
-	fmt.Printf("guest: %s and %s\n", `C:\Windows\Temp`, `C:\Users\Public`)
+	say("vm:     %s", *name)
+	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
 	e, err := utmvm.Find(*name)
 	if err != nil {
 		// No VM means nothing was ever put on it. An undo that fails when
 		// there is nothing to undo cannot be run twice.
-		fmt.Printf("\nUTM knows no VM %q; nothing to delete\n", *name)
+		say("UTM knows no VM %q; nothing to delete", *name)
 		return nil
 	}
-	if err := utmvm.AppDelete(e.UUID, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }, fs.Args()...); err != nil {
+	if err := utmvm.AppDelete(e.UUID, func(f string, a ...any) { say("  "+f, a...) }, fs.Args()...); err != nil {
 		return err
 	}
-	fmt.Printf("cleaned %s\n", e.Name)
+	say("cleaned %s", e.Name)
 	return nil
 }
 
@@ -377,7 +380,7 @@ func runISOCreate(args []string) error {
 	// Elapsed time on every line. A multi-gigabyte download and an ISO build take
 	// minutes, and without this there is no way to tell a slow step from a
 	// stuck one — which is how a 77-second cached-media check went unnoticed.
-	say := stamped()
+	say := utmvm.Printer("iso-create")
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	say("STEP 0/4  the two programs an ISO build needs")
@@ -420,7 +423,7 @@ func runISODelete(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	say := stamped()
+	say := utmvm.Printer("iso-delete")
 
 	// Everything that would go, listed as what it is — things about to be
 	// deleted, not an inventory. The earlier version printed the same lines
@@ -549,14 +552,6 @@ func runISODelete(args []string) error {
 	return nil
 }
 
-// stamped returns a printer that prefixes every line with seconds elapsed.
-func stamped() func(string, ...any) {
-	start := time.Now()
-	return func(f string, a ...any) {
-		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
-	}
-}
-
 // runVMScreen photographs the guest's display.
 //
 // The only thing that answers "what is it actually doing" when a VM is stuck:
@@ -572,7 +567,7 @@ func runVMScreen(args []string) error {
 	if *out == "" {
 		*out = filepath.Join(utmvm.VMScreensDir(), *name+".png")
 	}
-	say := stamped()
+	say := utmvm.Printer("vm-screen")
 	say("vm:     %s", *name)
 	say("shot:   %s", utmvm.Home(*out))
 	if err := utmvm.Screenshot(*name, *out); err != nil {

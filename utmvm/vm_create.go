@@ -64,10 +64,11 @@ type VMCreateResult struct {
 // and is indistinguishable from "did nothing" unless it says so.
 func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	var res VMCreateResult
-	began := time.Now()
+	// No timestamp here: the caller's printer owns that, and adding one too
+	// produced "[   0.2s] [   0.2s]".
 	say := func(f string, a ...any) {
 		if log != nil {
-			log(fmt.Sprintf("[%6.1fs] ", time.Since(began).Seconds()) + fmt.Sprintf(f, a...))
+			log(fmt.Sprintf(f, a...))
 		}
 	}
 	last := time.Now()
@@ -215,6 +216,23 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 			return res, nil
 		}
 		_ = stage("resume", false, "resumed, but the agent has not answered yet", nil)
+	}
+
+	// Installed but off is the other cheap case, and it was missing: this said
+	// "not installed yet — re-run with -install", which is false and invites a
+	// 45-minute reinstall over working Windows. Booting is a minute or two.
+	if e, fErr := Find(opts.VMName); fErr == nil {
+		if bundle, bErr := BundlePath(e.Name); bErr == nil {
+			if p := Inspect(e.UUID, bundle); p.BootEntryWritten {
+				begin("booting the Windows already on it")
+				if rErr := EnsureReady(e.UUID, bundle, 10*time.Minute); rErr != nil {
+					return res, stage("boot Windows", false, "", rErr)
+				}
+				res.Ready = true
+				_ = stage("boot Windows", false, "booted, agent answering", nil)
+				return res, nil
+			}
+		}
 	}
 
 	if !opts.Install {
@@ -840,12 +858,32 @@ func RunInstall(opts InstallOptions) error {
 		}
 	}
 
+	// Media mastered with efisys_noprompt.bin boots itself. Driving the UEFI
+	// shell then types fs0:, an EFI path and eight Enters into Setup, which is
+	// already showing its language dialog — the exact accident that once left
+	// EFI-path fragments in the Product key field, and which turns an
+	// unattended install into an interactive one.
+	//
+	// So the media is asked whether it needs driving, rather than assumed to.
+	// Asked by inode, not by path. The bundle's install.iso is a hardlink to
+	// the media, so it shares the media's identity but not its scan sidecar —
+	// inspecting the bundle copy would re-read 5 GB and still not know.
+	selfBooting := isoIsSelfBooting(filepath.Join(opts.BundlePath, bundleData, installISO))
+
+	// Always with a display, even for self-booting media. The FIRST boot needs
+	// no keystrokes, but the second does — Setup reboots and must be pointed at
+	// the ESP — and UTM routes input through the display window, so a headless
+	// VM silently swallows them.
 	vm := Named(opts.VMRef)
 	if !vm.IsRunning() {
 		if err := vm.StartWithDisplay(); err != nil {
 			return err
 		}
-		logf("started with a display (keystrokes need one)")
+		if selfBooting {
+			logf("started — this medium boots itself, so nothing is typed at the installer")
+		} else {
+			logf("started with a display (keystrokes need one)")
+		}
 	}
 	// Let the firmware enumerate and settle on the shell prompt.
 	time.Sleep(30 * time.Second)
@@ -882,6 +920,17 @@ func RunInstall(opts InstallOptions) error {
 				// Windows has written to the disk, so the ESP exists and the
 				// stall is the post-copy reboot sitting in the shell.
 				target, what = BootInstalled, "installed Windows off the ESP"
+			}
+			// selfBooting describes the INSTALL MEDIUM, and only the first
+			// boot comes off it. Setup then copies files, reboots, and lands
+			// back at the UEFI shell needing a boot off the ESP — which no
+			// medium does for us. This is checked BEFORE counting an attempt:
+			// waiting for a disc to boot itself is not an attempt at anything,
+			// and counting it burned the budget the second phase needs.
+			if selfBooting && target == BootInstaller {
+				logf("%s — waiting; this medium boots itself", p)
+				stalls = 0
+				continue
 			}
 			assists++
 			if assists > 6 {
@@ -1006,4 +1055,74 @@ func typeBootCommand(vmRef, fsn, path string) error {
 		return fmt.Errorf("sending keystrokes to %s: %w: %s", vmRef, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ---- how much room a Windows install needs ----
+
+// SchemaConfigurationVersion is the value UTM v4 accepts. UTM rejects anything
+// higher outright, so a major-version jump is a real compatibility signal
+// rather than cosmetic drift.
+const SchemaConfigurationVersion = 4
+
+// A Windows 11 install consumes roughly this much once it settles. The sparse
+// disk starts near zero, so the free-space figure at creation time is
+// misleading — the cost arrives later, during install, when failing is most
+// expensive.
+const WindowsInstallBytes = 30 << 30
+
+// SpaceCheck reports whether a target directory can host an install.
+type SpaceCheck struct {
+	FreeBytes     int64
+	RequiredBytes int64
+	ISOBytes      int64 // 0 when the ISO is hardlinked and therefore free
+	OK            bool
+}
+
+func (s SpaceCheck) String() string {
+	return fmt.Sprintf("%s free, ~%s needed", HumanBytes(s.FreeBytes), HumanBytes(s.RequiredBytes))
+}
+
+// CheckSpace verifies there is room before a VM is created.
+//
+// Worth doing up front because the failure mode is so bad: the sparse disk and
+// hardlinked ISO make a new bundle look almost free, then Windows Setup runs
+// out of space mid-install and leaves a corrupt VM that has to be rebuilt from
+// scratch — after a 20-minute wait.
+//
+// The ISO costs nothing when it can be hardlinked into the same volume, so it
+// is only counted when a copy would be needed.
+func CheckSpace(targetDir, isoPath string) (SpaceCheck, error) {
+	var s SpaceCheck
+
+	free, err := statfsAvailable(targetDir)
+	if err != nil {
+		return s, fmt.Errorf("checking free space on %s: %w", targetDir, err)
+	}
+	s.FreeBytes = free
+	s.RequiredBytes = WindowsInstallBytes
+
+	if isoPath != "" && !sameVolume(targetDir, isoPath) {
+		if n, err := fileSize(isoPath); err == nil {
+			s.ISOBytes = n
+			s.RequiredBytes += n
+		}
+	}
+
+	s.OK = s.FreeBytes >= s.RequiredBytes
+	return s, nil
+}
+
+// sameVolume reports whether two paths live on one filesystem, in which case a
+// hardlink works and the ISO is free.
+//
+// A false answer only costs an over-estimate of the space needed, which is the
+// safe direction — so a platform that cannot tell says no.
+func sameVolume(a, b string) bool { return sameDevice(a, b) }
+
+func fileSize(p string) (int64, error) {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
 }

@@ -648,7 +648,7 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 	// in question. Without writing it down the next command scanned the whole
 	// file to rediscover it, which measured at 77 seconds and looked like a
 	// hang every time.
-	isoStoreVerdict(out, isoInfo{IsARM64: true})
+	isoStoreVerdict(out, isoInfo{IsARM64: true, SelfBooting: true})
 	return nil
 }
 

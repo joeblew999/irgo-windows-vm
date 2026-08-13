@@ -299,11 +299,11 @@ description = "Render the markdown into site/dist"
 run = "go -C site run . -root .. -out dist"
 
 [tasks."site:serve"]
-description = "Build the site and serve it at http://localhost:8080 to check it"
+description = "Build the site and serve it at http://localhost:8127 to check it"
 # Building and serving are one command on purpose: a separate server can be
 # pointed at a stale dist from an earlier run, and checking a site that no
 # longer matches the markdown is worse than not checking it.
-run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8080}"
+run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8127}"
 
 [tasks."vm:create"]
 description = "irgo-winvm vm-create"

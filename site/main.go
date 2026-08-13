@@ -72,7 +72,7 @@ func main() {
 	out := flag.String("out", "dist", "directory to write the site into")
 	repo := flag.String("repo", "https://github.com/joeblew999/irgo-windows-vm", "repository URL")
 	serve := flag.Bool("serve", false, "after building, serve it for checking locally")
-	port := flag.Int("port", 8080, "port for -serve")
+	port := flag.Int("port", 8127, "port for -serve")
 	flag.Parse()
 
 	if err := build(*root, *out, *repo); err != nil {

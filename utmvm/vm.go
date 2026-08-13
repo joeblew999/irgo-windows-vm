@@ -774,6 +774,15 @@ func Inspect(vmRef, bundlePath string) Progress {
 		// Written well after creation means the guest, not UTM, wrote it.
 		if bi, err2 := os.Stat(bundlePath + "/config.plist"); err2 == nil {
 			p.BootEntryWritten = st.ModTime().After(bi.ModTime().Add(time.Minute))
+			// Corroborated by the disk, because the mtime alone is a guess: UTM
+			// writes efi_vars.fd on the FIRST power-on, so a bundle merely
+			// booted once with no Windows on it satisfied the comparison and
+			// reported an install that had never happened. Windows cannot have
+			// registered a boot entry without having written the disk, so a
+			// disk below the copy threshold refutes it.
+			if p.BootEntryWritten && p.DiskMiB < copyingMiB {
+				p.BootEntryWritten = false
+			}
 		}
 	}
 	p.AgentUp = Named(vmRef).AgentReady()

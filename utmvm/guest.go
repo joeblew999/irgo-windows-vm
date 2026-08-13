@@ -160,12 +160,21 @@ func RunInGuest(vmRef string, argv []string, timeout time.Duration) (Result, err
 		time.Sleep(2 * time.Second)
 	}
 
-	if out, perr := Pull(vmRef, outFile); perr == nil {
-		res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+	// Both checked. Swallowing these meant a failed pull or an unparsable exit
+	// code returned Result{Stdout: "", ExitCode: 0} with err == nil — a suite
+	// that ran nothing, indistinguishable from a suite that passed. Everything
+	// used to verify this VM works runs through here, so it must not lie.
+	out, perr := Pull(vmRef, outFile)
+	if perr != nil {
+		return res, fmt.Errorf("reading command output from %s: %w", vmRef, perr)
 	}
-	if n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw))); cerr == nil {
-		res.ExitCode = n
+	res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+
+	n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw)))
+	if cerr != nil {
+		return res, fmt.Errorf("unreadable exit code %q from %s: %w", string(rcRaw), vmRef, cerr)
 	}
+	res.ExitCode = n
 
 	_, _ = Named(vmRef).Exec("cmd.exe", "/c", "del /q "+batFile+" "+outFile+" "+rcFile)
 	return res, nil
@@ -287,13 +296,18 @@ func runInteractive(vmRef, guestExe string, args []string, user string, timeout 
 	// supplying one makes schtasks register the task but fail to run it with
 	// "ERROR: Element not found" — which reads like a missing session even when
 	// the user is logged in. The old signature took a pass and discarded it.
+	// user goes through quoteForCmd, which exists in this file for exactly this
+	// and was not used here: an account name with a space broke the command, and
+	// one containing & or > was injection into a batch file running in the guest.
+	//
 	// The schtasks line goes through a pushed batch file for the same reason the
 	// command itself does: it contains quotes, and cmd.exe applies its own
 	// quote-stripping to a quoted string passed through exec, so the line
 	// silently fails.
 	launcher := "@echo off\r\n" +
 		"schtasks /delete /tn " + task + " /f >nul 2>&1\r\n" +
-		"schtasks /create /tn " + task + " /tr \"cmd /c " + inner + "\" /sc once /st 23:59 /ru " + user + " /it /f\r\n" +
+		"schtasks /create /tn " + task + " /tr " + quoteForCmd([]string{"cmd /c " + inner}) +
+		" /sc once /st 23:59 /ru " + quoteForCmd([]string{user}) + " /it /f\r\n" +
 		"schtasks /run /tn " + task + "\r\n"
 	launcherGuest := guestPublic + `\irgo-l-` + stamp + `.bat`
 	if perr := pushScript(vmRef, launcherGuest, launcher); perr != nil {
@@ -317,12 +331,21 @@ func runInteractive(vmRef, guestExe string, args []string, user string, timeout 
 		}
 		time.Sleep(3 * time.Second)
 	}
-	if out, perr := Pull(vmRef, outFile); perr == nil {
-		res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+	// Both checked. Swallowing these meant a failed pull or an unparsable exit
+	// code returned Result{Stdout: "", ExitCode: 0} with err == nil — a suite
+	// that ran nothing, indistinguishable from a suite that passed. Everything
+	// used to verify this VM works runs through here, so it must not lie.
+	out, perr := Pull(vmRef, outFile)
+	if perr != nil {
+		return res, fmt.Errorf("reading command output from %s: %w", vmRef, perr)
 	}
-	if n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw))); cerr == nil {
-		res.ExitCode = n
+	res.Stdout = string(bytes.TrimRight(out, "\r\n"))
+
+	n, cerr := strconv.Atoi(strings.TrimSpace(string(rcRaw)))
+	if cerr != nil {
+		return res, fmt.Errorf("unreadable exit code %q from %s: %w", string(rcRaw), vmRef, cerr)
 	}
+	res.ExitCode = n
 	_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
 	_, _ = vm.Exec("cmd.exe", "/c", "del /q "+inner+" "+outFile+" "+rcFile+" "+launcherGuest)
 	return res, nil

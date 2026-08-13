@@ -85,17 +85,36 @@ the desktop.
 
 Every one of these was taken by the tool itself, named for the stage that
 produced it. Nothing was staged, cropped, or copied across by hand —
-`mise run vm:shots` publishes the newest shot of each stage:
+`mise run vm:shots` publishes the newest shot of each stage.
 
-| stage | |
-|---|---|
-| `booting-1` — UEFI firmware, before Windows | ![booting-1](docs/screens/vm/booting-1.png) |
-| `booting-2` — Windows starting | ![booting-2](docs/screens/vm/booting-2.png) |
-| `ready` — the guest agent answers | ![ready](docs/screens/vm/ready.png) |
-| `copying` — an unattended install, mid-flight | ![copying](docs/screens/vm/copying.png) |
-| `finalising` — copy done, first logon | ![finalising](docs/screens/vm/finalising.png) |
-| `stalled-1` — an install that stopped moving | ![stalled-1](docs/screens/vm/stalled-1.png) |
-| `running-no-agent` — the failure it now refuses to cause | ![running-no-agent](docs/screens/vm/running-no-agent.png) |
+**`booting-1`** — UEFI firmware, before Windows has started
+
+![booting-1](docs/screens/vm/booting-1.png)
+
+**`booting-2`** — Windows starting
+
+![booting-2](docs/screens/vm/booting-2.png)
+
+**`ready`** — the guest agent answers, and the VM is usable
+
+![ready](docs/screens/vm/ready.png)
+
+**`copying`** — an unattended install, mid-flight. Nobody clicked anything
+
+![copying](docs/screens/vm/copying.png)
+
+**`finalising`** — the copy is done, first logon
+
+![finalising](docs/screens/vm/finalising.png)
+
+**`stalled-1`** — an install that stopped moving, photographed so you can see why
+
+![stalled-1](docs/screens/vm/stalled-1.png)
+
+**`running-no-agent`** — the failure it now refuses to cause: keystrokes meant
+for a boot prompt, landing in a logged-in desktop
+
+![running-no-agent](docs/screens/vm/running-no-agent.png)
 
 `booting-N` repeats every few seconds until the agent answers, so a boot that
 hangs leaves a picture of exactly where it stopped.

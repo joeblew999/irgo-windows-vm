@@ -33,6 +33,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -100,6 +101,7 @@ func main() {
 	// what was just built. A separate server could be pointed at a stale dist
 	// from an earlier run, and checking a site that no longer matches the
 	// markdown is worse than not checking it.
+	freePort(*port)
 	addr := fmt.Sprintf("localhost:%d", *port)
 	fmt.Printf("\n  http://%s  — ctrl-c to stop\n", addr)
 	srv := &http.Server{
@@ -111,6 +113,41 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// freePort stops whatever is already listening on the port, and says what it
+// stopped.
+//
+// A previous run left in the background is the normal case: ctrl-c in one
+// terminal, a `&` forgotten in another, and the next `site:serve` dies with
+// "address already in use" while the page you are looking at is served by the
+// old build. That is worse than an error — the site looks stale rather than
+// broken, and the fix is invisible.
+//
+// It names the process before killing it rather than killing silently, because
+// this will one day match something that is not a previous copy of this
+// server, and the only defence against that is saying so.
+//
+// Never fatal: if lsof is missing or the kill is refused, ListenAndServe
+// reports the real problem a moment later.
+func freePort(port int) {
+	out, err := exec.Command("lsof", "-nP", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN").Output()
+	if err != nil {
+		return // nothing listening, or no lsof: either way there is nothing to do
+	}
+	for _, pid := range strings.Fields(string(out)) {
+		name := "?"
+		if b, nErr := exec.Command("ps", "-p", pid, "-o", "comm=").Output(); nErr == nil {
+			name = strings.TrimSpace(string(b))
+		}
+		fmt.Printf("  port %d was held by %s (pid %s) — stopping it\n", port, filepath.Base(name), pid)
+		if kErr := exec.Command("kill", pid).Run(); kErr != nil {
+			fmt.Fprintf(os.Stderr, "  could not stop pid %s: %v\n", pid, kErr)
+			continue
+		}
+	}
+	// The socket is not free the instant the process is signalled.
+	time.Sleep(300 * time.Millisecond)
 }
 
 func build(root, out, repo string) error {

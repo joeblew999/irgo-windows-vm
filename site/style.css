@@ -115,7 +115,7 @@ main { padding: 0 1.5rem 4rem; }
   border-bottom: 1px solid var(--rule);
   vertical-align: top;
 }
-.prose th { font-weight: 650; white-space: nowrap; }
+.prose th { font-weight: 650; }
 .prose tbody tr:hover { background: var(--code-bg); }
 
 .prose img { max-width: 100%; height: auto; border-radius: 6px; }
@@ -158,3 +158,51 @@ footer {
 }
 footer p { max-width: var(--max); margin: 0 auto; }
 footer a { color: var(--accent); }
+
+
+/* --- narrow screens ------------------------------------------------------
+   The page was written once, at desktop width, with no breakpoints at all —
+   which is not "responsive by default", it is untested. A phone got 1.5rem of
+   padding either side of a 375px viewport and a header that wrapped into three
+   lines and then stuck there, over content, for the whole scroll.
+
+   Nothing here changes the layout; it only gives back the room. */
+
+@media (max-width: 34rem) {
+  body { font-size: 15px; }
+
+  main { padding: 0 1rem 3rem; }
+
+  /* Not sticky. On a short screen a wrapped nav bar pinned to the top eats a
+     third of the viewport and never gives it back. */
+  .top {
+    position: static;
+    padding: 1rem;
+    gap: 0.5rem 1rem;
+  }
+  .top nav { gap: 0.9rem; font-size: 0.85rem; }
+  /* Pushing GitHub to the far right is what forced the wrap in the first
+     place; let it sit in the flow with the others. */
+  .top nav a.gh { margin-left: 0; }
+
+  .prose h1 { font-size: 1.6rem; }
+  .prose h2 { font-size: 1.2rem; margin-top: 2rem; }
+  .prose h1 + p { font-size: 1rem; }
+
+  .prose pre { padding: 0.8rem; font-size: 0.85rem; }
+  .prose table { font-size: 0.85rem; }
+  .prose th, .prose td { padding: 0.45rem 0.5rem; }
+
+  /* One per row. A two-column grid of screenshots on a phone is two unreadable
+     thumbnails rather than one legible picture. */
+  .shots { grid-template-columns: 1fr; gap: 1rem; }
+
+  footer { padding: 1.25rem 1rem; }
+}
+
+/* Coarse pointers: tap targets and the horizontal scroll on wide tables need
+   to be reachable with a thumb rather than discovered with a cursor. */
+@media (pointer: coarse) {
+  .top nav a { padding: 0.15rem 0; }
+  .prose table { -webkit-overflow-scrolling: touch; }
+}

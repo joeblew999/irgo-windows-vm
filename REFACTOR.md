@@ -260,6 +260,45 @@ coverage is thin: it is structural, not laziness.
 - **`CanCreateVMs()` is bypassed** at `bundle.go:15`, which compares
   `runtime.GOOS` directly despite the helper's own comment saying not to.
 
+### This is two systems wearing one coat
+
+The largest structural problem in the repo, and the one that made the phase 5
+decision come out wrong the first time.
+
+| | **System A — VM management** | **System B — the probe suite** |
+|---|---|---|
+| what | Windows VMs under UTM on Apple Silicon: create, install unattended, boot, run a binary, suspend, screenshot, build ISOs | Windows programs exercising glaze/native capabilities, plus the harness that runs them and records what works |
+| audience | any Go developer needing Windows-on-ARM64 | glaze/native users, and crgimenes upstream |
+| artefacts | `utmvm`, `irgo-winvm` | `probe/`, `glaze-probes/`, `examples/`, `RESULTS.md`, `UPSTREAM.md` |
+| depends on | nothing here | **System A** |
+
+B depends on A. **A must not know B exists** — and today it does:
+
+- `Options.ProbeDir`, `PayloadOptions.ProbeDir`, `SetupOptions.ProbeDir` —
+  the generic "stage files onto the payload medium" feature is named after one
+  caller's use for it.
+- `external.go:104` lists *"probe binaries"* as a dependency, with the fix
+  `"mise run probes"` — a VM library telling you to run a task in this repo.
+- `external.go:113–124` lists **glaze and native clones** as dependencies of
+  the VM library.
+- `paths.go:203` hardcodes `~/workspace/go/src/github.com/crgimenes` as
+  `IRGO_UPSTREAM_DIR`'s default. **A library for running Windows VMs contains
+  one person's GitHub org.**
+- `config.go:117` justifies the GPU choice by *"running console probes and a
+  WebView2 window"* — a correct finding, filed under the wrong system.
+
+The rule that follows: **nothing in `utmvm` may name a probe, glaze, native or
+crgimenes.** `ProbeDir` becomes `StageDir` and means what it does — files to
+place on the payload medium. The upstream-clone inventory and `IRGO_UPSTREAM_DIR`
+move to System B, which is the only thing that has ever wanted them.
+
+**One repo or two?** One, for now — but only because the boundary is dirty.
+Splitting today distributes the tangle across two repos *and* adds a module
+version to manage between them. Once `utmvm` contains no System B symbol, the
+split is a `git mv` and a `go.mod`, and the decision can be taken on its merits
+— the strongest argument for it being that a Go developer who wants a Windows VM
+should not `go install` something whose README opens with rules about glaze.
+
 ### Found by reading, not grepping
 
 Everything above came from measurement. These came from reading the code line by
@@ -551,10 +590,11 @@ seam phase 6 installs. Fixing it before then means verifying by hand against a
 | 10 | Idempotency through `Ensure`; `setup` becomes thin | M | CI + twice-run | needs 7's `Ensure` to exist |
 | 11 | `context.Context` through long operations | M | **VM** | signature change, after 7–10 settle |
 | 12 | Verbs, typed errors, locking | M | CI | last API change before the CLI |
-| 13 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
-| 14 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
-| 15 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
-| 16 | Tighten enforcement | M | CI | thresholds set from the finished code |
+| 13 | **Separate the two systems** | M | CI | **decides what the CLI is**; after the API work, before 15 |
+| 14 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
+| 15 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
+| 16 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
+| 17 | Tighten enforcement | M | CI | thresholds set from the finished code |
 
 **1 — Lint baseline, then delete.** Land `.golangci.yml` with only the checks
 the code already passes, and turn on `unused` so it *identifies* the dead code
@@ -593,34 +633,44 @@ hardlinked destination is refused; an immutable one is refused; an
 *unanswerable* one is refused; and on a `!darwin` build `CheckWritable` still
 refuses rather than degrading to the directory test.
 
-**5 — Probe distribution. DECIDED: build on demand in the CLI.**
+**5 — Probe distribution. DECIDED: System B owns its own build; mise sequences
+the two systems.**
 
-`irgo-winvm probe -build` cross-compiles the four probes, taking over the 13
-lines of shell that currently live only in `mise.toml` — which is why anyone who
-ran `go install …@latest` cannot build probes at all today, and why
-`create -probes <dir>` asks for binaries they have no way to obtain.
+The first version of this decision put `probe -build` in `irgo-winvm`. That was
+wrong, and wrong in the way the section above describes: it accepted the premise
+that probes are the VM tool's business. They are not. `irgo-winvm probe` and
+`create -probes` are **System B inside System A's CLI** and both go.
 
-The reasoning that settled it: **the probes are this repo's self-test, not a
-user feature.** A user's workflow is `go build -o my.exe && irgo-winvm run
-my.exe`; they never need ours. So requiring a Go toolchain costs nothing real —
-every `go install` user has one by definition, and anyone building a Windows
-`.exe` to test in the VM already has one too.
+So:
+
+- **System B builds its own probes**, from its own source, with its own entry
+  point. Not 13 lines of shell in `mise.toml`, which is what made
+  `go install …@latest` produce a binary that could not build probes at all.
+- **System A gains nothing.** It already has the whole feature:
+  `create -stage <dir>` puts files on the payload medium and `run <exe>` runs
+  one. Neither needs to know what a probe is.
+- **mise sequences them** — build the probes, ensure the VM, run each, collect
+  results. That is a maintainer workflow over two tools, which is exactly what
+  mise is for.
+
+> **mise may *sequence* the two systems. It may not *implement* either.**
+>
+> This is the sharpened form of the existing rule, and it is what the earlier
+> failure was really about: the harm was not that probe-building lived in mise,
+> it was that mise **implemented** it, so the capability existed nowhere else and
+> `go install` users silently got less. Sequencing two CLIs breaks nothing,
+> because each remains complete on its own.
 
 Rejected, with reasons worth keeping:
 
-- **`go:embed`** — works offline and needs no toolchain, but adds ~22 MB (arm64
-  only; ~48 MB for both arches) and puts committed `.exe` files in the repo that
-  drift from the source they were built from. That is precisely the *one fact,
-  two declarations* failure the rest of this plan is removing.
-- **Download from a release** — the right shape, and matches how guest tools
-  already work, but there is no remote, nothing is pushed and no release exists.
-  Keep it as the **fallback for release-binary users** once those exist; the
-  `-build` path is what makes it optional rather than blocking.
-- **Maintainer-only** — honest and smallest, but deletes the demonstration of
-  what this tool is for.
+- **`go:embed` into `irgo-winvm`** — adds ~22 MB (arm64 only; ~48 MB both
+  arches) and commits `.exe` files that drift from their source. Doubly wrong
+  now: it would embed System B's artefacts in System A's binary.
+- **Download from a release** — right shape for System B once a remote exists.
+  Blocked today: no remote, nothing pushed, no release.
 
-Implemented in phase 14 with the rest of the CLI, so it is written once. What
-lands here is the decision and the `mise.toml` task marked for deletion.
+Lands here: the decision, `-probes` renamed to `-stage`, and the mise task
+rewritten to sequence rather than implement.
 
 **6 — Reporting seam and `runner` interface.** One reporting mechanism instead
 of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
@@ -691,20 +741,36 @@ should act on. A lockfile per VM bundle. Route `bundle.go:15` through
 `CanCreateVMs`. `Delete` resolves the bundle by UUID rather than rebuilding a
 path from the display name, and `UnprotectISO`s before removing.
 
-**13 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
-`deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are coupled and
-splitting would force the exported surface to stay large, defeating phase 15.
+**13 — Separate the two systems.** `utmvm` stops naming anything from System B.
+`ProbeDir` becomes `StageDir` on `Options`, `PayloadOptions` and `SetupOptions`
+— the feature is *stage these files on the payload medium*, which is what it
+always was. `external.go` loses the "probe binaries", "glaze clone" and "native
+clone" entries; `paths.go` loses `IRGO_UPSTREAM_DIR` and the hardcoded
+`github.com/crgimenes` default. Both move to System B, their only consumer.
+`config.go:117`'s GPU finding stays but stops citing probes as the reason.
 
-**14 — Rewrite the CLI.** Written fresh against the now-final API, old file
+Then the enforcement, which is the point: **a test that fails if `utmvm`
+mentions a probe, glaze, native or crgimenes.** Grep the package's own source at
+test time. That boundary is invisible to the compiler and will not hold without
+one.
+
+Before the CLI (15) because it decides what the CLI *is* — one binary or two —
+and after the API work (7–12) so the rename lands on final signatures.
+
+**14 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
+`deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are coupled and
+splitting would force the exported surface to stay large, defeating phase 16.
+
+**15 — Rewrite the CLI.** Written fresh against the now-final API, old file
 deleted. Every primitive carried over unchanged; only `up` dropped. New shape:
 `main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
 helper behind the 18 flagsets and 10 copies of *resolve-find-handle*, so an
 unknown VM reads the same from every command — which it currently does not.
 
-**15 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
+**16 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
 symbols; unexport what is absent. Expect 40–60 to go.
 
-**16 — Tighten enforcement.** Below.
+**17 — Tighten enforcement.** Below.
 
 ### If it stops early
 
@@ -713,12 +779,12 @@ and needs no VM**, so it is the best value per hour in the plan. **Phase 6 is
 the highest-value single phase**: without a `runner` seam nothing here can be
 tested, and every later phase has to be verified by hand against a real VM.
 **Phases 7 and 8 fix bugs that are shipping today**, 8 being the one that has
-already destroyed an install. Phases 13–15 are cosmetic by comparison: stop
+already destroyed an install. Phases 14–16 are cosmetic by comparison: stop
 before them without loss.
 
 ---
 
-## Phase 16 in detail — enforcement
+## Phase 17 in detail — enforcement
 
 A cleanup that is not enforced decays back. **Most of this mess was made by an
 agent that did not read what already existed**, so prevention has to work on
@@ -812,7 +878,7 @@ irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
 irgo-winvm iso -protect && irgo-winvm iso -protect
 ```
 
-**Phases 8, 9, 11 and 14 (*VM*)** — a green build means "compiles", not "works", and
+**Phases 8, 9, 11 and 15 (*VM*)** — a green build means "compiles", not "works", and
 these paths fail silently:
 
 ```sh
@@ -856,6 +922,47 @@ git switch master && git merge --no-ff refactor/06-check-ensure
   output in the merge commit body — the only durable record it was run.
 - **`pre-refactor` is tagged** at the last commit whose `RESULTS.md`
   measurements were actually taken.
+
+### Should subagents execute this?
+
+Partly — and the plan's own diagnosis sets the limit.
+
+**The central finding of this document is that most of this mess was written by
+an agent that did not read what already existed.** Fanning work out to several
+agents, each holding a narrow brief and none holding the whole package, is a
+faithful reproduction of the conditions that produced the mess. Parallelism is
+not free here; the scarce resource is *knowing what already exists*, and that is
+exactly what splitting the work destroys.
+
+So the split is by **kind of work**, not by convenience:
+
+| | use an agent | why |
+|---|---|---|
+| **read-only analysis** | **yes, heavily** | how phases 4, 8 and 13 were found at all — two agents reading 26 files line by line surfaced defects that four measurement passes missed |
+| **review of a finished diff** | **yes, always** | an independent reader asking *who else performs this responsibility?* is the check that was missing every time |
+| mechanical phases (1, 2, 3, 16) | one at a time | narrow and CI-verifiable, but they overlap on `paths.go` and `run.go`, so concurrent worktrees would spend the saving on merge conflicts |
+| **architectural phases (6, 7, 13)** | **no** | one coherent design across every file; a brief narrow enough to delegate is narrower than the problem |
+| **VM-verified phases (8, 9, 11, 15)** | **no** | the verification is watching a real Windows install; an agent cannot see the screen |
+
+**Do not run phases concurrently.** They are ordered by dependency, not by
+taste: 6 before everything risky, the API before the CLI, 13 before 15. The
+table's *why here* column is the constraint, and the wall-clock saving on a
+repo of 6,700 lines does not repay breaking it.
+
+The pattern that does work, per phase:
+
+1. **Read** — an agent reads the files the phase touches and reports what is
+   there, including anything the plan got wrong. Phase 5 was decided twice
+   because the first answer reasoned from the tangle instead of finding it.
+2. **Write** — one agent, or the main session, with `AGENTS.md` and this phase's
+   section in context. One concern, one branch.
+3. **Review** — a *different* agent reads the diff cold against the phase's
+   stated goal, and is told to look for a second implementation of something
+   that already exists. This is the adversarial step, and it is the one that
+   catches the failure mode this whole document is about.
+4. **Verify** — CI, or the VM commands above. Output into the merge commit.
+
+Step 3 is the one to keep if any are dropped.
 
 ---
 

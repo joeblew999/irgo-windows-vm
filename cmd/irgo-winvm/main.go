@@ -446,59 +446,75 @@ func runISO(args []string) error {
 // rather than failing with EPERM.
 func runISODelete(args []string) error {
 	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
-	force := fs.Bool("force", false, "delete it even though re-fetching costs 4.2 GB")
+	force := fs.Bool("force", false, "actually delete it")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	say := stamped()
 
-	// Every file `iso` can leave, and every tool it can install, named before
-	// anything is touched.
+	// Everything that would go, listed as what it is — things about to be
+	// deleted, not an inventory. The earlier version printed the same lines
+	// under "media:" and "tool:" and then refused, which read as a status
+	// report followed by an unrelated complaint.
 	p := utmvm.DefaultPaths()
-	files := utmvm.ISOFiles(p)
-	var present []string
-	var total int64
-	for _, f := range files {
+	var files []string
+	var bytes int64
+	for _, f := range utmvm.ISOFiles(p) {
 		if fi, err := os.Stat(f); err == nil {
-			present = append(present, f)
-			total += fi.Size()
-			say("media:  %s (%s)", utmvm.Home(f), utmvm.HumanBytes(fi.Size()))
+			files = append(files, f)
+			bytes += fi.Size()
 		}
 	}
-	if len(present) == 0 {
-		say("media:  %s (nothing there)", utmvm.Home(p.Cache))
-	}
 	tools := utmvm.ISOTools()
+	var installed []int
 	for i := range tools {
-		say("tool:   %-16s %s", tools[i].Name, utmvm.Home(tools[i].Where()))
+		if tools[i].Found() {
+			installed = append(installed, i)
+		}
 	}
-	say("")
 
-	if total > 0 && !*force {
-		return fmt.Errorf("this deletes %s that costs 4.2 GB to re-fetch from a\n"+
-			"  source that rate-limits. Pass -force if you mean it",
-			utmvm.HumanBytes(total))
+	if len(files) == 0 && len(installed) == 0 {
+		say("nothing to delete")
+		say("  media would be at %s", utmvm.Home(p.Cache))
+		for i := range tools {
+			say("  %s would be at %s", tools[i].Name, utmvm.Home(tools[i].Where()))
+		}
+		return nil
 	}
-	for _, f := range present {
+
+	say("would delete:")
+	for _, f := range files {
+		fi, _ := os.Stat(f)
+		say("  %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
+	}
+	for _, i := range installed {
+		say("  %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
+	}
+
+	if !*force {
+		return fmt.Errorf("%d file(s) totalling %s, and %d tool(s).\n"+
+			"  The media costs 4.2 GB to re-fetch from a source that rate-limits.\n"+
+			"  Pass -force to do it",
+			len(files), utmvm.HumanBytes(bytes), len(installed))
+	}
+
+	say("")
+	for _, f := range files {
 		_ = utmvm.ISOUnprotect(f) // uchg blocks unlink
 		if err := os.Remove(f); err != nil {
 			return err
 		}
-		say("  · removed %s", utmvm.Home(f))
+		say("  · deleted %s", utmvm.Home(f))
 	}
-
-	// The tools go whether or not the media was there. Undo runs to completion
-	// from any starting point — stopping early because one half was already
-	// gone would leave the other half behind for good.
+	// The tools go whether or not the media was there: an undo has to run to
+	// completion from any starting point.
 	for i := range tools {
 		where, err := tools[i].Remove()
 		switch {
 		case err != nil:
 			say("  · %s left in place: %v", tools[i].Name, err)
 		case where != "":
-			say("  · removed %s from %s", tools[i].Name, utmvm.Home(where))
-		default:
-			say("  · %s was not installed", tools[i].Name)
+			say("  · uninstalled %s from %s", tools[i].Name, utmvm.Home(where))
 		}
 	}
 	return nil

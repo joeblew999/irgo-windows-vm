@@ -403,18 +403,23 @@ func runISO(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	p := utmvm.DefaultPaths()
+	fmt.Printf("media:  %s\n", utmvm.Home(p.ISO()))
+	fmt.Printf("work:   %s\n", utmvm.Home(p.Work))
+
 	// The two external programs building an ISO needs. Installed here, and
 	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
-	// takes off.
+	// takes off. Every path printed, because "installed" without a location
+	// cannot be checked and cannot be undone by hand.
 	for _, t := range utmvm.ISOTools() {
+		fmt.Printf("tool:   %-16s %s\n", t.Name, utmvm.Home(t.Where()))
 		if t.Found() {
-			fmt.Printf("  · %s at %s\n", t.Name, utmvm.Home(t.Path))
 			continue
 		}
 		if err := t.Ensure(); err != nil {
 			return err
 		}
-		fmt.Printf("  ✓ installed %s\n", t.Name)
+		fmt.Printf("  ✓ %-16s installed at %s\n", t.Name, utmvm.Home(t.Path))
 	}
 
 	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
@@ -442,9 +447,13 @@ func runISODelete(args []string) error {
 		return err
 	}
 
-	// One path. The media lives where `iso` puts it and nowhere else.
+	// Every path this will touch, named before it touches any of it.
 	iso := utmvm.DefaultPaths().ISO()
-	fmt.Printf("media: %s\n", utmvm.Home(iso))
+	fmt.Printf("media:  %s\n", utmvm.Home(iso))
+	for _, t := range utmvm.ISOTools() {
+		fmt.Printf("tool:   %-16s %s\n", t.Name, utmvm.Home(t.Where()))
+	}
+	fmt.Println()
 
 	fi, statErr := os.Stat(iso)
 	if statErr == nil && !*force {
@@ -473,9 +482,9 @@ func runISODelete(args []string) error {
 		case err != nil:
 			fmt.Printf("  · %s left in place: %v\n", t.Name, err)
 		case where != "":
-			fmt.Printf("  · removed %s (%s)\n", t.Name, utmvm.Home(where))
+			fmt.Printf("  · removed %s from %s\n", t.Name, utmvm.Home(where))
 		default:
-			fmt.Printf("  · %s not installed\n", t.Name)
+			fmt.Printf("  · %s was not installed\n", t.Name)
 		}
 	}
 	return nil

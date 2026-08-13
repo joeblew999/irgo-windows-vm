@@ -264,6 +264,17 @@ type Tool struct {
 // Found reports whether the tool is installed.
 func (t Tool) Found() bool { return t.Path != "" }
 
+// Where is the tool's location: where it is, or where it would go.
+//
+// Never empty. "not installed" with no path cannot be checked and cannot be
+// undone by hand, which is the whole reason these commands print locations.
+func (t *Tool) Where() string {
+	if t.resolve() {
+		return t.Path
+	}
+	return filepath.Join(brewBin, t.Name) + " (not installed)"
+}
+
 // resolve looks the executable up on PATH, recording where it was found. The
 // one place in this package that asks that question about an external tool.
 func (t *Tool) resolve() bool {

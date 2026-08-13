@@ -468,6 +468,19 @@ func (v VM) run(args ...string) (string, error) {
 	return combined, nil
 }
 
+// statusStarted is what utmctl reports for a powered-on VM.
+//
+// Compared through IsRunning, never spelled out at a call site: there used to
+// be five such comparisons and two of them were case-sensitive while three used
+// EqualFold, so the same VM could be "running" to one caller and not to another.
+const statusStarted = "started"
+
+// IsRunning reports whether the VM is powered on. One comparison, case-folded.
+func (v VM) IsRunning() bool {
+	st, err := v.Status()
+	return err == nil && strings.EqualFold(st, statusStarted)
+}
+
 // Status returns "started", "stopped", "paused" or similar.
 func (v VM) Status() (string, error) { return v.run("status") }
 
@@ -838,7 +851,7 @@ func RunInstall(opts InstallOptions) error {
 	}
 
 	vm := Named(opts.VMRef)
-	if st, _ := vm.Status(); st != "started" {
+	if !vm.IsRunning() {
 		if err := vm.StartWithDisplay(); err != nil {
 			return err
 		}
@@ -1059,7 +1072,7 @@ func BootAndWait(vmRef string, target BootTarget, diskPath string, timeout time.
 	if vm.AgentReady() {
 		return nil
 	}
-	if st, _ := vm.Status(); !strings.EqualFold(st, "started") {
+	if !vm.IsRunning() {
 		// Must be StartWithDisplay: keystrokes go nowhere on a headless VM.
 		if err := vm.StartWithDisplay(); err != nil {
 			return err
@@ -1114,7 +1127,7 @@ func InspectRemoval(ref string) (Removal, error) {
 	}
 	r.Name = e.Name
 	r.UUID = e.UUID
-	r.Running = strings.EqualFold(e.Status, "started")
+	r.Running = strings.EqualFold(e.Status, statusStarted)
 
 	dir, err := DefaultVMDir()
 	if err != nil {
@@ -1181,7 +1194,7 @@ func Delete(ref string, force bool) (Removal, error) {
 		vm := Named(ref)
 		_ = vm.Stop()
 		for i := 0; i < 15; i++ {
-			if st, _ := vm.Status(); !strings.EqualFold(st, "started") {
+			if !vm.IsRunning() {
 				break
 			}
 			time.Sleep(2 * time.Second)

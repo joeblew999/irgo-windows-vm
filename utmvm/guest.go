@@ -192,7 +192,7 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
 	if vm.AgentReady() {
 		return nil
 	}
-	if st, _ := vm.Status(); st != "started" {
+	if !vm.IsRunning() {
 		// Resuming a suspended VM restores RAM and never reaches the firmware,
 		// so this is both the fast path and the one needing no keystrokes.
 		if err := vm.StartWithDisplay(); err != nil {

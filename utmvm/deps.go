@@ -16,7 +16,7 @@ import (
 )
 
 // ---- from ensure.go ----
-// AppPath is where Homebrew's cask and the direct download both install UTM.
+// AppPath is where UTM is installed.
 const AppPath = "/Applications/UTM.app"
 
 // VerifiedVersion is the UTM release this package's config schema was read
@@ -80,7 +80,7 @@ func DetectUTM() (Install, error) {
 // EnsureUTM returns the installed UTM, installing it if missing.
 //
 // A developer should not have to read a prerequisites list before the tool
-// works. Homebrew is used when present; otherwise UTM's signed .dmg is
+// works: UTM's signed .dmg is
 // downloaded from its GitHub release and the app copied out, so nothing has to
 // be installed first.
 func EnsureUTM() (Install, error) {
@@ -92,23 +92,13 @@ func EnsureUTM() (Install, error) {
 		return in, err
 	}
 
-	// Download it ourselves rather than requiring Homebrew.
+	// Downloaded directly, not via a package manager.
 	//
-	// "Install Homebrew, then install UTM" is two prerequisites for a tool
+	// "Install a package manager, then install UTM" is two prerequisites for a tool
 	// whose whole claim is that a single binary sets the machine up. UTM
 	// publishes a signed .dmg on its GitHub releases, so there is nothing to
 	// require: fetch it, mount it, copy the app out.
 	//
-	// Homebrew is still used when it is present, because a developer who
-	// manages their applications with it will want UTM in that inventory rather
-	// than dropped into /Applications behind its back.
-	if BrewPath() != "" {
-		if runErr := BrewInstall("utm", true); runErr == nil {
-			return DetectUTM()
-		}
-		fmt.Fprintln(os.Stderr, "Homebrew could not install it; downloading the .dmg instead...")
-	}
-
 	if dlErr := InstallUTMFromRelease(nil); dlErr != nil {
 		return in, dlErr
 	}
@@ -227,7 +217,7 @@ func GuestToolsISO() (string, error) {
 // Installing UTM from nothing.
 //
 // The promise this project makes is that a developer runs one binary on a
-// machine with nothing on it. "First install Homebrew, then install UTM" is two
+// machine with nothing on it. "First install a package manager" is one
 // prerequisites for a tool whose entire job is removing them.
 //
 // UTM publishes a signed .dmg on its GitHub releases, so there is nothing to
@@ -356,70 +346,33 @@ func latestUTMDMG() (string, error) {
 		rel.TagName, len(rel.Assets))
 }
 
-// ---- from brew.go ----
+// ---- external tools ----
 // Installing the things this project needs, in one place.
 //
 // There are three of them — UTM, wimlib, xorriso — and before this they were
-// three different stories: UTM shelled out to brew inline, wimlib and xorriso
-// printed a `brew install` line for the developer to copy, and each had its own
-// idea of what to say when brew was missing. Same job, three implementations,
+// three different stories: UTM shelled out to a package manager inline, wimlib
+// and xorriso printed a line for the developer to copy, and each had its own
+// idea of what to say when it was missing. Same job, three implementations,
 // three behaviours.
 //
-// A developer running one binary should not be handed a shopping list. If brew
+// A developer running one binary should not be handed a shopping list. If the tool
 // is there, use it; if it is not, say so once, in one voice.
 
-// BrewPath returns the Homebrew binary, or "" when it is not installed.
-func BrewPath() string {
-	p, err := exec.LookPath("brew")
-	if err != nil {
-		return ""
-	}
-	return p
-}
-
-// BrewInstall installs a formula or cask.
+// Ensure reports whether the tool is available, and says what to install if not.
 //
-// Output goes to stderr as it happens rather than being captured: these take
-// tens of seconds to minutes, and a silent command that long reads as a hang.
-func BrewInstall(name string, cask bool) error {
-	brew := BrewPath()
-	if brew == "" {
-		return fmt.Errorf("Homebrew is not installed")
-	}
-	args := []string{"install"}
-	if cask {
-		args = append(args, "--cask")
-	}
-	args = append(args, name)
-
-	fmt.Fprintf(os.Stderr, "installing %s with Homebrew...\n", name)
-	cmd := exec.Command(brew, args...) //nolint:gosec // name comes from this package's own tables
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	return cmd.Run()
-}
-
-// Ensure makes the tool available, installing it with Homebrew if it is not.
+// It does NOT install anything. Reaching into somebody's machine and running a
+// package manager is not this tool's business — and the two tools that need
+// this are only wanted when building an ISO from scratch, which most people
+// never do.
 //
-// The error when that is impossible names the tool, what it is for, and the one
-// command that fixes it — because "executable file not found in $PATH" tells a
-// developer nothing about which of three tools is missing or why this project
-// wants it.
+// The error names the tool, what it is for, and the one command that fixes it,
+// because "executable file not found in $PATH" tells a developer nothing about
+// which of three tools is missing or why this project wants it.
 func (t *Tool) Ensure() error {
 	if t.resolve() {
 		return nil
 	}
-	if BrewPath() == "" {
-		return fmt.Errorf("%s is needed to %s, and Homebrew is not installed to fetch it.\n"+
-			"  Install Homebrew from https://brew.sh, then: %s",
-			t.Name, t.Why, t.Install())
-	}
-	if err := BrewInstall(t.Formula, false); err != nil {
-		return fmt.Errorf("installing %s: %w\n  Try it by hand: %s", t.Name, err, t.Install())
-	}
-	if !t.resolve() {
-		return fmt.Errorf("%s installed but %s is still not on PATH", t.Formula, t.Name)
-	}
-	return nil
+	return fmt.Errorf("%s is needed to %s.\n  Install it: %s", t.Name, t.Why, t.Install())
 }
 
 // ---- from host.go ----
@@ -555,7 +508,7 @@ func Externals(repoRoot string) []External {
 			Name: "UTM.app",
 			Path: AppPath,
 			Why:  "the hypervisor. Everything here drives it through utmctl, which lives inside the bundle.",
-			Fix:  "brew install --cask utm   (or `irgo-winvm doctor`, which offers to)",
+			Fix:  "irgo-winvm setup, which downloads and installs it",
 			Kind: KindTool,
 		},
 		{
@@ -756,7 +709,7 @@ func lookPath(name string) string {
 		return filepath.Join("(not on PATH)", name)
 	}
 	p := t.Path
-	// Resolve symlinks: Homebrew's bin is a link farm, and the interesting
+	// Resolve symlinks: package-manager bin dirs are link farms, and the interesting
 	// answer is which install it actually points at.
 	if real, rErr := filepath.EvalSymlinks(p); rErr == nil {
 		return real

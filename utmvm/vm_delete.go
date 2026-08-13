@@ -128,12 +128,11 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// Search the cache and work dirs too, not just Downloads and the VM dir:
 	// this project's own ISO normally lives under IRGO_CACHE_DIR, and a survivor
 	// that is not found is a survivor that is not re-protected.
-	dp := DefaultPaths()
 	_, immutable := walkBundle(r.Path)
 	if len(immutable) > 0 {
 		step("… releasing %d protected file(s) so the bundle can be removed", len(immutable))
 	}
-	reprotect := releaseImmutable(immutable, append(isoSearchDirs(), dp.Cache, dp.Work))
+	reprotect := releaseImmutable(immutable, isoSearchDirs())
 	defer func() {
 		for _, p := range reprotect {
 			_ = isoProtect(p)
@@ -384,17 +383,14 @@ func CheckAutomation() error {
 		strings.TrimSpace(string(out)))
 }
 
-// isoSearchDirs are the places worth looking for other names for an ISO: where
-// a browser puts a download, and where UTM keeps the bundles that use it.
+// isoSearchDirs are the two places an ISO's other names can be: the one
+// directory media lives in, and UTM's bundles, which hardlink it.
 //
-// It lives here rather than with the ISO code because knowing about VM bundles
-// is vm-delete's business. Getting media has nothing to do with UTM.
+// Two, and both fixed. It used to include ~/Downloads as well, which was a
+// third place a file could be and therefore a third answer to "where is the
+// media" — the permutation this layout exists to remove.
 func isoSearchDirs() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	dirs := []string{filepath.Join(home, "Downloads")}
+	dirs := []string{ISODir()}
 	if vmDir, err := DefaultVMDir(); err == nil {
 		dirs = append(dirs, vmDir)
 	}

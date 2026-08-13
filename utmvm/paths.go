@@ -15,13 +15,6 @@ package utmvm
 // Every directory can be overridden by an environment variable, so a run can be
 // pointed somewhere else without editing anything:
 //
-//	IRGO_ROOT          everything below defaults under this   (default: cwd)
-//	IRGO_CACHE_DIR     ISOs and other large downloads         (default: <root>/.cache)
-//	IRGO_BIN_DIR       cross-compiled probe binaries          (default: <root>/.bin)
-//	IRGO_WORK_DIR      scratch for building images            (default: <root>/.work)
-//	IRGO_VM_DIR        UTM bundles                            (default: UTM's Documents)
-//	IRGO_UPSTREAM_DIR  glaze and native clones                (default: ~/workspace/go/src/github.com/crgimenes)
-//	IRGO_SCREENS_DIR   screenshots, for documentation         (default: <root>/docs/screens)
 
 import (
 	"fmt"
@@ -31,6 +24,10 @@ import (
 )
 
 // Paths is every directory this project reads or writes.
+//
+// Fixed, all of them. Nothing here is configurable: a second way to answer
+// "where does this go" is a second answer, and the media directory once had
+// three (an env override, a repo-relative guess in doctor, and the default).
 type Paths struct {
 	Root     string
 	Cache    string
@@ -66,10 +63,12 @@ func DefaultPaths() Paths {
 	base := filepath.Join(home, "Library", "Application Support", "irgo-winvm")
 
 	p := Paths{
-		Root:    base,
-		Cache:   filepath.Join(base, "media"),
+		Root: base,
+		// The ISO code owns this location and this reads it back, rather than
+		// spelling out "media" a second time and letting the two drift.
+		Cache:   ISODir(),
 		Bin:     filepath.Join(base, "bin"),
-		Work:    filepath.Join(base, "work"),
+		Work:    ISOWorkDir(),
 		Screens: filepath.Join(base, "screens"),
 	}
 

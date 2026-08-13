@@ -457,22 +457,11 @@ func Externals(repoRoot string) []External {
 	home, _ := os.UserHomeDir()
 	utmData := filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data")
 
-	// Honour the same overrides everything else does, so an inventory taken
-	// with IRGO_CACHE_DIR set reports where the files actually are rather than
-	// where they would be by default — which is the whole point of taking one.
+	// One layout, reported as it is. This used to rewrite Cache, Bin and Work
+	// to repo-relative directories when run inside a checkout, and consult
+	// IRGO_* variables that no longer exist — so doctor described a third set
+	// of locations that neither the ISO code nor anything else used.
 	paths := DefaultPaths()
-	if repoRoot != "" {
-		paths.Root = repoRoot
-		if os.Getenv("IRGO_CACHE_DIR") == "" {
-			paths.Cache = filepath.Join(repoRoot, ".cache")
-		}
-		if os.Getenv("IRGO_BIN_DIR") == "" {
-			paths.Bin = filepath.Join(repoRoot, ".bin")
-		}
-		if os.Getenv("IRGO_WORK_DIR") == "" {
-			paths.Work = filepath.Join(repoRoot, ".work")
-		}
-	}
 
 	list := []External{
 		{
@@ -503,8 +492,8 @@ func Externals(repoRoot string) []External {
 			Name: "Windows 11 ARM64 ISO",
 			Path: paths.ISO(),
 			Why: "the installation media. Microsoft's, not redistributable, and 5 GB. " +
-				"Hardlinked into .cache so nothing depends on ~/Downloads and the second copy costs no space.",
-			Fix:  "fetch with CrystalFetch, then: mkdir -p .cache && ln <the.iso> .cache/win11-arm64.iso",
+				"Downloaded or built by irgo-winvm iso-create.",
+			Fix:  "irgo-winvm iso-create -fetch",
 			Kind: KindMedia,
 			Skip: repoRoot == "",
 		},
@@ -513,7 +502,7 @@ func Externals(repoRoot string) []External {
 			Path: paths.VMs,
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
-			Fix:  "irgo-winvm vm -iso .cache/win11-arm64.iso -name irgo-win11",
+			Fix:  "irgo-winvm vm",
 			Kind: KindState,
 			Dir:  true,
 		},

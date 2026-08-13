@@ -1381,3 +1381,120 @@ func latestUTMDMG() (string, error) {
 	return "", fmt.Errorf("utmvm: UTM release %s has no UTM.dmg among its %d assets",
 		rel.TagName, len(rel.Assets))
 }
+
+// ---- the unattend medium a VM installs from ----
+
+// PayloadOptions describes what goes onto the unattend medium.
+type PayloadOptions struct {
+	// ProbeDir is an optional directory whose top-level files are copied to the
+	// image ROOT — not a subdirectory. go-diskfs mangles Joliet names inside
+	// nested directories into UCS-2 garbage; root entries survive.
+	ProbeDir string
+
+	// SizeMiB sizes the image. It must fit the probes with room to spare.
+	SizeMiB int
+}
+
+// BuildPayload writes the ISO9660 medium that makes the install unattended.
+//
+// A single image, because three different readers each need part of it:
+// Windows Setup finds autounattend.xml at the root, the UEFI shell finds
+// startup.nsh at the root, and the installed Windows finds the probes and
+// run-all.cmd there too. Splitting
+// them across separate media was the earlier design and it meant two images
+// and an extra drive for no benefit.
+func BuildPayload(imagePath string, opts PayloadOptions) error {
+	if opts.SizeMiB == 0 {
+		opts.SizeMiB = 256
+	}
+	// Deliberately an ISO9660 CD, not a FAT disk. Setup did not read
+	// autounattend.xml from a FAT removable disk and silently fell back to an
+	// interactive install; from a CD it applies. See isoBuildImage.
+
+	stage, err := os.MkdirTemp("", "irgo-winvm-payload-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stage) }() // scratch
+
+	if err := os.WriteFile(filepath.Join(stage, "autounattend.xml"), autounattendXML, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stage, "startup.nsh"), startupNSH, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stage, "run-all.cmd"), runAllCmd, 0o644); err != nil {
+		return err
+	}
+
+	// Probe binaries go at the ROOT, not in a subdirectory. go-diskfs's Joliet
+	// encoding mangles names inside nested directories into UCS-2 garbage —
+	// root entries survive intact. Flat is uglier and it works.
+	if opts.ProbeDir != "" {
+		dst := stage
+		entries, err := os.ReadDir(opts.ProbeDir)
+		if err != nil {
+			return fmt.Errorf("probe dir: %w", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if err := copyFile(filepath.Join(opts.ProbeDir, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	return isoBuildImage(imagePath, stage, opts.SizeMiB)
+}
+
+// EnsureReady brings a VM to a state where commands can be run in it.
+//
+// A Windows guest reboots on its own — Windows Update did so mid-session here,
+// dropping the agent with "Port is not connected" — and UTM's firmware does not
+// reliably auto-boot afterwards. So "is the VM ready" cannot be assumed just
+// because it was ready a minute ago, and every entry point that talks to the
+// guest has to be able to recover rather than fail.
+func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
+	vm := Named(vmRef)
+	if vm.AgentReady() {
+		return nil
+	}
+	if !vm.IsRunning() {
+		// Resuming a suspended VM restores RAM and never reaches the firmware,
+		// so this is both the fast path and the one needing no keystrokes.
+		if err := vm.StartWithDisplay(); err != nil {
+			return err
+		}
+		if err := vm.waitForAgent(timeout); err == nil {
+			return nil
+		}
+	}
+	// Running but unreachable means it is sitting in the UEFI shell after a
+	// reboot. Drive it out the same way an install would.
+	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout})
+}
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }() // read-only
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	// Close is CHECKED, not deferred away. A deferred close on a file being
+	// written discards the error, and that error is where a full disk shows
+	// up — the copy reports success and the file is short.
+	if _, err := out.ReadFrom(in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}

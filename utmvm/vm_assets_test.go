@@ -11,7 +11,7 @@ import (
 // to an interactive install with no error explaining why. Each check here is a
 // mistake that was actually made.
 func TestAnswerFileIsValidAndARM64(t *testing.T) {
-	x := AnswerFile()
+	x := autounattendXML
 
 	if err := xml.Unmarshal(x, new(struct {
 		XMLName xml.Name `xml:"unattend"`
@@ -52,7 +52,7 @@ func TestAnswerFileIsValidAndARM64(t *testing.T) {
 // silently, the installer never runs, and the VM comes up with no guest agent —
 // undriveable from the host, with nothing to indicate why.
 func TestGuestToolsInstallExpandsWildcard(t *testing.T) {
-	s := string(AnswerFile())
+	s := string(autounattendXML)
 	body := stripXMLComments(s)
 	i := strings.Index(body, "utm-guest-tools")
 	if i < 0 {
@@ -69,7 +69,7 @@ func TestGuestToolsInstallExpandsWildcard(t *testing.T) {
 // installer first would restart VMCreate forever once Windows is installed.
 func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 	// Comments explain both loaders, so compare only executable lines.
-	s := stripNSHComments(string(StartupScript()))
+	s := stripNSHComments(string(startupNSH))
 	installed := strings.Index(s, "bootmgfw.efi")
 	installer := strings.Index(s, "cdboot_noprompt.efi")
 	if installed < 0 || installer < 0 {

@@ -406,7 +406,7 @@ func runISOCreate(args []string) error {
 
   %s
 
-  uses media already there, or a .esd already downloaded (~40s to build)
+  uses media already there, or a .esd already downloaded (40s to build)
   -fetch    downloads %s from Microsoft when there is neither
 
 Installs wimlib and xorriso if missing. iso-delete removes them.
@@ -465,7 +465,7 @@ func runISODelete(args []string) error {
   %s
 
   no flags   lists what would go, deletes nothing
-  -force     deletes the ISO, keeps the .esd (~40s to rebuild)
+  -force     deletes the ISO, keeps the .esd (40s to rebuild)
   -all       deletes the .esd too (%s, rate-limited)
 
 Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
@@ -481,7 +481,7 @@ Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 	// deleted, not an inventory. The earlier version printed the same lines
 	// under "media:" and "tool:" and then refused, which read as a status
 	// report followed by an unrelated complaint.
-	say("STEP 1/3  looking for media files")
+	say("STEP 1/3  media in %s", utmvm.Home(utmvm.ISODir()))
 	var files []string
 	var bytes int64
 	wanted := utmvm.ISODerived()
@@ -491,12 +491,29 @@ Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 	for _, f := range wanted {
 		fi, err := os.Stat(f)
 		if err != nil {
-			say("          not there: %s", utmvm.Home(f))
+			continue // absent files are not news; the directory is named above
+		}
+		files = append(files, f)
+		// Sidecars go with the file they describe rather than as entries of
+		// their own: 32 bytes of cached scan result each, and listing them
+		// separately made a two-file directory look like four.
+		if strings.HasSuffix(f, ".scan") {
 			continue
 		}
-		say("          found %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
-		files = append(files, f)
+		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), filepath.Base(f))
 		bytes += fi.Size()
+	}
+	if len(files) == 0 {
+		say("          none")
+	}
+	// The .esd is reported even when it is not being deleted: "what is on this
+	// machine" is the question, and a silent 4.2 GB is the answer nobody
+	// expects.
+	if !*all {
+		if fi, err := os.Stat(utmvm.ISOSourcePath()); err == nil {
+			say("          %-9s %s  (kept — pass -all to delete it)",
+				utmvm.HumanBytes(fi.Size()), filepath.Base(utmvm.ISOSourcePath()))
+		}
 	}
 	say("STEP 2/3  looking for the tools iso installed")
 	tools := utmvm.ISOTools()
@@ -519,10 +536,13 @@ Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 		return nil
 	}
 
-	say("STEP 3/3  would delete:")
+	say("STEP 3/3  nothing deleted yet — this is what would go:")
 	for _, f := range files {
+		if strings.HasSuffix(f, ".scan") {
+			continue
+		}
 		fi, _ := os.Stat(f)
-		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
+		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), filepath.Base(f))
 	}
 	for _, i := range installed {
 		say("          %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
@@ -531,7 +551,15 @@ Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 	if !*force {
 		var what []string
 		if len(files) > 0 {
-			what = append(what, fmt.Sprintf("%d file(s), %s", len(files), utmvm.HumanBytes(bytes)))
+			// Sidecars are not counted: they are 32 bytes of cache and saying
+			// "2 files" for one ISO plus its scan result is just wrong.
+			n := 0
+			for _, f := range files {
+				if !strings.HasSuffix(f, ".scan") {
+					n++
+				}
+			}
+			what = append(what, fmt.Sprintf("%d file(s), %s", n, utmvm.HumanBytes(bytes)))
 		}
 		if len(installed) > 0 {
 			what = append(what, fmt.Sprintf("%d tool(s)", len(installed)))
@@ -541,8 +569,10 @@ Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 			if *all {
 				msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
 			} else {
-				msg += "\n  The .esd is kept, so iso-create rebuilds this in about three\n" +
-					"  minutes with no network. Add -all to delete that too."
+				// 40s, measured — see RESULTS.md. It said "about three minutes"
+				// from before the figure was taken.
+				msg += "\n  The .esd is kept, so iso-create rebuilds this in about 40s with\n" +
+					"  no network. Add -all to delete that too."
 			}
 		}
 		return fmt.Errorf("%s\n  Pass -force to do it", msg)

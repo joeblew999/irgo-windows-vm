@@ -830,14 +830,19 @@ func ISODerived() []string {
 	return out
 }
 
+// ISOSourcePath is the .esd itself, for callers that want to report on it
+// without deleting it.
+func ISOSourcePath() string { return isoESDPath() }
+
 // ISOSource is what cannot be rebuilt: the .esd Microsoft served.
 //
 // Kept apart from the derived files because losing it means 4.2 GB from a
 // source that rate-limits, while losing the ISO means three minutes of local
 // work. Deleting both on one flag priced them the same.
 func ISOSource() []string {
-	f := isoESDPath()
-	return []string{f, f + scanSuffix}
+	// No sidecar: an .esd is never scanned for architecture, so listing one
+	// only ever printed a file that cannot exist.
+	return []string{isoESDPath()}
 }
 
 // ISODir is where ISO artefacts live. One place, and this file decides it.

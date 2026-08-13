@@ -43,19 +43,25 @@ func InspectRemoval(ref string) (Removal, error) {
 	if _, err := os.Stat(r.Path); err != nil {
 		return r, fmt.Errorf("bundle not found at %s", r.Path)
 	}
-	r.TotalBytes = reclaimableBytes(r.Path)
+	r.TotalBytes, _ = walkBundle(r.Path)
 	return r, nil
 }
 
-// reclaimableBytes sums file sizes, counting each inode once. A file with more
-// than one link is shared with another bundle, so deleting this one frees
-// nothing — counting it would overstate the saving.
-func reclaimableBytes(root string) int64 {
+// walkBundle visits a bundle once and answers both questions Delete needs:
+// how much space comes back, and which files are immutable.
+//
+// One walk, not two. A file with more than one link is shared with another
+// bundle, so deleting this one frees nothing — counting it would overstate the
+// saving. Immutable files are collected because uchg is per-inode and blocks
+// unlink, so they must be released before anything can remove the bundle.
+func walkBundle(root string) (bytes int64, immutable []string) {
 	seen := map[uint64]bool{}
-	var total int64
-	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
-			return nil
+			return nil //nolint:nilerr // an unreadable entry contributes nothing
+		}
+		if flags, ok := fileFlags(p); ok && flags&uchgFlag != 0 {
+			immutable = append(immutable, p)
 		}
 		ino, nlink, ok := inodeInfo(p)
 		if ok {
@@ -68,13 +74,13 @@ func reclaimableBytes(root string) int64 {
 			seen[ino] = true
 		}
 		if used, ok := diskUsage(p); ok {
-			total += used // blocks actually occupied, not the sparse length
+			bytes += used // blocks actually occupied, not the sparse length
 		} else {
-			total += info.Size()
+			bytes += info.Size()
 		}
 		return nil
 	})
-	return total
+	return bytes, immutable
 }
 
 // Delete stops a VM if needed and removes its bundle.
@@ -114,8 +120,8 @@ func Delete(ref string, force bool) (Removal, error) {
 	// this project's own ISO normally lives under IRGO_CACHE_DIR, and a survivor
 	// that is not found is a survivor that is not re-protected.
 	dp := DefaultPaths()
-	search := append(ISOSearchDirs(), dp.Cache, dp.Work)
-	reprotect := releaseImmutable(r.Path, search)
+	_, immutable := walkBundle(r.Path)
+	reprotect := releaseImmutable(immutable, append(ISOSearchDirs(), dp.Cache, dp.Work))
 	defer func() {
 		for _, p := range reprotect {
 			_ = ProtectISO(p)
@@ -142,22 +148,15 @@ func Delete(ref string, force bool) (Removal, error) {
 	return r, nil
 }
 
-// releaseImmutable clears uchg on every file in the bundle that carries it, and
-// returns the OTHER names for those inodes so they can be re-protected once the
-// bundle is gone. Removing this bundle unlinks one name; the inode survives via
-// the others, and it should not be left unprotected.
-func releaseImmutable(bundle string, searchIn []string) []string {
+// releaseImmutable clears uchg on the given files and returns the OTHER names
+// for those inodes, so they can be re-protected once the bundle is gone.
+// Removing the bundle unlinks one name; the inode survives via the others and
+// should not be left unprotected.
+func releaseImmutable(paths, searchIn []string) []string {
 	var survivors []string
-	_ = filepath.Walk(bundle, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil //nolint:nilerr // an unreadable entry simply has nothing to release
-		}
-		flags, ok := fileFlags(p)
-		if !ok || flags&uchgFlag == 0 {
-			return nil
-		}
-		// Find the siblings BEFORE clearing, while the link still exists.
-		if st, sErr := ISOLinks(p, searchIn); sErr == nil {
+	for _, p := range paths {
+		// Find the siblings BEFORE clearing, while this link still exists.
+		if st, err := ISOLinks(p, searchIn); err == nil {
 			for _, other := range st.Found {
 				if other != p {
 					survivors = append(survivors, other)
@@ -165,8 +164,7 @@ func releaseImmutable(bundle string, searchIn []string) []string {
 			}
 		}
 		_ = UnprotectISO(p)
-		return nil
-	})
+	}
 	return survivors
 }
 

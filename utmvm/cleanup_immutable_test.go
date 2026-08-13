@@ -49,7 +49,8 @@ func TestReleaseImmutableUnblocksRemovalAndReprotects(t *testing.T) {
 			"the premise of releaseImmutable no longer holds")
 	}
 
-	survivors := releaseImmutable(filepath.Dir(bundle), []string{dir})
+	_, immutable := walkBundle(filepath.Dir(bundle))
+	survivors := releaseImmutable(immutable, []string{dir})
 
 	if err := os.RemoveAll(filepath.Dir(bundle)); err != nil {
 		t.Fatalf("after releaseImmutable the bundle should delete: %v", err)

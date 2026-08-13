@@ -248,6 +248,54 @@ and `bundle.go:15` compares `runtime.GOOS` anyway.
 
 ---
 
+## Why not start a new repository beside this one
+
+It is the obvious question given how much is changing, and the answer is no —
+except for one part, where it is yes. The deciding measurement:
+
+| area | lines | comment lines | density |
+|---|---|---|---|
+| `cmd/irgo-winvm` | 1144 | 138 | **12%** |
+| `utmvm` | 5579 | **1418** | **25%** |
+
+**The value of this repository is not its code. It is roughly 1400 lines of
+recorded findings**, each of which cost hours and none of which is recoverable
+by reading the code they annotate: why the display must be `virtio-ramfb-gl`,
+why ESD image 3 needs `--boot`, why the keystroke count is bounded at eight
+(surplus presses reached Setup's UI and destroyed an install), why the answer
+file must be a CD and not a FAT disk, why `%q` must not be re-escaped for
+AppleScript, why `utmctl exec` output cannot be trusted.
+
+A rewrite either loses those or copies them across — and copying them *is* the
+refactor, minus the compiler checking that each one still sits beside the code
+it explains.
+
+Three further costs a new repo pays:
+
+- **The evidence stops being true.** `RESULTS.md` records measurements — 400 ms
+  resume, a self-built ISO installing unattended, every native capability on
+  Windows ARM64 — taken against *these* binaries. A rewrite invalidates all of
+  it until re-measured, and re-measuring costs 45-minute installs.
+- **The tests encode traps, not behaviour.** `config_test.go` exists because UTM
+  rejects a bad config with one generic "cannot import this VM" naming no field.
+  Porting those is work with no gain.
+- **Git history is provenance.** Which commit discovered which fact is currently
+  answerable, and would not be.
+
+And the refactor is mostly *mechanical* — move, rename, extract — where the
+compiler and the existing tests carry you. The genuinely new work (`context`,
+the `runner` seam, typed errors, one reporting interface) is additive and small.
+A rewrite reaches "compiles and looks nicer" quickly and "actually boots Windows
+unattended" slowly, because the hard part was never the structure.
+
+**The exception, and it is worth taking:** `cmd/irgo-winvm` is 1144 lines at 12%
+density — flag plumbing with almost nothing learned embedded in it. Phase 5
+should therefore be **written fresh against the new `utmvm` API and the old file
+deleted**, rather than carefully split. Untangling boilerplate is slower than
+replacing it, and there is nothing there to lose.
+
+So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
+
 ## Phases
 
 Each is one commit, independently verifiable. Ordered so the properties land
@@ -289,10 +337,13 @@ the package testable without a VM.
 `Setup`. Ctrl-C should stop a 45-minute install cleanly rather than leaving
 partial state.
 
-**Phase 5 — split the CLI.** 1144 lines → `main.go` (dispatch only) plus
-`cmd_{setup,vm,boot,guest,media}.go`. Pure movement. Then collapse the boilerplate:
-18 flagsets and 10 copies of *resolve-find-handle* behind one helper, so an
-unknown VM reads the same from every command — which it currently does not.
+**Phase 5 — rewrite the CLI.** Not a split: written fresh against the new
+`utmvm` API, old file deleted. 1144 lines at 12% comment density is flag
+plumbing with nothing learned embedded in it, and untangling boilerplate is
+slower than replacing it. The new shape is `main.go` (dispatch only) plus
+`cmd_{setup,vm,boot,guest,media}.go`, with one helper behind the 18 flagsets and
+10 copies of *resolve-find-handle*, so an unknown VM reads the same from every
+command — which it currently does not.
 
 **Phase 6 — group `utmvm` by subject** with `git mv` so history follows:
 `media_*`, `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are

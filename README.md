@@ -111,12 +111,9 @@ irgo-winvm resume  -vm irgo-win11
 irgo-winvm delete -vm irgo-win11 -force          # stop and reclaim the space
 ```
 
-`setup` covers what `up` did (create + restart UTM + boot) and everything either
-side of it, and skips whatever is already done. `up` and the individual steps
-remain, because each fails differently and is worth retrying alone.
-
-`up` is `create` + `RestartUTM` + `boot`. The steps stay separate underneath
-because each fails differently and is worth retrying alone.
+`setup` covers what `up` does — create, restart UTM, boot — and everything
+either side of it, skipping whatever is already done. `up` and the individual
+steps remain, because each fails differently and is worth retrying alone.
 
 Two behaviours that look like bugs and are not:
 
@@ -273,8 +270,9 @@ Four Go modules, deliberately not one: glaze and native stay out of the CLI's
 dependency graph, which is what lets it cross-compile with nothing installed.
 `mise run check` walks all four; `mise tasks` lists the rest.
 
-See [RESULTS.md](RESULTS.md) for measured results per platform, and
-[UPSTREAM.md](UPSTREAM.md) for what this repo has found in glaze and native.
+See [RESULTS.md](RESULTS.md) for measured results per platform,
+[UPSTREAM.md](UPSTREAM.md) for what this repo has found in glaze and native, and
+[REFACTOR.md](REFACTOR.md) for the planned cleanup of this codebase.
 
 ## Requirements
 

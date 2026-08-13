@@ -213,8 +213,68 @@ description = "irgo-winvm iso-delete"
 run = "go run ./cmd/irgo-winvm iso-delete"
 
 [tasks."iso:test"]
-description = "The ISO tests"
-run = "go test ./utmvm/ -run 'TestVerdict|TestInspectISO|TestProtect|TestISOLinks|TestISO|TestDownload' -v"
+description = "Delete the ISO and rebuild it, keeping the .esd"
+# A real create/delete cycle, like vm:test and app:test. It named a list of unit
+# tests, every one of which `go test ./utmvm/...` in go:check already runs -- so
+# the one stage whose undo destroys 4.9 GB was the one stage with no test of its
+# undo, and the task that looked like it covered it covered nothing new.
+#
+# Disposable without needing a disposable location, which is the whole reason
+# iso-delete has two levels: the default keeps the .esd and only -all removes
+# it. So the cycle costs a rebuild from a file that is already there, and never
+# a second 4.2 GB download.
+#
+# -all is therefore never used here, and must not be. It deletes the one thing
+# that cannot be rebuilt from anything local.
+#
+# It costs 4.9 GB of real disk, once, and measurably: an existing VM's
+# Data/install.iso is a HARDLINK to the media ISO, so the two share one inode
+# and 4.9 GB. The rebuilt ISO is a new inode, and the bundle keeps holding the
+# old one -- 4.9 GB shared becomes 9.8 GB in two files. The space comes back
+# when that VM is deleted. Nothing is broken by it: the VM boots from a disk it
+# installed long ago and the ISO it holds is already spent.
+run = '''
+set -e
+state() { go run ./cmd/irgo-winvm doctor | grep "$1" | awk '{print $5}'; }
+
+if [ "$(state 'ARM64 .esd')" = "MISSING" ]; then
+  echo "no .esd, so a rebuild would mean downloading 4.2 GB again." >&2
+  echo "run: irgo-winvm iso-create -fetch" >&2
+  exit 1
+fi
+
+echo "=== create: idempotent, so this starts from a known-good ISO ==="
+go run ./cmd/irgo-winvm iso-create
+
+echo
+echo "=== delete without -force lists, changes nothing, and does NOT report success ==="
+# Non-zero on purpose, and asserted rather than tolerated: a dry run that exited
+# 0 would be indistinguishable from a delete that had happened, and every
+# `set -e` script treating it as one. vm-delete does the same.
+if go run ./cmd/irgo-winvm iso-delete; then
+  echo "a dry run exited 0; a script cannot tell that from a real delete" >&2
+  exit 1
+fi
+[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "a dry run deleted the ISO" >&2; exit 1; }
+
+echo
+echo "=== delete: the ISO goes, the .esd stays ==="
+go run ./cmd/irgo-winvm iso-delete -force
+[ "$(state 'ARM64 ISO')" = "MISSING" ] || { echo "ISO survived the delete" >&2; exit 1; }
+[ "$(state 'ARM64 .esd')" != "MISSING" ] || { echo "the .esd was deleted; only -all may do that" >&2; exit 1; }
+
+echo
+echo "=== deleting again is success, not an error ==="
+go run ./cmd/irgo-winvm iso-delete -force
+
+echo
+echo "=== create: rebuilt from the .esd, no download ==="
+go run ./cmd/irgo-winvm iso-create
+[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "the ISO was not rebuilt" >&2; exit 1; }
+
+echo
+echo "iso create and delete cycle complete"
+'''
 
 [tasks."vm:create"]
 description = "irgo-winvm vm-create"

@@ -132,6 +132,14 @@ func Externals() []External {
 			Fix: "irgo-winvm iso-create -fetch",
 		},
 		{
+			Name: "Windows 11 ARM64 .esd",
+			Path: ISOSourcePath(),
+			Why: "what the ISO is built FROM, and the one thing here that cannot be rebuilt " +
+				"locally. iso-delete keeps it on purpose and only -all removes it; without it, " +
+				"rebuilding the ISO means downloading 4.2 GB from Microsoft again.",
+			Fix: "irgo-winvm iso-create -fetch",
+		},
+		{
 			Name: "the VM itself",
 			Path: mustVMDir(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +

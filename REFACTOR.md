@@ -24,6 +24,58 @@ files to move. Moving files is the last and least interesting part.
 
 ---
 
+---
+
+## Why not start a new repository beside this one
+
+It is the obvious question given how much is changing, and the answer is no —
+except for one part, where it is yes. The deciding measurement:
+
+| area | lines | comment lines | density |
+|---|---|---|---|
+| `cmd/irgo-winvm` | 1144 | 138 | **12%** |
+| `utmvm` | 5579 | **1418** | **25%** |
+
+**The value of this repository is not its code. It is roughly 1400 lines of
+recorded findings**, each of which cost hours and none of which is recoverable
+by reading the code they annotate: why the display must be `virtio-ramfb-gl`,
+why ESD image 3 needs `--boot`, why the keystroke count is bounded at eight
+(surplus presses reached Setup's UI and destroyed an install), why the answer
+file must be a CD and not a FAT disk, why `%q` must not be re-escaped for
+AppleScript, why `utmctl exec` output cannot be trusted.
+
+A rewrite either loses those or copies them across — and copying them *is* the
+refactor, minus the compiler checking that each one still sits beside the code
+it explains.
+
+Three further costs a new repo pays:
+
+- **The evidence stops being true.** `RESULTS.md` records measurements — 400 ms
+  resume, a self-built ISO installing unattended, every native capability on
+  Windows ARM64 — taken against *these* binaries. A rewrite invalidates all of
+  it until re-measured, and re-measuring costs 45-minute installs.
+- **The tests encode traps, not behaviour.** `config_test.go` exists because UTM
+  rejects a bad config with one generic "cannot import this VM" naming no field.
+  Porting those is work with no gain.
+- **Git history is provenance.** Which commit discovered which fact is currently
+  answerable, and would not be.
+
+And the refactor is mostly *mechanical* — move, rename, extract — where the
+compiler and the existing tests carry you. The genuinely new work (`context`,
+the `runner` seam, typed errors, one reporting interface) is additive and small.
+A rewrite reaches "compiles and looks nicer" quickly and "actually boots Windows
+unattended" slowly, because the hard part was never the structure.
+
+**The exception, and it is worth taking:** `cmd/irgo-winvm` is 1144 lines at 12%
+density — flag plumbing with almost nothing learned embedded in it. Phase 5
+should therefore be **written fresh against the new `utmvm` API and the old file
+deleted**, rather than carefully split. Untangling boilerplate is slower than
+replacing it, and there is nothing there to lose.
+
+So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
+
+---
+
 ## The properties, and where they are violated today
 
 ### 1. Idempotency is a bolted-on layer, not a property of operations
@@ -248,135 +300,35 @@ and `bundle.go:15` compares `runtime.GOOS` anyway.
 
 ---
 
-## Why not start a new repository beside this one
-
-It is the obvious question given how much is changing, and the answer is no —
-except for one part, where it is yes. The deciding measurement:
-
-| area | lines | comment lines | density |
-|---|---|---|---|
-| `cmd/irgo-winvm` | 1144 | 138 | **12%** |
-| `utmvm` | 5579 | **1418** | **25%** |
-
-**The value of this repository is not its code. It is roughly 1400 lines of
-recorded findings**, each of which cost hours and none of which is recoverable
-by reading the code they annotate: why the display must be `virtio-ramfb-gl`,
-why ESD image 3 needs `--boot`, why the keystroke count is bounded at eight
-(surplus presses reached Setup's UI and destroyed an install), why the answer
-file must be a CD and not a FAT disk, why `%q` must not be re-escaped for
-AppleScript, why `utmctl exec` output cannot be trusted.
-
-A rewrite either loses those or copies them across — and copying them *is* the
-refactor, minus the compiler checking that each one still sits beside the code
-it explains.
-
-Three further costs a new repo pays:
-
-- **The evidence stops being true.** `RESULTS.md` records measurements — 400 ms
-  resume, a self-built ISO installing unattended, every native capability on
-  Windows ARM64 — taken against *these* binaries. A rewrite invalidates all of
-  it until re-measured, and re-measuring costs 45-minute installs.
-- **The tests encode traps, not behaviour.** `config_test.go` exists because UTM
-  rejects a bad config with one generic "cannot import this VM" naming no field.
-  Porting those is work with no gain.
-- **Git history is provenance.** Which commit discovered which fact is currently
-  answerable, and would not be.
-
-And the refactor is mostly *mechanical* — move, rename, extract — where the
-compiler and the existing tests carry you. The genuinely new work (`context`,
-the `runner` seam, typed errors, one reporting interface) is additive and small.
-A rewrite reaches "compiles and looks nicer" quickly and "actually boots Windows
-unattended" slowly, because the hard part was never the structure.
-
-**The exception, and it is worth taking:** `cmd/irgo-winvm` is 1144 lines at 12%
-density — flag plumbing with almost nothing learned embedded in it. Phase 5
-should therefore be **written fresh against the new `utmvm` API and the old file
-deleted**, rather than carefully split. Untangling boilerplate is slower than
-replacing it, and there is nothing there to lose.
-
-So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
-
-## Review of this plan's own flaws
-
-Written down because the plan was assembled incrementally and inherited exactly
-the failure it describes.
-
-**The ordering was wrong.** Phase 6b renamed the `utmvm` API *after* Phase 5
-rewrote the CLI against it — writing the CLI twice. **Every `utmvm` API change
-now lands before the CLI is touched.**
-
-**A whole phase was wasted work.** "Cut `up` and `start`" was a separate phase
-*before* the CLI rewrite. If the CLI is being written fresh, you simply do not
-write them. Folded in.
-
-**The numbering (0,1,2,3,4,4b,4c,5,6,6b,7,8) was itself the evidence** — the
-`b`/`c` suffixes are where things were bolted on instead of re-planned.
-Renumbered.
-
-**`probes build` in the CLI is probably wrong, and it exposes a deeper hole.**
-A `go install`ed binary has no `probe/`, `glaze-probes/` or `examples/` source
-tree, so it cannot compile them — the command cannot exist there. Worse, the
-whole probe story is already incoherent: `create -probes <dir>` bakes binaries
-into the payload CD, and an installed binary has no way to obtain those
-binaries. So `irgo-winvm probe` is broken for anyone who did not clone.
-
-That is a **distribution decision, not a placement one**, and it must be made
-before Phase 4:
-
-- **embed** the cross-compiled probes with `go:embed` — a self-contained binary,
-  at the cost of ~20 MB and a release process that cross-compiles first;
-- **download** them from a GitHub release, like the guest tools already are;
-- **accept** that probes are maintainer-only, and say so — then mise *is* their
-  correct home and the "product gap" identified above is not one.
-
-Until this is decided, `probes` stays in mise and the README stops implying
-otherwise.
-
-## Git strategy
-
-Each phase is a branch off `master`, merged only once verified. The reason is
-not ceremony: **CI cannot prove these phases correct.** Phases touching boot,
-run, media or setup have no unit coverage, so a green build means "compiles",
-not "works" — and the failures are silent.
-
-```sh
-git switch -c refactor/01-facts master
-# … work, verify …
-git switch master && git merge --no-ff refactor/01-facts
-```
-
-- **`--no-ff`**, so each phase is one revertable merge commit. When a VM-only
-  regression surfaces three phases later, `git revert -m 1 <merge>` takes back
-  exactly one phase.
-- **One phase per branch**, never two. The point of the sequence is that a
-  bisect lands on a single concern.
-- **Do not merge on CI alone** for phases marked *VM* below. Run the checks in
-  Verification first and put the output in the merge commit body — that is the
-  only durable record that it was actually run.
-- **Tag `pre-refactor` at `master` now.** A single known-good point that predates
-  everything, since `RESULTS.md`'s measurements were taken there.
+---
 
 ## Phases
 
 Ordered so every `utmvm` API change lands before the CLI is rewritten against
 it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
 
-| # | phase | size | verify |
-|---|---|---|---|
-| 1 | Delete dead code | S | CI |
-| 2 | One source of truth for facts | S | CI |
-| 3 | One retry primitive | S | CI |
-| 4 | Decide probe distribution | S | decision |
-| 5 | Idempotency contract | M | CI + twice-run test |
-| 6 | Reporting seam + `runner` interface | L | CI (unlocks unit tests) |
-| 7 | `context.Context` through long operations | M | **VM** |
-| 8 | Verbs, typed errors, locking | M | CI |
-| 9 | Group `utmvm` by subject (`git mv`) | S | CI |
-| 10 | Rewrite the CLI | L | **VM** |
-| 11 | Shrink the exported surface | S | CI |
-| 12 | Enforcement | M | CI |
+| # | phase | size | verify | why here |
+|---|---|---|---|---|
+| 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
+| 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
+| 3 | One retry primitive | S | CI | no dependencies |
+| 4 | Decide probe distribution | S | decision | blocks 10 |
+| 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
+| 6 | Idempotency contract | M | CI + twice-run test | needs 5's tests to be safe |
+| 7 | `context.Context` through long operations | M | **VM** | signature change, after 5 and 6 settle |
+| 8 | Verbs, typed errors, locking | M | CI | last API change before the CLI is written |
+| 9 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
+| 10 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
+| 11 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
+| 12 | Tighten enforcement | M | CI | thresholds set from the finished code |
 
-**1 — Delete dead code.** Eight symbols with no caller: `BuildFATImage`,
+The rule the order follows: **every `utmvm` API change lands before the CLI is
+written against it** (5–8 before 10), and **the phase that makes testing
+possible comes before the phases that need testing** (5 before 6–8).
+
+**1 — Lint baseline, then delete what it finds.** Land `.golangci.yml` with only
+the checks the code already passes, and turn on `unused` — which identifies the
+dead code rather than trusting a grep. Then delete it: Eight symbols with no caller: `BuildFATImage`,
 `GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed
 in the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
 `SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is a
@@ -390,18 +342,20 @@ reason; ISO name and default VM name declared once in `paths.go`.
 **3 — One retry primitive.** Collapse the six hand-written loops.
 
 **4 — Decide probe distribution.** Embed, download, or maintainer-only. Blocks
-phase 10, because it decides whether `probes` is a CLI command at all.
+phase 10, because it decides whether `probes` is a CLI command at all. A
+decision, not code — do it early so phase 10 is not blocked by it.
 
-**5 — Idempotency contract.** `Ensure` semantics on `Create`, `BuildISO`,
+**5 — Reporting seam and `runner` interface.** One reporting mechanism instead
+of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
+The `runner` seam lands here because both are about who may talk to the outside
+world. **This is the phase that makes the package testable without a VM**, which is
+why it comes before idempotency, `context` and the renames rather than after:
+every phase from here on can be verified by a test instead of by hand.
+
+**6 — Idempotency contract.** `Ensure` semantics on `Create`, `BuildISO`,
 `Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skipping
 images already exported. `Setup` shrinks as its subsystems answer for
 themselves.
-
-**6 — Reporting seam and `runner` interface.** One reporting mechanism instead
-of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
-The `runner` seam lands here because both are about who may talk to the outside
-world. **This is the phase that makes the package testable without a VM** — do
-it before the risky ones, and add fakes for the paths that follow.
 
 **7 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
 `EnsureReady`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
@@ -431,12 +385,12 @@ symbols; unexport what is absent. Expect 40–60 to go.
 ### If it stops early
 
 Phases 1–3 are cheap, self-contained and fix a live bug; they are worth doing
-even if nothing else happens. **Phase 6 is the highest-value single phase** —
-without a `runner` seam this codebase cannot be tested, and every later phase is
-verified by hand. Phases 9–11 are cosmetic by comparison: stop before them
-without loss.
+even if nothing else happens. **Phase 5 is the highest-value single phase** —
+without a `runner` seam this codebase cannot be tested at all, and every later
+phase has to be verified by hand against a real VM. Phases 9–11 are cosmetic by
+comparison: stop before them without loss.
 
-## Phase 12 — enforcement: make the mess impossible to repeat
+### Phase 12 in detail — enforcement
 
 A cleanup that is not enforced decays back. This phase is the reason the others
 are worth doing.
@@ -454,16 +408,16 @@ that would have caught the bugs in this repo's history — not a default preset:
 
 | linter | the bug it would have caught |
 |---|---|
-| `unused` | all 8 dead symbols in Phase 0, at the moment each lost its caller |
+| `unused` | all 8 dead symbols in phase 1, at the moment each lost its caller |
 | `dupl` | the 3 wait-for-agent loops, the 3 batch-file blocks, the 4 byte formatters |
 | `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3 |
 | `mnd` | the 8 unexplained timeout literals |
 | `funlen`, `gocognit` | `runUp` at 86 lines doing five things |
 | `errcheck`, `gosec` | already clean; keep them clean |
 
-Land a **minimal config in Phase 1** with only the checks the code already
+Land a **minimal config in phase 1** with only the checks the code already
 passes, so the refactor itself is gated while churn is highest. Tighten the
-thresholds in Phase 12 once the code is final — saving all of it for the end
+thresholds in phase 12 once the code is final — saving all of it for the end
 leaves the noisiest period ungoverned.
 
 ### 12b. Wire it into the gate, not just the docs
@@ -501,19 +455,6 @@ things this repo has learned the hard way:
   or media — those paths have no unit coverage and fail silently.
 - **One fact, one declaration.**
 
-## What not to do
-
-- **Do not "tidy" the comments.** They record findings that cost hours and are
-  not recoverable from the code: why the display is `virtio-ramfb-gl`, why image
-  3 needs `--boot`, why `--save-state` must never be called.
-- **Do not make `boot` idempotent by making it re-drive.** Re-sending keystrokes
-  into a live Setup has destroyed an install. Idempotent here means *detecting
-  that it need not act*, not repeating the action.
-- **Do not touch `assets/`, the answer file, or the plist template.** UTM rejects
-  a bad config with one generic "cannot import this VM" naming no field;
-  `config_test.go` exists because that failure is undebuggable.
-- **Do not do this in one commit.**
-
 ---
 
 ## Verification
@@ -527,8 +468,8 @@ for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
 done
 ```
 
-**Idempotency — run it twice.** The check this repo does not have; Phase 5 adds
-it as a test. Most of it needs no VM: `Prune` twice, `Download` twice to an
+**Idempotency — run it twice.** The check this repo does not have; phase 6 adds
+it as a test (phase 6). Most of it needs no VM: `Prune` twice, `Download` twice to an
 existing file, `BuildISO` twice against a fixture.
 
 ```sh
@@ -548,7 +489,7 @@ irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 The last must still report **~400 ms**. Seconds means a poll interval was lost —
 exactly how that bug happened the first time.
 
-**Once, at the end — a fresh install.** Nothing above exercises it, phases 5 and
+**Once, at the end — a fresh install.** Nothing above exercises it, phases 6 and
 7 both touch it, and it is the only path whose failure costs 45 minutes to
 observe:
 
@@ -562,3 +503,84 @@ Never against `irgo-win11`.
 **Rollback.** Each phase is one `--no-ff` merge, so a regression found late is
 `git revert -m 1 <merge>` — one concern, not a hand-unpick. `pre-refactor` tags
 the last commit whose `RESULTS.md` measurements were actually taken.
+
+---
+
+## Git strategy
+
+Each phase is a branch off `master`, merged only once verified. The reason is
+not ceremony: **CI cannot prove these phases correct.** Phases touching boot,
+run, media or setup have no unit coverage, so a green build means "compiles",
+not "works" — and the failures are silent.
+
+```sh
+git switch -c refactor/01-facts master
+# … work, verify …
+git switch master && git merge --no-ff refactor/01-facts
+```
+
+- **`--no-ff`**, so each phase is one revertable merge commit. When a VM-only
+  regression surfaces three phases later, `git revert -m 1 <merge>` takes back
+  exactly one phase.
+- **One phase per branch**, never two. The point of the sequence is that a
+  bisect lands on a single concern.
+- **Do not merge on CI alone** for phases marked *VM* below. Run the checks in
+  Verification first and put the output in the merge commit body — that is the
+  only durable record that it was actually run.
+- **Tag `pre-refactor` at `master` now.** A single known-good point that predates
+  everything, since `RESULTS.md`'s measurements were taken there.
+
+---
+
+## What not to do
+
+- **Do not "tidy" the comments.** They record findings that cost hours and are
+  not recoverable from the code: why the display is `virtio-ramfb-gl`, why image
+  3 needs `--boot`, why `--save-state` must never be called.
+- **Do not make `boot` idempotent by making it re-drive.** Re-sending keystrokes
+  into a live Setup has destroyed an install. Idempotent here means *detecting
+  that it need not act*, not repeating the action.
+- **Do not touch `assets/`, the answer file, or the plist template.** UTM rejects
+  a bad config with one generic "cannot import this VM" naming no field;
+  `config_test.go` exists because that failure is undebuggable.
+- **Do not do this in one commit.**
+
+---
+
+---
+
+## Appendix: this plan's own flaws, and how they were fixed
+
+Written down because the plan was assembled incrementally and inherited exactly
+the failure it describes.
+
+**The ordering was wrong.** Phase 6b renamed the `utmvm` API *after* Phase 5
+rewrote the CLI against it — writing the CLI twice. **Every `utmvm` API change
+now lands before the CLI is touched.**
+
+**A whole phase was wasted work.** "Cut `up` and `start`" was a separate phase
+*before* the CLI rewrite. If the CLI is being written fresh, you simply do not
+write them. Folded in.
+
+**The numbering (0,1,2,3,4,4b,4c,5,6,6b,7,8) was itself the evidence** — the
+`b`/`c` suffixes are where things were bolted on instead of re-planned.
+Renumbered.
+
+**`probes build` in the CLI is probably wrong, and it exposes a deeper hole.**
+A `go install`ed binary has no `probe/`, `glaze-probes/` or `examples/` source
+tree, so it cannot compile them — the command cannot exist there. Worse, the
+whole probe story is already incoherent: `create -probes <dir>` bakes binaries
+into the payload CD, and an installed binary has no way to obtain those
+binaries. So `irgo-winvm probe` is broken for anyone who did not clone.
+
+That is a **distribution decision, not a placement one**, and it must be made
+before Phase 4:
+
+- **embed** the cross-compiled probes with `go:embed` — a self-contained binary,
+  at the cost of ~20 MB and a release process that cross-compiles first;
+- **download** them from a GitHub release, like the guest tools already are;
+- **accept** that probes are maintainer-only, and say so — then mise *is* their
+  correct home and the "product gap" identified above is not one.
+
+Until this is decided, `probes` stays in mise and the README stops implying
+otherwise.

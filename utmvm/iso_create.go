@@ -537,7 +537,7 @@ type ISOGetOptions struct {
 // The order is what a developer would want if they thought about it: use what
 // is here, then what they built earlier, then build from an ESD they already
 // downloaded, and only then spend 4.2 GB of somebody's bandwidth.
-func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, detail string, skipped bool, err error) {
+func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, skipped bool, err error) {
 	// Named explicitly.
 	if opts.ISO != "" {
 		if _, sErr := os.Stat(opts.ISO); sErr != nil {
@@ -548,8 +548,8 @@ func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, det
 
 	// Already in the cache, under either name.
 	for _, candidate := range []string{
-		paths.ISO(),
-		filepath.Join(paths.Cache, builtISOName),
+		ISOPath(),
+		ISOBuiltPath(),
 	} {
 		if _, sErr := os.Stat(candidate); sErr != nil {
 			continue
@@ -563,11 +563,11 @@ func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, det
 	}
 
 	// An ESD already downloaded — build from it rather than downloading again.
-	esd := filepath.Join(paths.Cache, esdName)
+	esd := ISOESDPath()
 	if _, sErr := os.Stat(esd); sErr == nil {
-		built := filepath.Join(paths.Cache, builtISOName)
+		built := ISOBuiltPath()
 		say("  … building an ISO from the .esd already in the cache")
-		if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
+		if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 			return "", "", false, bErr
 		}
 		return built, filepath.Base(built), false, nil
@@ -578,7 +578,7 @@ func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, det
 			"no Windows media found.\n"+
 				"     Put an ARM64 ISO at %s, or re-run with -fetch to download\n"+
 				"     4.2 GB from Microsoft and build one (needs wimlib and xorriso).",
-			Home(paths.ISO()))
+			Home(ISOPath()))
 	}
 
 	// ISODownload, then build.
@@ -592,7 +592,7 @@ func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, det
 	}
 	e := match[0]
 	say("  … downloading %s (%s)", e.Build(), HumanBytes(e.Size))
-	if err := os.MkdirAll(paths.Cache, 0o755); err != nil {
+	if err := os.MkdirAll(ISODir(), 0o755); err != nil {
 		return "", "", false, err
 	}
 	if dErr := ISODownload(e.FilePath, esd, e.Sha1, func(done, total int64) {
@@ -603,9 +603,46 @@ func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, det
 		return "", "", false, dErr
 	}
 
-	built := filepath.Join(paths.Cache, builtISOName)
-	if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
+	built := ISOBuiltPath()
+	if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 		return "", "", false, bErr
 	}
 	return built, filepath.Base(built), false, nil
+}
+
+func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
+	// Scratch lives beside the media, not in a shared work directory: the ISO
+	// code owns everywhere it writes.
+	media, err := isoWorkDir()
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(media); err != nil {
+		return err
+	}
+	defer os.RemoveAll(media)
+
+	if err := ISOExpandESD(esd, media, func(step string) { say("      %s", step) }); err != nil {
+		return err
+	}
+	return ISOBuild(ISORemasterOptions{
+		Source:   media,
+		Output:   out,
+		Label:    "WINDOWS_ARM64",
+		NoPrompt: true,
+	})
+}
+
+// isoWorkDir is scratch space for expanding an ESD, emptied before use. It
+// needs about 12 GB: the expanded tree is roughly the size of the ISO it will
+// become, plus the images being written into it.
+func isoWorkDir() (string, error) {
+	d := filepath.Join(ISODir(), "work")
+	if err := os.RemoveAll(d); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return "", err
+	}
+	return d, nil
 }

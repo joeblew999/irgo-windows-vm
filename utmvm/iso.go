@@ -54,6 +54,13 @@ const (
 	// PATH alone cannot answer "was this installed by us and where".
 	brewBin = "/opt/homebrew/bin"
 
+	// isoDirName is where every ISO artefact lives, under the user's data
+	// directory. The ISO code owns its own location rather than being handed
+	// one: "where does the ISO go" is an ISO question, and routing it through
+	// a shared Paths struct is how it came to be answerable six different ways
+	// by six environment variables.
+	isoDirName = "media"
+
 	// minWindowsISOBytes separates Windows media from the small ISOs that share
 	// a directory with it: the generated answer file is 32 MB and UTM's guest
 	// tools are 121 MB, and neither will ever install an operating system.
@@ -483,11 +490,11 @@ func (o ISORemasterOptions) BootImage() (rel string, noPrompt bool) {
 }
 
 // ISOBuild writes a bootable Windows ARM64 ISO from a directory of media.
-func ISOBuild(opts ISORemasterOptions, paths Paths) error {
+func ISOBuild(opts ISORemasterOptions) error {
 	if fi, err := os.Stat(opts.Source); err != nil || !fi.IsDir() {
 		return fmt.Errorf("utmvm: source %s is not a directory", opts.Source)
 	}
-	if err := paths.CheckWritable(opts.Output); err != nil {
+	if err := isoCheckWritable(opts.Output); err != nil {
 		return err
 	}
 	if _, err := os.Stat(opts.Output); err == nil {
@@ -800,11 +807,30 @@ func ISOTools() []ISOTool {
 // It did: iso built win11-arm64-built.iso and left a 4.2 GB .esd behind, while
 // iso-delete only knew win11-arm64.iso — so deleting the media removed nothing
 // and reported success.
-func ISOFiles(p Paths) []string {
+func ISOFiles() []string {
 	var out []string
-	for _, n := range []string{isoName, builtISOName, esdName} {
-		f := filepath.Join(p.Cache, n)
+	for _, f := range []string{ISOPath(), ISOBuiltPath(), ISOESDPath()} {
 		out = append(out, f, f+scanSuffix)
 	}
 	return out
 }
+
+// ISODir is where ISO artefacts live. One place, and this file decides it.
+func ISODir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, "Library", "Application Support", "irgo-winvm", isoDirName)
+}
+
+// ISOPath is the Windows media this tool downloads or builds.
+func ISOPath() string { return filepath.Join(ISODir(), isoName) }
+
+// ISOBuiltPath is media this tool mastered itself, kept under a separate name
+// because the two fail differently and telling them apart matters when a boot
+// goes wrong.
+func ISOBuiltPath() string { return filepath.Join(ISODir(), builtISOName) }
+
+// ISOESDPath is the compressed image the catalog serves, before expansion.
+func ISOESDPath() string { return filepath.Join(ISODir(), esdName) }

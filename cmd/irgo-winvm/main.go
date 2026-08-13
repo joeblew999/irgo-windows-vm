@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
@@ -407,9 +408,7 @@ func runISO(args []string) error {
 	// minutes, and without this there is no way to tell a slow step from a
 	// stuck one — which is how a 77-second cached-media check went unnoticed.
 	say := stamped()
-	p := utmvm.DefaultPaths()
-	say("media:  %s", utmvm.Home(p.ISO()))
-	say("work:   %s", utmvm.Home(p.Work))
+	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	// The two external programs building an ISO needs. Installed here, and
 	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
@@ -429,8 +428,7 @@ func runISO(args []string) error {
 	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
 	// ESD expansion; a hypervisor is not involved, and this used to run the
 	// whole setup chain — so fetching an ISO required UTM to be installed first.
-	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: *fetch},
-		utmvm.DefaultPaths(), func(f string, a ...any) { say(f+"\n", a...) })
+	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: *fetch}, say)
 	if err != nil {
 		return err
 	}
@@ -456,10 +454,9 @@ func runISODelete(args []string) error {
 	// deleted, not an inventory. The earlier version printed the same lines
 	// under "media:" and "tool:" and then refused, which read as a status
 	// report followed by an unrelated complaint.
-	p := utmvm.DefaultPaths()
 	var files []string
 	var bytes int64
-	for _, f := range utmvm.ISOFiles(p) {
+	for _, f := range utmvm.ISOFiles() {
 		if fi, err := os.Stat(f); err == nil {
 			files = append(files, f)
 			bytes += fi.Size()
@@ -475,7 +472,7 @@ func runISODelete(args []string) error {
 
 	if len(files) == 0 && len(installed) == 0 {
 		say("nothing to delete")
-		say("  media would be at %s", utmvm.Home(p.Cache))
+		say("  media would be at %s", utmvm.Home(utmvm.ISODir()))
 		for i := range tools {
 			say("  %s would be at %s", tools[i].Name, utmvm.Home(tools[i].Where()))
 		}
@@ -492,10 +489,18 @@ func runISODelete(args []string) error {
 	}
 
 	if !*force {
-		return fmt.Errorf("%d file(s) totalling %s, and %d tool(s).\n"+
-			"  The media costs 4.2 GB to re-fetch from a source that rate-limits.\n"+
-			"  Pass -force to do it",
-			len(files), utmvm.HumanBytes(bytes), len(installed))
+		var what []string
+		if len(files) > 0 {
+			what = append(what, fmt.Sprintf("%d file(s), %s", len(files), utmvm.HumanBytes(bytes)))
+		}
+		if len(installed) > 0 {
+			what = append(what, fmt.Sprintf("%d tool(s)", len(installed)))
+		}
+		msg := strings.Join(what, " and ")
+		if len(files) > 0 {
+			msg += "\n  The media costs 4.2 GB to re-fetch from a source that rate-limits."
+		}
+		return fmt.Errorf("%s\n  Pass -force to do it", msg)
 	}
 
 	say("")

@@ -89,3 +89,32 @@ func isoChflags(path string, set bool) error {
 	}
 	return nil
 }
+
+// isoCheckWritable refuses to clobber media that something else is using.
+//
+// Two refusals, both learned the hard way: an immutable file was protected on
+// purpose, and a file with more than one name shares its blocks — writing to it
+// empties every other name too, including a VM's install.iso.
+//
+// It lives with the ISO code because it is an ISO question. Routing it through
+// a shared Paths helper meant the ISO code had to be handed a struct just to
+// answer "may I write here".
+func isoCheckWritable(dest string) error {
+	abs, err := filepath.Abs(dest)
+	if err != nil {
+		abs = dest
+	}
+	if _, sErr := os.Stat(abs); sErr != nil {
+		return nil // does not exist yet, which is the normal case
+	}
+	if flags, ok := fileFlags(abs); ok && flags&uchgFlag != 0 {
+		return fmt.Errorf("utmvm: %s is immutable — it was protected on purpose\n"+
+			"  Clear it by hand if you really mean to replace it: chflags nouchg %s",
+			Home(abs), Home(abs))
+	}
+	if _, nlink, ok := inodeInfo(abs); ok && nlink > 1 {
+		return fmt.Errorf("utmvm: %s has %d names — it is ONE file shared with %d other place(s),\n"+
+			"  and writing here empties all of them", Home(abs), nlink, nlink-1)
+	}
+	return nil
+}

@@ -126,7 +126,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	// 3. ISOGet. Three ways to already have it, in order of preference, then
 	// building one.
 	say("… checking Windows media (scans the ISO the first time; cached after)")
-	iso, isoDetail, isoSkipped, err := ISOGet(ISOGetOptions{ISO: opts.ISO, Fetch: opts.Fetch}, paths, say)
+	iso, isoDetail, isoSkipped, err := ISOGet(ISOGetOptions{ISO: opts.ISO, Fetch: opts.Fetch}, say)
 	if err != nil {
 		return res, stage("Windows media", false, "", err)
 	}
@@ -254,26 +254,4 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	res.Ready = true
 	_ = stage("install Windows", false, "installed and answering", nil)
 	return res, nil
-}
-
-func buildFromESD(esd, out string, paths Paths, say func(string, ...any)) error {
-	work, err := paths.EnsureWork(12 << 30)
-	if err != nil {
-		return err
-	}
-	media := filepath.Join(work, "media")
-	if err := os.RemoveAll(media); err != nil {
-		return err
-	}
-	defer os.RemoveAll(media)
-
-	if err := ISOExpandESD(esd, media, func(step string) { say("      %s", step) }); err != nil {
-		return err
-	}
-	return ISOBuild(ISORemasterOptions{
-		Source:   media,
-		Output:   out,
-		Label:    "WINDOWS_ARM64",
-		NoPrompt: true,
-	}, paths)
 }

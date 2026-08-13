@@ -552,13 +552,6 @@ func Externals(repoRoot string) []External {
 			Kind: KindTool,
 		},
 		{
-			Name: "mise",
-			Path: lookPath("mise"),
-			Why:  "runs everything in mise.toml. Nothing here requires it — the tasks are all plain `go` commands.",
-			Fix:  "brew install mise",
-			Kind: KindTool,
-		},
-		{
 			Name: "UTM.app",
 			Path: AppPath,
 			Why:  "the hypervisor. Everything here drives it through utmctl, which lives inside the bundle.",

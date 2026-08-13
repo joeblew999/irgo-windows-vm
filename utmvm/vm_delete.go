@@ -117,7 +117,7 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	}
 	// Immutable media has to be released before anything can unlink it.
 	//
-	// ISOProtect sets uchg on the ISO's INODE, and Create hardlinks that same
+	// isoProtect sets uchg on the ISO's INODE, and Create hardlinks that same
 	// inode into the bundle as Data/install.iso — so the flag is on the copy in
 	// here too, and unlink returns EPERM. Measured: `rm -rf` on such a bundle
 	// fails with "Operation not permitted" and leaves the directory behind.
@@ -136,7 +136,7 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	reprotect := releaseImmutable(immutable, append(isoSearchDirs(), dp.Cache, dp.Work))
 	defer func() {
 		for _, p := range reprotect {
-			_ = ISOProtect(p)
+			_ = isoProtect(p)
 		}
 		if len(reprotect) > 0 {
 			step("· re-protected %d shared file(s)", len(reprotect))
@@ -173,7 +173,7 @@ func releaseImmutable(paths, searchIn []string) []string {
 	var survivors []string
 	for _, p := range paths {
 		// Find the siblings BEFORE clearing, while this link still exists.
-		if st, err := ISOLinks(p, searchIn); err == nil {
+		if st, err := isoLinks(p, searchIn); err == nil {
 			for _, other := range st.Found {
 				if other != p {
 					survivors = append(survivors, other)

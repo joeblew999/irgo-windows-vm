@@ -67,7 +67,7 @@ const (
 	minWindowsISOBytes = 1 << 30
 )
 
-type ISOInfo struct {
+type isoInfo struct {
 	// IsARM64 reports whether the ARM64 UEFI bootloader is present. An x86-64
 	// ISO on Apple Silicon boots to a black screen with no diagnostic at all,
 	// so this is the single most valuable check here.
@@ -85,7 +85,7 @@ type ISOInfo struct {
 	SizeBytes int64
 }
 
-// ISOInspect reports what matters about Windows install media.
+// isoInspect reports what matters about Windows install media.
 //
 // Implementation note, because the obvious approach does not work: Windows 11
 // ISOs are UDF, not ISO9660 — they have to be, since install.wim exceeds
@@ -101,27 +101,27 @@ type ISOInfo struct {
 // isoVerdict caches what a scan found, keyed by size and mtime. The ISO is
 // 5.27 GB and immutable; re-reading all of it on every command to answer "is
 // this ARM64" cost 77 seconds per invocation.
-func isoCachedVerdict(path string) (ISOInfo, bool) {
+func isoCachedVerdict(path string) (isoInfo, bool) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return ISOInfo{}, false
+		return isoInfo{}, false
 	}
 	b, rErr := os.ReadFile(path + scanSuffix)
 	if rErr != nil {
-		return ISOInfo{}, false
+		return isoInfo{}, false
 	}
 	var size, mod int64
 	var arm int
 	if _, sErr := fmt.Sscanf(string(b), "%d %d %d", &size, &mod, &arm); sErr != nil {
-		return ISOInfo{}, false
+		return isoInfo{}, false
 	}
 	if size != fi.Size() || mod != fi.ModTime().UnixNano() {
-		return ISOInfo{}, false
+		return isoInfo{}, false
 	}
-	return ISOInfo{SizeBytes: fi.Size(), IsARM64: arm == 1}, true
+	return isoInfo{SizeBytes: fi.Size(), IsARM64: arm == 1}, true
 }
 
-func isoStoreVerdict(path string, info ISOInfo) {
+func isoStoreVerdict(path string, info isoInfo) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return
@@ -133,7 +133,7 @@ func isoStoreVerdict(path string, info ISOInfo) {
 	_ = os.WriteFile(path+scanSuffix, []byte(fmt.Sprintf("%d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm)), 0o644)
 }
 
-func ISOInspect(path string) (ISOInfo, error) {
+func isoInspect(path string) (isoInfo, error) {
 	if v, ok := isoCachedVerdict(path); ok {
 		return v, nil
 	}
@@ -144,8 +144,8 @@ func ISOInspect(path string) (ISOInfo, error) {
 	return info, err
 }
 
-func isoInspectSlow(path string) (ISOInfo, error) {
-	var info ISOInfo
+func isoInspectSlow(path string) (isoInfo, error) {
+	var info isoInfo
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -349,8 +349,8 @@ func ISOFindMasterer() (ISOTool, []ISOTool) {
 	return ISOTool{}, all
 }
 
-// ISOExpandESD lays a Microsoft .esd archive out as a directory of installation
-// media, ready for ISOBuild.
+// isoExpandESD lays a Microsoft .esd archive out as a directory of installation
+// media, ready for isoBuild.
 //
 // The sequence is not guessable and each step has a reason. It follows the one
 // shipped, working reference — CrystalFetch's `esd2iso.sh`, itself Paul
@@ -368,7 +368,7 @@ func ISOFindMasterer() (ISOTool, []ISOTool) {
 // boot.wim is LZX because Windows PE's loader reads it before anything that
 // understands LZMS exists; install.wim is LZMS because it is the 4 GB one and
 // compression is what keeps it near the disc size at all.
-func ISOExpandESD(esd, dir string, progress func(step string)) error {
+func isoExpandESD(esd, dir string, progress func(step string)) error {
 	wim := ISOWimTool()
 	if eErr := wim.Ensure(); eErr != nil {
 		return eErr
@@ -452,8 +452,8 @@ func isoESDImageCount(wimPath, esd string) (int, error) {
 	return 0, fmt.Errorf("utmvm: %s: could not find an image count in wimlib's output", esd)
 }
 
-// ISORemasterOptions configures ISOBuild.
-type ISORemasterOptions struct {
+// isoRemasterOptions configures isoBuild.
+type isoRemasterOptions struct {
 	// Source is a directory holding the complete media layout.
 	Source string
 
@@ -479,7 +479,7 @@ type ISORemasterOptions struct {
 
 // BootImage returns the El Torito image to use, and whether it is the
 // no-prompt variant.
-func (o ISORemasterOptions) BootImage() (rel string, noPrompt bool) {
+func (o isoRemasterOptions) BootImage() (rel string, noPrompt bool) {
 	const dir = "efi/microsoft/boot"
 	if o.NoPrompt {
 		if _, err := os.Stat(filepath.Join(o.Source, dir, "efisys_noprompt.bin")); err == nil {
@@ -489,8 +489,8 @@ func (o ISORemasterOptions) BootImage() (rel string, noPrompt bool) {
 	return dir + "/efisys.bin", false
 }
 
-// ISOBuild writes a bootable Windows ARM64 ISO from a directory of media.
-func ISOBuild(opts ISORemasterOptions) error {
+// isoBuild writes a bootable Windows ARM64 ISO from a directory of media.
+func isoBuild(opts isoRemasterOptions) error {
 	if fi, err := os.Stat(opts.Source); err != nil || !fi.IsDir() {
 		return fmt.Errorf("utmvm: source %s is not a directory", opts.Source)
 	}
@@ -574,7 +574,7 @@ func ISOBuild(opts ISORemasterOptions) error {
 	return nil
 }
 
-// ISOBuildImage writes an ISO9660 image containing srcDir.
+// isoBuildImage writes an ISO9660 image containing srcDir.
 //
 // The answer file must be on an ISO9660 CD, not a FAT disk. This is not a
 // preference — it was established by regression. An earlier version shipped the
@@ -586,7 +586,7 @@ func ISOBuild(opts ISORemasterOptions) error {
 //
 // Joliet is enabled so long filenames survive; plain ISO9660 would truncate
 // autounattend.xml to 8.3 and Setup would never find it.
-func ISOBuildImage(imagePath, srcDir string, sizeMiB int) error {
+func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	if sizeMiB < 16 {
 		sizeMiB = 16
 	}
@@ -724,7 +724,7 @@ func isoCopyInto(fs filesystem.FileSystem, hostPath, target string) error {
 // it through one path and all three names are protected, including the one
 // inside UTM's container that this repo never mentions.
 
-// ISOStatus is what is known about one ISO and every other name for it.
+// isoStatus is what is known about one ISO and every other name for it.
 
 // Ensure makes the tool available, installing it with Homebrew if it is not.
 //
@@ -809,7 +809,7 @@ func ISOTools() []ISOTool {
 // and reported success.
 func ISOFiles() []string {
 	var out []string
-	for _, f := range []string{ISOPath(), ISOBuiltPath(), ISOESDPath()} {
+	for _, f := range []string{isoPath(), isoBuiltPath(), isoESDPath()} {
 		out = append(out, f, f+scanSuffix)
 	}
 	return out
@@ -824,13 +824,13 @@ func ISODir() string {
 	return filepath.Join(home, "Library", "Application Support", "irgo-winvm", isoDirName)
 }
 
-// ISOPath is the Windows media this tool downloads or builds.
-func ISOPath() string { return filepath.Join(ISODir(), isoName) }
+// isoPath is the Windows media this tool downloads or builds.
+func isoPath() string { return filepath.Join(ISODir(), isoName) }
 
-// ISOBuiltPath is media this tool mastered itself, kept under a separate name
+// isoBuiltPath is media this tool mastered itself, kept under a separate name
 // because the two fail differently and telling them apart matters when a boot
 // goes wrong.
-func ISOBuiltPath() string { return filepath.Join(ISODir(), builtISOName) }
+func isoBuiltPath() string { return filepath.Join(ISODir(), builtISOName) }
 
-// ISOESDPath is the compressed image the catalog serves, before expansion.
-func ISOESDPath() string { return filepath.Join(ISODir(), esdName) }
+// isoESDPath is the compressed image the catalog serves, before expansion.
+func isoESDPath() string { return filepath.Join(ISODir(), esdName) }

@@ -137,9 +137,9 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 
 	// 4. Protect it. Free, and the difference between a slip and a 4.2 GB
 	// re-download of something rate-limited.
-	if st, sErr := ISOLinks(iso, nil); sErr == nil && st.Protected {
+	if st, sErr := isoLinks(iso, nil); sErr == nil && st.Protected {
 		_ = stage("protect the media", true, "immutable", nil)
-	} else if pErr := ISOProtect(iso); pErr != nil {
+	} else if pErr := isoProtect(iso); pErr != nil {
 		// Not fatal: an unprotected ISO still works, it is just easier to lose.
 		_ = stage("protect the media", false, "could not: "+pErr.Error(), nil)
 	} else {

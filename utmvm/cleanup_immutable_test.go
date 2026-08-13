@@ -37,7 +37,7 @@ func TestReleaseImmutableUnblocksRemovalAndReprotects(t *testing.T) {
 	if err := os.Link(orig, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := ISOProtect(orig); err != nil {
+	if err := isoProtect(orig); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ISOUnprotect(orig) })
@@ -67,9 +67,9 @@ func TestReleaseImmutableUnblocksRemovalAndReprotects(t *testing.T) {
 		t.Errorf("original %s not reported as a surviving name; it would be left unprotected", orig)
 	}
 	for _, s := range survivors {
-		_ = ISOProtect(s) // what Delete's deferred re-protect does
+		_ = isoProtect(s) // what Delete's deferred re-protect does
 	}
-	st, err := ISOLinks(orig, nil)
+	st, err := isoLinks(orig, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

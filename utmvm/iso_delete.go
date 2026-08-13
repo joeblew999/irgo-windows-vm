@@ -11,7 +11,7 @@ import (
 
 // Finding every name for an ISO, protecting it, and removing it.
 
-type ISOStatus struct {
+type isoStatus struct {
 	Path      string
 	Bytes     int64
 	Links     int      // how many names this inode has, per the filesystem
@@ -19,7 +19,7 @@ type ISOStatus struct {
 	Protected bool
 }
 
-// ISOLinks reports an ISO's size, protection, and every other path that shares
+// isoLinks reports an ISO's size, protection, and every other path that shares
 // its blocks.
 //
 // searchIn bounds the hunt for sibling names. There is no reverse index from
@@ -28,8 +28,8 @@ type ISOStatus struct {
 // looked for and located. Links > len(Found) means a name exists somewhere not
 // searched — a Time Machine local snapshot, usually — and is not cause for
 // alarm.
-func ISOLinks(path string, searchIn []string) (ISOStatus, error) {
-	st := ISOStatus{Path: path}
+func isoLinks(path string, searchIn []string) (isoStatus, error) {
+	st := isoStatus{Path: path}
 	fi, err := os.Stat(path)
 	if err != nil {
 		return st, err
@@ -60,9 +60,9 @@ func ISOLinks(path string, searchIn []string) (ISOStatus, error) {
 	return st, nil
 }
 
-// ISOProtect makes the ISO immutable: it cannot be written, truncated, renamed
+// isoProtect makes the ISO immutable: it cannot be written, truncated, renamed
 // or deleted until ISOUnprotect clears the flag. Idempotent.
-func ISOProtect(path string) error { return isoChflags(path, true) }
+func isoProtect(path string) error { return isoChflags(path, true) }
 
 // ISOUnprotect clears the immutable flag, so the ISO can be replaced or the VM
 // holding a hardlink to it can be deleted. Idempotent.

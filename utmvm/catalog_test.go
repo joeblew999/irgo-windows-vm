@@ -90,7 +90,7 @@ func TestFilterCatalog(t *testing.T) {
 		{"no match at all", "ARM64", "de-de", "", 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ISOFilterCatalog(all, tc.arch, tc.lang, tc.edtn)
+			got := isoFilterCatalog(all, tc.arch, tc.lang, tc.edtn)
 			if len(got) != tc.want {
 				t.Fatalf("got %d, want %d", len(got), tc.want)
 			}
@@ -144,7 +144,7 @@ func TestFetchCatalogLive(t *testing.T) {
 		t.Fatalf("catalog has %d images, which is too few to be the real one", len(all))
 	}
 
-	match := ISOFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
+	match := isoFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
 	if len(match) != 1 {
 		t.Fatalf("ARM64/en-us/consumer matched %d images, want exactly 1 — "+
 			"more than one means the filter no longer identifies a single download", len(match))

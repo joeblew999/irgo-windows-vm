@@ -441,7 +441,7 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	}
 	// Deliberately an ISO9660 CD, not a FAT disk. Setup did not read
 	// autounattend.xml from a FAT removable disk and silently fell back to an
-	// interactive install; from a CD it applies. See ISOBuildImage.
+	// interactive install; from a CD it applies. See isoBuildImage.
 
 	stage, err := os.MkdirTemp("", "irgo-winvm-payload-*")
 	if err != nil {
@@ -478,7 +478,7 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 		}
 	}
 
-	return ISOBuildImage(imagePath, stage, opts.SizeMiB)
+	return isoBuildImage(imagePath, stage, opts.SizeMiB)
 }
 
 func copyFile(src, dst string) error {

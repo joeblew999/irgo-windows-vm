@@ -30,7 +30,7 @@ func TestVerdictRoundTrips(t *testing.T) {
 	if _, ok := isoCachedVerdict(p); ok {
 		t.Fatal("a verdict was returned for an ISO that has never been scanned")
 	}
-	isoStoreVerdict(p, ISOInfo{IsARM64: true})
+	isoStoreVerdict(p, isoInfo{IsARM64: true})
 	got, ok := isoCachedVerdict(p)
 	if !ok {
 		t.Fatal("the verdict just stored was not read back")
@@ -43,7 +43,7 @@ func TestVerdictRoundTrips(t *testing.T) {
 // Size changing means a different file, whatever the name says.
 func TestVerdictInvalidatedBySize(t *testing.T) {
 	p := writeISO(t, "small")
-	isoStoreVerdict(p, ISOInfo{IsARM64: true})
+	isoStoreVerdict(p, isoInfo{IsARM64: true})
 
 	// mtime is restored afterwards, so ONLY the size differs. Without this the
 	// mtime check catches it and the size check is never exercised — which is
@@ -68,7 +68,7 @@ func TestVerdictInvalidatedBySize(t *testing.T) {
 // case that catches an ISO rebuilt in place.
 func TestVerdictInvalidatedByMtime(t *testing.T) {
 	p := writeISO(t, "aaaa")
-	isoStoreVerdict(p, ISOInfo{IsARM64: true})
+	isoStoreVerdict(p, isoInfo{IsARM64: true})
 	if err := os.WriteFile(p, []byte("bbbb"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -98,16 +98,16 @@ func TestVerdictRejectsGarbage(t *testing.T) {
 // making the file unreadable — a real scan would fail, a cache hit will not.
 func TestInspectISOUsesTheCache(t *testing.T) {
 	p := writeISO(t, "not really an iso")
-	isoStoreVerdict(p, ISOInfo{IsARM64: true})
+	isoStoreVerdict(p, isoInfo{IsARM64: true})
 
 	if err := os.Chmod(p, 0o000); err != nil {
 		t.Skip("cannot make the file unreadable here")
 	}
 	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
 
-	info, err := ISOInspect(p)
+	info, err := isoInspect(p)
 	if err != nil {
-		t.Fatalf("ISOInspect re-read the file instead of using the cached verdict: %v", err)
+		t.Fatalf("isoInspect re-read the file instead of using the cached verdict: %v", err)
 	}
 	if !info.IsARM64 {
 		t.Error("the cached verdict was not returned")

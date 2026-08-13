@@ -23,8 +23,8 @@ func buildTestISO(t *testing.T, files map[string]string) string {
 	out := filepath.Join(t.TempDir(), "test.iso")
 	// 64 MiB requested for a few bytes of content, so the trimming below is
 	// actually exercised.
-	if err := ISOBuildImage(out, src, 64); err != nil {
-		t.Fatalf("ISOBuildImage: %v", err)
+	if err := isoBuildImage(out, src, 64); err != nil {
+		t.Fatalf("isoBuildImage: %v", err)
 	}
 	return out
 }
@@ -83,7 +83,7 @@ func TestISOKeepsLongFilenames(t *testing.T) {
 	}
 }
 
-// ISOInspect must agree with what was written, since it is the gate that stops
+// isoInspect must agree with what was written, since it is the gate that stops
 // an x86-64 image being used on Apple Silicon — where it boots to a black
 // screen with no diagnostic.
 func TestInspectISORoundTrip(t *testing.T) {
@@ -91,15 +91,15 @@ func TestInspectISORoundTrip(t *testing.T) {
 		"efi/boot/bootaa64.efi":                  "stub",
 		"efi/microsoft/boot/cdboot_noprompt.efi": "stub",
 	})
-	info, err := ISOInspect(iso)
+	info, err := isoInspect(iso)
 	if err != nil {
-		t.Fatalf("ISOInspect: %v", err)
+		t.Fatalf("isoInspect: %v", err)
 	}
 	if !info.IsARM64 {
-		t.Error("bootaa64.efi was written but ISOInspect reports the image is not ARM64")
+		t.Error("bootaa64.efi was written but isoInspect reports the image is not ARM64")
 	}
 	if !info.HasNoPromptLoader {
-		t.Error("cdboot_noprompt.efi was written but ISOInspect did not find it")
+		t.Error("cdboot_noprompt.efi was written but isoInspect did not find it")
 	}
 	if info.SizeBytes == 0 {
 		t.Error("SizeBytes not reported")
@@ -108,7 +108,7 @@ func TestInspectISORoundTrip(t *testing.T) {
 
 func TestInspectISORejectsNonARM(t *testing.T) {
 	iso := buildTestISO(t, map[string]string{"efi/boot/bootx64.efi": "stub"})
-	info, err := ISOInspect(iso)
+	info, err := isoInspect(iso)
 	if err != nil {
 		t.Fatal(err)
 	}

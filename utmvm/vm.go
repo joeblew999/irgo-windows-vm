@@ -222,7 +222,7 @@ func linkOrCopy(src, dst string) error {
 	if flags, ok := fileFlags(src); ok && flags&uchgFlag != 0 {
 		if uErr := ISOUnprotect(src); uErr == nil {
 			linkErr := os.Link(src, dst)
-			_ = ISOProtect(src)
+			_ = isoProtect(src)
 			if linkErr == nil {
 				return nil
 			}

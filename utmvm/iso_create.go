@@ -312,9 +312,9 @@ func isoTailBytes(b []byte, n int) []byte {
 	return append([]byte(nil), b[len(b)-n:]...)
 }
 
-// ISOFilterCatalog narrows the catalog to what this project can use. Every
+// isoFilterCatalog narrows the catalog to what this project can use. Every
 // argument is optional; an empty string matches everything.
-func ISOFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCatalogEntry {
+func isoFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCatalogEntry {
 	var out []ISOCatalogEntry
 	for _, e := range all {
 		if arch != "" && !strings.EqualFold(e.Architecture, arch) {
@@ -341,7 +341,7 @@ func ISOFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCa
 // staging path and only ever links or renames into place once the hash matches,
 // and refuses outright if the destination is in use.
 
-// ISODownload fetches url to dest, resuming a partial file and verifying sha1.
+// isoDownload fetches url to dest, resuming a partial file and verifying sha1.
 //
 // dest must not exist. The staging file is dest+".part", which is resumable
 // across runs: a 4 GB download that dies at 90% costs the last 10%, not the
@@ -349,7 +349,7 @@ func ISOFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCa
 //
 // progress, if non-nil, is called about once a second with bytes so far and the
 // total. A 4 GB download with no output looks identical to a hung one.
-func ISODownload(url, dest, wantSHA1 string, progress func(done, total int64)) error {
+func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) error {
 	if err := isoRefuseUnsafeDest(dest); err != nil {
 		return err
 	}
@@ -447,7 +447,7 @@ func ISODownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 	}
 
 	if wantSHA1 != "" {
-		got, hErr := ISOFileSHA1(part)
+		got, hErr := isoFileSHA1(part)
 		if hErr != nil {
 			return hErr
 		}
@@ -461,8 +461,8 @@ func ISODownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 	return os.Rename(part, dest)
 }
 
-// ISOFileSHA1 hashes a file, which for a 4 GB ESD takes a few seconds.
-func ISOFileSHA1(path string) (string, error) {
+// isoFileSHA1 hashes a file, which for a 4 GB ESD takes a few seconds.
+func isoFileSHA1(path string) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // caller-supplied path
 	if err != nil {
 		return "", err
@@ -492,7 +492,7 @@ func isoRefuseUnsafeDest(dest string) error {
 	msg := fmt.Sprintf("utmvm: %s already exists (%s)", dest, HumanBytes(fi.Size()))
 
 	if _, nlink, ok := inodeInfo(dest); ok && nlink > 1 {
-		st, sErr := ISOLinks(dest, isoSearchDirs())
+		st, sErr := isoLinks(dest, isoSearchDirs())
 		if sErr == nil {
 			// Not len(Found)-1: dest may not be among Found at all, because the
 			// search covers ~/Downloads and UTM's bundles, and dest is usually
@@ -516,7 +516,7 @@ func isoRefuseUnsafeDest(dest string) error {
 	return fmt.Errorf("%s\n  Move it aside, or choose another -o path. This will not overwrite it.", msg)
 }
 
-// ISOInfo is what we can learn about Windows install media without mounting it.
+// isoInfo is what we can learn about Windows install media without mounting it.
 
 // ISOGetOptions configures ISOGet.
 type ISOGetOptions struct {
@@ -552,15 +552,15 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	// asks when this goes wrong is "what was it doing".
 	say("STEP 1/4  looking for media already here")
 	for _, candidate := range []string{
-		ISOPath(),
-		ISOBuiltPath(),
+		isoPath(),
+		isoBuiltPath(),
 	} {
 		if _, sErr := os.Stat(candidate); sErr != nil {
 			say("          not there: %s", Home(candidate))
 			continue
 		}
 		say("          found %s — checking it is ARM64 (reads the whole file the first time)", Home(candidate))
-		info, iErr := ISOInspect(candidate)
+		info, iErr := isoInspect(candidate)
 		if iErr != nil || !info.IsARM64 {
 			say("  … %s is not ARM64 media; ignoring it", filepath.Base(candidate))
 			continue
@@ -570,10 +570,10 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	}
 
 	// An ESD already downloaded — build from it rather than downloading again.
-	esd := ISOESDPath()
+	esd := isoESDPath()
 	say("STEP 2/4  looking for a downloaded .esd to build from")
 	if _, sErr := os.Stat(esd); sErr == nil {
-		built := ISOBuiltPath()
+		built := isoBuiltPath()
 		say("          found %s — skipping the 4.2 GB download", Home(esd))
 		say("STEP 4/4  expanding it and mastering a bootable ISO")
 		if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
@@ -588,7 +588,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 			"no Windows media found.\n"+
 				"     Put an ARM64 ISO at %s, or re-run with -fetch to download\n"+
 				"     4.2 GB from Microsoft and build one (needs wimlib and xorriso).",
-			Home(ISOPath()))
+			Home(isoPath()))
 	}
 
 	say("STEP 3/4  asking Microsoft which build to download")
@@ -596,7 +596,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	if cErr != nil {
 		return "", "", false, cErr
 	}
-	match := ISOFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
+	match := isoFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
 	if len(match) != 1 {
 		return "", "", false, fmt.Errorf("catalog matched %d ARM64 en-us images, expected exactly 1", len(match))
 	}
@@ -606,7 +606,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	if err := os.MkdirAll(ISODir(), 0o755); err != nil {
 		return "", "", false, err
 	}
-	if dErr := ISODownload(e.FilePath, esd, e.Sha1, func(done, total int64) {
+	if dErr := isoDownload(e.FilePath, esd, e.Sha1, func(done, total int64) {
 		if total > 0 {
 			say("      %s / %s", HumanBytes(done), HumanBytes(total))
 		}
@@ -614,7 +614,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 		return "", "", false, dErr
 	}
 
-	built := ISOBuiltPath()
+	built := isoBuiltPath()
 	say("STEP 4/4  expanding it and mastering a bootable ISO at %s", Home(built))
 	if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 		return "", "", false, bErr
@@ -635,11 +635,11 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 	defer os.RemoveAll(media)
 
 	say("          expanding %s into %s", Home(esd), Home(media))
-	if err := ISOExpandESD(esd, media, func(step string) { say("            %s", step) }); err != nil {
+	if err := isoExpandESD(esd, media, func(step string) { say("            %s", step) }); err != nil {
 		return err
 	}
 	say("          mastering the ISO with xorriso (takes a minute)")
-	return ISOBuild(ISORemasterOptions{
+	return isoBuild(isoRemasterOptions{
 		Source:   media,
 		Output:   out,
 		Label:    "WINDOWS_ARM64",

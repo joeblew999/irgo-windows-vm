@@ -20,23 +20,23 @@ func TestProtectAndUnprotectRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ISOUnprotect(p) })
 
-	st, err := ISOLinks(p, nil)
+	st, err := isoLinks(p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.Protected {
 		t.Fatal("a freshly written file reported as protected")
 	}
-	if err := ISOProtect(p); err != nil {
+	if err := isoProtect(p); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ = ISOLinks(p, nil); !st.Protected {
-		t.Fatal("ISOProtect did not set the flag, or ISOLinks cannot see it")
+	if st, _ = isoLinks(p, nil); !st.Protected {
+		t.Fatal("isoProtect did not set the flag, or isoLinks cannot see it")
 	}
 	if err := ISOUnprotect(p); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ = ISOLinks(p, nil); st.Protected {
+	if st, _ = isoLinks(p, nil); st.Protected {
 		t.Error("ISOUnprotect did not clear the flag")
 	}
 }
@@ -48,7 +48,7 @@ func TestProtectedISORefusesRemoval(t *testing.T) {
 	if err := os.WriteFile(p, []byte("media"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ISOProtect(p); err != nil {
+	if err := isoProtect(p); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ISOUnprotect(p) })
@@ -64,7 +64,7 @@ func TestProtectedISORefusesRemoval(t *testing.T) {
 	}
 }
 
-// ISOLinks reports every other name for the same bytes, which is what tells a
+// isoLinks reports every other name for the same bytes, which is what tells a
 // caller that deleting this one frees nothing.
 func TestISOLinksCountsSharedNames(t *testing.T) {
 	dir := t.TempDir()
@@ -76,7 +76,7 @@ func TestISOLinksCountsSharedNames(t *testing.T) {
 	if err := os.Link(a, b); err != nil {
 		t.Fatal(err)
 	}
-	st, err := ISOLinks(a, []string{dir})
+	st, err := isoLinks(a, []string{dir})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -50,6 +50,7 @@ Every capability exposes exactly two entry points:
 ```go
 Check()  (State,   error)   // pure. No installs, no downloads, no writes.
 Ensure() (Outcome, error)   // acts — and is built on Check
+Clean()  error              // removes what Ensure created
 ```
 
 - **DO** calls `Ensure`.
@@ -57,6 +58,23 @@ Ensure() (Outcome, error)   // acts — and is built on Check
   what makes reproducing a `setup` failure by hand actually reproduce it.
 - **REPORT** calls `Check` **only**, so a diagnostic *cannot* mutate rather than
   being trusted not to.
+
+`Clean` is the third because it is what makes a failed stage recoverable:
+
+> **fix the code → delete what the stage did → run it again**
+
+That loop is the whole recovery story for an unattended run, and it needs each
+stage to know what it created. Without it, a failure leaves debris that the
+retry then trips over — which is not hypothetical, it is three live bugs:
+`RunInteractive` leaves an `irgo-l-*.bat` in the guest on **every** call,
+`Create` leaves a half-built bundle when it fails (and cannot remove it, because
+the ISO hardlink is immutable), and `Download` leaves a `.part` that makes a
+subsequent 416 permanent. Each is a missing `Clean`.
+
+`Clean` also completes idempotency rather than duplicating it. `Ensure` makes
+re-running safe when the previous run *succeeded*; `Clean` makes it safe when
+the previous run *failed halfway* — which this project's own notes call the
+normal case.
 
 Everything below is a consequence of this: the idempotency contract, the thin
 `setup`, the single `VMState`, the primitives kept as a recovery toolkit.
@@ -829,14 +847,20 @@ and poking it. `delete -force` already calls `Stop` internally, so the
 capability exists and is simply not exposed. **Add `stop`** — it is not new
 machinery, it is an unexported one.
 
-The rest cannot be given inverses, so they get the other kind of reversibility:
+The rest have no inverse, so they get `Clean` instead — each stage removes what
+it created, and the retry loop is:
 
-> **Snapshot before every irreversible command, not just after the install.**
+> **fix the code → `Clean` what the stage did → run it again**
 
-This is what the APFS copy-on-write measurement actually buys — 0.003 s and ~0
-bytes per snapshot means "take one before anything one-way" is affordable as a
-blanket rule rather than a judgement call the harness has to make correctly at
-3 a.m.
+That is cheaper and more precise than restoring a whole VM, and it is why
+`Clean` joins `Check` and `Ensure` in the core pattern above rather than being
+harness-only scaffolding.
+
+**Snapshots are the fallback for what `Clean` cannot reach**: guest state after
+an install, where the damage is inside Windows and no host-side cleanup
+describes it. There the APFS measurement pays — 0.003 s and ~0 bytes — so the
+harness snapshots before the handful of commands that dirty the guest
+irrecoverably, and relies on `Clean` everywhere else.
 
 Two axes of reversibility, and the plan needs both:
 

@@ -19,8 +19,8 @@ import (
 	"time"
 )
 
-// CatalogEntry is one downloadable image.
-type CatalogEntry struct {
+// ISOCatalogEntry is one downloadable image.
+type ISOCatalogEntry struct {
 	FileName     string `xml:"FileName"`
 	LanguageCode string `xml:"LanguageCode"`
 	Language     string `xml:"Language"`
@@ -32,13 +32,13 @@ type CatalogEntry struct {
 }
 
 // IsARM64 reports whether this entry is for Apple Silicon's guest architecture.
-func (e CatalogEntry) IsARM64() bool { return strings.EqualFold(e.Architecture, "ARM64") }
+func (e ISOCatalogEntry) IsARM64() bool { return strings.EqualFold(e.Architecture, "ARM64") }
 
 // Build is the Windows build string the filename starts with, e.g.
 // "26100.4349.250607-1500". It is the only version identifier in the catalog —
 // there is no field for it — and it is what distinguishes two entries that are
 // otherwise identical.
-func (e CatalogEntry) Build() string {
+func (e ISOCatalogEntry) Build() string {
 	name := e.FileName
 	// Three dot-separated groups, then an underscore: 26100.4349.250607-1500.ge_...
 	parts := strings.SplitN(name, ".", 4)
@@ -48,13 +48,13 @@ func (e CatalogEntry) Build() string {
 	return strings.Join(parts[:3], ".")
 }
 
-// FetchCatalog downloads and parses the Media Creation Tool catalog.
-func FetchCatalog(timeout time.Duration) ([]CatalogEntry, error) {
+// ISOFetchCatalog downloads and parses the ISOGet Creation ISOTool catalog.
+func ISOFetchCatalog(timeout time.Duration) ([]ISOCatalogEntry, error) {
 	if timeout == 0 {
 		timeout = 2 * time.Minute
 	}
 	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequest(http.MethodGet, CatalogURL, nil)
+	req, err := http.NewRequest(http.MethodGet, ISOCatalogURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -70,20 +70,20 @@ func FetchCatalog(timeout time.Duration) ([]CatalogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	xmlBytes, err := extractCatalogCAB(cab)
+	xmlBytes, err := isoExtractCatalogCAB(cab)
 	if err != nil {
 		return nil, err
 	}
-	return parseCatalog(xmlBytes)
+	return isoParseCatalog(xmlBytes)
 }
 
-// ParseCatalogXML exposes the parser for a products.xml already on disk, so a
+// ISOParseCatalog exposes the parser for a products.xml already on disk, so a
 // cached copy (CrystalFetch keeps one) can be used without a network call.
-func ParseCatalogXML(b []byte) ([]CatalogEntry, error) { return parseCatalog(b) }
+func ISOParseCatalog(b []byte) ([]ISOCatalogEntry, error) { return isoParseCatalog(b) }
 
-func parseCatalog(b []byte) ([]CatalogEntry, error) {
+func isoParseCatalog(b []byte) ([]ISOCatalogEntry, error) {
 	var doc struct {
-		Files []CatalogEntry `xml:"Catalogs>Catalog>PublishedMedia>Files>File"`
+		Files []ISOCatalogEntry `xml:"Catalogs>Catalog>PublishedMedia>Files>File"`
 	}
 	if err := xml.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("utmvm: parsing catalog xml: %w", err)
@@ -95,7 +95,7 @@ func parseCatalog(b []byte) ([]CatalogEntry, error) {
 	// on the URL: 1978 entries collapse to a few hundred real images, and a
 	// listing that shows the same build twenty times is unreadable.
 	seen := map[string]bool{}
-	out := make([]CatalogEntry, 0, len(doc.Files))
+	out := make([]ISOCatalogEntry, 0, len(doc.Files))
 	for _, f := range doc.Files {
 		if f.FilePath == "" || seen[f.FilePath] {
 			continue
@@ -106,15 +106,15 @@ func parseCatalog(b []byte) ([]CatalogEntry, error) {
 	return out, nil
 }
 
-// errNotMSZIP says which compression a cabinet used, so the caller can decide
+// isoErrNotMSZIP says which compression a cabinet used, so the caller can decide
 // whether it has another way to read it.
-type errNotMSZIP struct{ kind uint16 }
+type isoErrNotMSZIP struct{ kind uint16 }
 
-func (e errNotMSZIP) Error() string {
-	return fmt.Sprintf("cabinet uses %s compression, not MSZIP", compressionName(e.kind))
+func (e isoErrNotMSZIP) Error() string {
+	return fmt.Sprintf("cabinet uses %s compression, not MSZIP", isoCompressionName(e.kind))
 }
 
-// extractCatalogCAB reads the catalog out of its cabinet.
+// isoExtractCatalogCAB reads the catalog out of its cabinet.
 //
 // Two attempts, in this order, and the order is the point:
 //
@@ -133,30 +133,30 @@ func (e errNotMSZIP) Error() string {
 //     reason it is acceptable: an external tool that is already present on
 //     every machine this runs on is a different proposition from one somebody
 //     has to go and get.
-func extractCatalogCAB(cab []byte) ([]byte, error) {
-	xmlBytes, err := extractSingleFileCAB(cab)
+func isoExtractCatalogCAB(cab []byte) ([]byte, error) {
+	xmlBytes, err := isoExtractSingleFileCAB(cab)
 	if err == nil {
 		return xmlBytes, nil
 	}
-	var notMSZIP errNotMSZIP
+	var notMSZIP isoErrNotMSZIP
 	if !errors.As(err, &notMSZIP) {
 		return nil, fmt.Errorf("utmvm: catalog cab: %w", err)
 	}
 
-	xmlBytes, exErr := extractCABWithLibarchive(cab)
+	xmlBytes, exErr := isoExtractCABWithLibarchive(cab)
 	if exErr != nil {
 		return nil, fmt.Errorf("utmvm: catalog cab: %w, and %w", err, exErr)
 	}
 	return xmlBytes, nil
 }
 
-// extractCABWithLibarchive shells to bsdtar for the LZX case.
+// isoExtractCABWithLibarchive shells to bsdtar for the LZX case.
 //
 // The temporary directory is ours and is removed: bsdtar extracts by name, and
 // letting an archive choose where to write in a directory somebody else uses is
 // how a download becomes a path-traversal bug.
-func extractCABWithLibarchive(cab []byte) ([]byte, error) {
-	tar := Tool{Name: "bsdtar", Formula: "libarchive",
+func isoExtractCABWithLibarchive(cab []byte) ([]byte, error) {
+	tar := ISOTool{Name: "bsdtar", Formula: "libarchive",
 		Why: "extracts Microsoft's LZX-compressed catalog cabinet"}
 	if !tar.resolve() {
 		return nil, fmt.Errorf("bsdtar not found; it ships with macOS at /usr/bin/bsdtar")
@@ -200,7 +200,7 @@ func extractCABWithLibarchive(cab []byte) ([]byte, error) {
 // for the same reason the rest of this repository is: the whole point is that a
 // clone builds and cross-compiles with nothing installed.
 
-func extractSingleFileCAB(cab []byte) ([]byte, error) {
+func isoExtractSingleFileCAB(cab []byte) ([]byte, error) {
 	if len(cab) < 44 || string(cab[:4]) != "MSCF" {
 		return nil, fmt.Errorf("not a cabinet (bad signature)")
 	}
@@ -235,7 +235,7 @@ func extractSingleFileCAB(cab []byte) ([]byte, error) {
 		//
 		// Named rather than glossed, because "compression type 3" tells whoever
 		// hits this nothing about what to do next.
-		return nil, errNotMSZIP{typeCompress}
+		return nil, isoErrNotMSZIP{typeCompress}
 	}
 
 	var out bytes.Buffer
@@ -266,13 +266,13 @@ func extractSingleFileCAB(cab []byte) ([]byte, error) {
 			return nil, fmt.Errorf("inflating block %d: %w", i, err)
 		}
 		out.Write(plain)
-		dict = tailBytes(plain, 1<<15)
+		dict = isoTailBytes(plain, 1<<15)
 		off = start + cbData
 	}
 	return out.Bytes(), nil
 }
 
-func compressionName(t uint16) string {
+func isoCompressionName(t uint16) string {
 	switch t {
 	case 0:
 		return "uncompressed"
@@ -287,12 +287,12 @@ func compressionName(t uint16) string {
 	}
 }
 
-// CachedCatalogPaths are products.xml files another tool has already extracted.
+// ISOCachedCatalogPaths are products.xml files another tool has already extracted.
 //
 // CrystalFetch — UTM's own authors' ISO downloader — keeps one, which is both
 // the fallback while LZX is unimplemented and the evidence that this catalog is
 // the right source: the ISO this project uses is the entry it lists.
-func CachedCatalogPaths() []string {
+func ISOCachedCatalogPaths() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -303,7 +303,7 @@ func CachedCatalogPaths() []string {
 	}
 }
 
-func tailBytes(b []byte, n int) []byte {
+func isoTailBytes(b []byte, n int) []byte {
 	if len(b) <= n {
 		// Copy: flate keeps a reference to the dictionary, and the caller's
 		// slice is reused on the next iteration.
@@ -312,10 +312,10 @@ func tailBytes(b []byte, n int) []byte {
 	return append([]byte(nil), b[len(b)-n:]...)
 }
 
-// FilterCatalog narrows the catalog to what this project can use. Every
+// ISOFilterCatalog narrows the catalog to what this project can use. Every
 // argument is optional; an empty string matches everything.
-func FilterCatalog(all []CatalogEntry, arch, lang, edition string) []CatalogEntry {
-	var out []CatalogEntry
+func ISOFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCatalogEntry {
+	var out []ISOCatalogEntry
 	for _, e := range all {
 		if arch != "" && !strings.EqualFold(e.Architecture, arch) {
 			continue
@@ -341,7 +341,7 @@ func FilterCatalog(all []CatalogEntry, arch, lang, edition string) []CatalogEntr
 // staging path and only ever links or renames into place once the hash matches,
 // and refuses outright if the destination is in use.
 
-// Download fetches url to dest, resuming a partial file and verifying sha1.
+// ISODownload fetches url to dest, resuming a partial file and verifying sha1.
 //
 // dest must not exist. The staging file is dest+".part", which is resumable
 // across runs: a 4 GB download that dies at 90% costs the last 10%, not the
@@ -349,8 +349,8 @@ func FilterCatalog(all []CatalogEntry, arch, lang, edition string) []CatalogEntr
 //
 // progress, if non-nil, is called about once a second with bytes so far and the
 // total. A 4 GB download with no output looks identical to a hung one.
-func Download(url, dest, wantSHA1 string, progress func(done, total int64)) error {
-	if err := refuseUnsafeDest(dest); err != nil {
+func ISODownload(url, dest, wantSHA1 string, progress func(done, total int64)) error {
+	if err := isoRefuseUnsafeDest(dest); err != nil {
 		return err
 	}
 	part := dest + ".part"
@@ -447,7 +447,7 @@ func Download(url, dest, wantSHA1 string, progress func(done, total int64)) erro
 	}
 
 	if wantSHA1 != "" {
-		got, hErr := FileSHA1(part)
+		got, hErr := ISOFileSHA1(part)
 		if hErr != nil {
 			return hErr
 		}
@@ -461,8 +461,8 @@ func Download(url, dest, wantSHA1 string, progress func(done, total int64)) erro
 	return os.Rename(part, dest)
 }
 
-// FileSHA1 hashes a file, which for a 4 GB ESD takes a few seconds.
-func FileSHA1(path string) (string, error) {
+// ISOFileSHA1 hashes a file, which for a 4 GB ESD takes a few seconds.
+func ISOFileSHA1(path string) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // caller-supplied path
 	if err != nil {
 		return "", err
@@ -475,12 +475,12 @@ func FileSHA1(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// refuseUnsafeDest stops a download from destroying media already in use.
+// isoRefuseUnsafeDest stops a download from destroying media already in use.
 //
 // Three separate refusals, because each is a different mistake: writing over a
 // file that exists, writing over a file some VM is booting from, and writing
 // over one that was deliberately made immutable.
-func refuseUnsafeDest(dest string) error {
+func isoRefuseUnsafeDest(dest string) error {
 	fi, err := os.Stat(dest)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -518,13 +518,13 @@ func refuseUnsafeDest(dest string) error {
 
 // ISOInfo is what we can learn about Windows install media without mounting it.
 
-// MediaOptions configures Media.
-type MediaOptions struct {
+// ISOGetOptions configures ISOGet.
+type ISOGetOptions struct {
 	ISO   string // use this file; empty means find or make one
 	Fetch bool   // permit a 4.2 GB download when nothing local works
 }
 
-// Media finds usable Windows media, or makes some.
+// ISOGet finds usable Windows media, or makes some.
 //
 // It has nothing to do with UTM, and deliberately does not touch it. Getting a
 // Windows ISO is a download from Microsoft or an expansion of an ESD; a
@@ -537,7 +537,7 @@ type MediaOptions struct {
 // The order is what a developer would want if they thought about it: use what
 // is here, then what they built earlier, then build from an ESD they already
 // downloaded, and only then spend 4.2 GB of somebody's bandwidth.
-func Media(opts MediaOptions, paths Paths, say func(string, ...any)) (iso, detail string, skipped bool, err error) {
+func ISOGet(opts ISOGetOptions, paths Paths, say func(string, ...any)) (iso, detail string, skipped bool, err error) {
 	// Named explicitly.
 	if opts.ISO != "" {
 		if _, sErr := os.Stat(opts.ISO); sErr != nil {
@@ -554,7 +554,7 @@ func Media(opts MediaOptions, paths Paths, say func(string, ...any)) (iso, detai
 		if _, sErr := os.Stat(candidate); sErr != nil {
 			continue
 		}
-		info, iErr := InspectISO(candidate)
+		info, iErr := ISOInspect(candidate)
 		if iErr != nil || !info.IsARM64 {
 			say("  … %s is not ARM64 media; ignoring it", filepath.Base(candidate))
 			continue
@@ -581,12 +581,12 @@ func Media(opts MediaOptions, paths Paths, say func(string, ...any)) (iso, detai
 			Home(paths.ISO()))
 	}
 
-	// Download, then build.
-	all, cErr := FetchCatalog(2 * time.Minute)
+	// ISODownload, then build.
+	all, cErr := ISOFetchCatalog(2 * time.Minute)
 	if cErr != nil {
 		return "", "", false, cErr
 	}
-	match := FilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
+	match := ISOFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
 	if len(match) != 1 {
 		return "", "", false, fmt.Errorf("catalog matched %d ARM64 en-us images, expected exactly 1", len(match))
 	}
@@ -595,7 +595,7 @@ func Media(opts MediaOptions, paths Paths, say func(string, ...any)) (iso, detai
 	if err := os.MkdirAll(paths.Cache, 0o755); err != nil {
 		return "", "", false, err
 	}
-	if dErr := Download(e.FilePath, esd, e.Sha1, func(done, total int64) {
+	if dErr := ISODownload(e.FilePath, esd, e.Sha1, func(done, total int64) {
 		if total > 0 {
 			say("      %s / %s", HumanBytes(done), HumanBytes(total))
 		}

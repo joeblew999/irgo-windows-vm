@@ -149,7 +149,7 @@ func FetchGuestTools(progress func(done, total int64)) (string, error) {
 	// changes with every guest-tools release. The size check below is the only
 	// guard available — a truncated download here presents later as a VM with
 	// no network, which is a long way from the cause.
-	if dErr := Download(GuestToolsURL, dest, "", progress); dErr != nil {
+	if dErr := ISODownload(GuestToolsURL, dest, "", progress); dErr != nil {
 		return "", fmt.Errorf("downloading UTM guest tools: %w\n"+
 			"  Alternatively, open UTM once and choose \"Install Windows guest tools\" "+
 			"from any VM's menu; it caches the ISO in the same place", dErr)
@@ -258,7 +258,7 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 
 	dmg := filepath.Join(tmp, "UTM.dmg")
 	fmt.Fprintf(os.Stderr, "downloading UTM from %s\n", url)
-	if dErr := Download(url, dmg, "", progress); dErr != nil {
+	if dErr := ISODownload(url, dmg, "", progress); dErr != nil {
 		return fmt.Errorf("utmvm: downloading UTM: %w", dErr)
 	}
 
@@ -683,7 +683,7 @@ func HumanBytes(n int64) string {
 // missing. An empty Path would stat the working directory and report present,
 // which is the wrong answer stated confidently.
 func lookPath(name string) string {
-	t := Tool{Name: name}
+	t := ISOTool{Name: name}
 	if !t.resolve() {
 		return filepath.Join("(not on PATH)", name)
 	}

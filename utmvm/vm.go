@@ -220,9 +220,9 @@ func linkOrCopy(src, dst string) error {
 	// whatever happens. uchg is per-inode, so this briefly unprotects the
 	// original too; that window is one syscall wide.
 	if flags, ok := fileFlags(src); ok && flags&uchgFlag != 0 {
-		if uErr := UnprotectISO(src); uErr == nil {
+		if uErr := ISOUnprotect(src); uErr == nil {
 			linkErr := os.Link(src, dst)
-			_ = ProtectISO(src)
+			_ = ISOProtect(src)
 			if linkErr == nil {
 				return nil
 			}

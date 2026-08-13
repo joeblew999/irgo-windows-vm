@@ -60,18 +60,18 @@ func ISOLinks(path string, searchIn []string) (ISOStatus, error) {
 	return st, nil
 }
 
-// ProtectISO makes the ISO immutable: it cannot be written, truncated, renamed
-// or deleted until UnprotectISO clears the flag. Idempotent.
-func ProtectISO(path string) error { return chflags(path, true) }
+// ISOProtect makes the ISO immutable: it cannot be written, truncated, renamed
+// or deleted until ISOUnprotect clears the flag. Idempotent.
+func ISOProtect(path string) error { return isoChflags(path, true) }
 
-// UnprotectISO clears the immutable flag, so the ISO can be replaced or the VM
+// ISOUnprotect clears the immutable flag, so the ISO can be replaced or the VM
 // holding a hardlink to it can be deleted. Idempotent.
 //
 // `irgo-winvm vm-delete` needs this: rm refuses an immutable file, and the VM
 // bundle's install.iso is the same inode as the protected one.
-func UnprotectISO(path string) error { return chflags(path, false) }
+func ISOUnprotect(path string) error { return isoChflags(path, false) }
 
-func chflags(path string, set bool) error {
+func isoChflags(path string, set bool) error {
 	if !immutableSupported {
 		return setFileFlags(path, 0) // reports the platform honestly
 	}
@@ -88,13 +88,4 @@ func chflags(path string, set bool) error {
 		return fmt.Errorf("utmvm: setting flags on %s: %w", path, err)
 	}
 	return nil
-}
-
-// FoundISO is one installation image found on this machine.
-type FoundISO struct {
-	Path  string
-	Bytes int64
-	Inode uint64
-	Links int
-	InUse bool // shares its blocks with a VM bundle or the repo's cache
 }

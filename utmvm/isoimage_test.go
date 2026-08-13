@@ -23,8 +23,8 @@ func buildTestISO(t *testing.T, files map[string]string) string {
 	out := filepath.Join(t.TempDir(), "test.iso")
 	// 64 MiB requested for a few bytes of content, so the trimming below is
 	// actually exercised.
-	if err := BuildISOImage(out, src, 64); err != nil {
-		t.Fatalf("BuildISOImage: %v", err)
+	if err := ISOBuildImage(out, src, 64); err != nil {
+		t.Fatalf("ISOBuildImage: %v", err)
 	}
 	return out
 }
@@ -76,14 +76,14 @@ func TestISOKeepsLongFilenames(t *testing.T) {
 	}
 	// Joliet stores names as UTF-16BE in the supplementary descriptor.
 	for _, name := range []string{"autounattend.xml", "nativeprobe-arm64.exe"} {
-		if !bytes.Contains(data, encode16be(name)) {
+		if !bytes.Contains(data, isoEncode16be(name)) {
 			t.Errorf("%q not present as a Joliet (UTF-16BE) name; "+
 				"without Joliet Setup sees only the 8.3 form and ignores the answer file", name)
 		}
 	}
 }
 
-// InspectISO must agree with what was written, since it is the gate that stops
+// ISOInspect must agree with what was written, since it is the gate that stops
 // an x86-64 image being used on Apple Silicon — where it boots to a black
 // screen with no diagnostic.
 func TestInspectISORoundTrip(t *testing.T) {
@@ -91,15 +91,15 @@ func TestInspectISORoundTrip(t *testing.T) {
 		"efi/boot/bootaa64.efi":                  "stub",
 		"efi/microsoft/boot/cdboot_noprompt.efi": "stub",
 	})
-	info, err := InspectISO(iso)
+	info, err := ISOInspect(iso)
 	if err != nil {
-		t.Fatalf("InspectISO: %v", err)
+		t.Fatalf("ISOInspect: %v", err)
 	}
 	if !info.IsARM64 {
-		t.Error("bootaa64.efi was written but InspectISO reports the image is not ARM64")
+		t.Error("bootaa64.efi was written but ISOInspect reports the image is not ARM64")
 	}
 	if !info.HasNoPromptLoader {
-		t.Error("cdboot_noprompt.efi was written but InspectISO did not find it")
+		t.Error("cdboot_noprompt.efi was written but ISOInspect did not find it")
 	}
 	if info.SizeBytes == 0 {
 		t.Error("SizeBytes not reported")
@@ -108,7 +108,7 @@ func TestInspectISORoundTrip(t *testing.T) {
 
 func TestInspectISORejectsNonARM(t *testing.T) {
 	iso := buildTestISO(t, map[string]string{"efi/boot/bootx64.efi": "stub"})
-	info, err := InspectISO(iso)
+	info, err := ISOInspect(iso)
 	if err != nil {
 		t.Fatal(err)
 	}

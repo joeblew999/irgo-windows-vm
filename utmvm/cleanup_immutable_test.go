@@ -10,7 +10,7 @@ import (
 
 // The bug this covers, measured before it was fixed:
 //
-//	$ ln orig bundle/inside && chflags uchg orig
+//	$ ln orig bundle/inside && isoChflags uchg orig
 //	$ rm -rf bundle
 //	rm: bundle/inside: Operation not permitted
 //	rm: bundle: Directory not empty
@@ -37,10 +37,10 @@ func TestReleaseImmutableUnblocksRemovalAndReprotects(t *testing.T) {
 	if err := os.Link(orig, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := ProtectISO(orig); err != nil {
+	if err := ISOProtect(orig); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = UnprotectISO(orig) })
+	t.Cleanup(func() { _ = ISOUnprotect(orig) })
 
 	// Negative control: without the fix, removal fails. If this ever stops
 	// failing, the rest of the test proves nothing and must be revisited.
@@ -67,7 +67,7 @@ func TestReleaseImmutableUnblocksRemovalAndReprotects(t *testing.T) {
 		t.Errorf("original %s not reported as a surviving name; it would be left unprotected", orig)
 	}
 	for _, s := range survivors {
-		_ = ProtectISO(s) // what Delete's deferred re-protect does
+		_ = ISOProtect(s) // what Delete's deferred re-protect does
 	}
 	st, err := ISOLinks(orig, nil)
 	if err != nil {

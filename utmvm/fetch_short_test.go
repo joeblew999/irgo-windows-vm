@@ -11,9 +11,9 @@ import (
 // A truncated body must not be renamed into place as finished media.
 //
 // This passes because net/http rejects a body shorter than its declared
-// Content-Length, NOT because of anything in Download — verified by disabling
-// Download's own check and watching this still pass. It is kept as a guard on
-// that behaviour, not as evidence Download validates length.
+// Content-Length, NOT because of anything in ISODownload — verified by disabling
+// ISODownload's own check and watching this still pass. It is kept as a guard on
+// that behaviour, not as evidence ISODownload validates length.
 func TestDownloadRejectsShortBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1000") // claims 1000
@@ -23,7 +23,7 @@ func TestDownloadRejectsShortBody(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "media.iso")
-	err := Download(srv.URL, dest, "", nil)
+	err := ISODownload(srv.URL, dest, "", nil)
 	if err == nil {
 		t.Fatal("a 400-byte body against a declared 1000 must fail, not report success")
 	}
@@ -42,7 +42,7 @@ func TestDownloadAcceptsCompleteBody(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "media.iso")
-	if err := Download(srv.URL, dest, "", nil); err != nil {
+	if err := ISODownload(srv.URL, dest, "", nil); err != nil {
 		t.Fatalf("a complete body must succeed: %v", err)
 	}
 	fi, err := os.Stat(dest)

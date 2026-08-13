@@ -173,7 +173,7 @@ func (p Paths) CheckWritable(dest string) error {
 	}
 	if flags, ok := fileFlags(abs); ok && flags&uchgFlag != 0 {
 		return fmt.Errorf("utmvm: %s is immutable — it was protected on purpose\n"+
-			"  It was protected on purpose; clear the flag by hand if you mean it: chflags nouchg %s",
+			"  It was protected on purpose; clear the flag by hand if you mean it: isoChflags nouchg %s",
 			Home(abs), Home(abs))
 	}
 	if _, nlink, ok := inodeInfo(abs); ok && nlink > 1 {

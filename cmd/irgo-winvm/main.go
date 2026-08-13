@@ -88,27 +88,27 @@ func vmRef(fs *flag.FlagSet, args []string) (string, error) {
 // loadCatalog prefers an explicit file, then the network, then a catalog some
 // other tool already extracted — in that order, because the first two are
 // reproducible and the third is whatever happens to be on this machine.
-func loadCatalog(explicit string) ([]utmvm.CatalogEntry, string, error) {
+func loadCatalog(explicit string) ([]utmvm.ISOCatalogEntry, string, error) {
 	if explicit != "" {
 		b, err := os.ReadFile(explicit) //nolint:gosec // the user named this file
 		if err != nil {
 			return nil, "", err
 		}
-		all, err := utmvm.ParseCatalogXML(b)
+		all, err := utmvm.ISOParseCatalog(b)
 		return all, explicit, err
 	}
 
-	all, netErr := utmvm.FetchCatalog(2 * time.Minute)
+	all, netErr := utmvm.ISOFetchCatalog(2 * time.Minute)
 	if netErr == nil {
-		return all, utmvm.CatalogURL, nil
+		return all, utmvm.ISOCatalogURL, nil
 	}
 
-	for _, p := range utmvm.CachedCatalogPaths() {
+	for _, p := range utmvm.ISOCachedCatalogPaths() {
 		b, err := os.ReadFile(p) //nolint:gosec // a known cache location
 		if err != nil {
 			continue
 		}
-		parsed, pErr := utmvm.ParseCatalogXML(b)
+		parsed, pErr := utmvm.ISOParseCatalog(b)
 		if pErr != nil {
 			continue
 		}
@@ -179,8 +179,8 @@ func runSetup(args []string) error {
 // Only two, and they are the two CrystalFetch bundles inside its own app —
 // which is why it appears to need nothing.
 func reportISOTools() {
-	wim := utmvm.WimTool()
-	master, candidates := utmvm.FindMasterer()
+	wim := utmvm.ISOWimTool()
+	master, candidates := utmvm.ISOFindMasterer()
 
 	fmt.Printf("\nbuilding your own Windows ISO needs two tools:\n\n")
 
@@ -403,38 +403,42 @@ func runISO(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Elapsed time on every line. A 4.2 GB download and an ISO build take
+	// minutes, and without this there is no way to tell a slow step from a
+	// stuck one — which is how a 77-second cached-media check went unnoticed.
+	say := stamped()
 	p := utmvm.DefaultPaths()
-	fmt.Printf("media:  %s\n", utmvm.Home(p.ISO()))
-	fmt.Printf("work:   %s\n", utmvm.Home(p.Work))
+	say("media:  %s", utmvm.Home(p.ISO()))
+	say("work:   %s", utmvm.Home(p.Work))
 
 	// The two external programs building an ISO needs. Installed here, and
 	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
 	// takes off. Every path printed, because "installed" without a location
 	// cannot be checked and cannot be undone by hand.
 	for _, t := range utmvm.ISOTools() {
-		fmt.Printf("tool:   %-16s %s\n", t.Name, utmvm.Home(t.Where()))
+		say("tool:   %-16s %s", t.Name, utmvm.Home(t.Where()))
 		if t.Found() {
 			continue
 		}
 		if err := t.Ensure(); err != nil {
 			return err
 		}
-		fmt.Printf("  ✓ %-16s installed at %s\n", t.Name, utmvm.Home(t.Path))
+		say("  ✓ %-16s installed at %s", t.Name, utmvm.Home(t.Path))
 	}
 
 	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
 	// ESD expansion; a hypervisor is not involved, and this used to run the
 	// whole setup chain — so fetching an ISO required UTM to be installed first.
-	iso, detail, skipped, err := utmvm.Media(utmvm.MediaOptions{Fetch: *fetch},
-		utmvm.DefaultPaths(), func(f string, a ...any) { fmt.Printf(f+"\n", a...) })
+	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: *fetch},
+		utmvm.DefaultPaths(), func(f string, a ...any) { say(f+"\n", a...) })
 	if err != nil {
 		return err
 	}
 	if skipped {
-		fmt.Printf("media: %s (already there — %s)\n", utmvm.Home(iso), detail)
+		say("media: %s (already there — %s)", utmvm.Home(iso), detail)
 		return nil
 	}
-	fmt.Printf("media: %s (%s)\n", utmvm.Home(iso), detail)
+	say("media: %s (%s)", utmvm.Home(iso), detail)
 	return nil
 }
 
@@ -446,46 +450,64 @@ func runISODelete(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	say := stamped()
 
-	// Every path this will touch, named before it touches any of it.
-	iso := utmvm.DefaultPaths().ISO()
-	fmt.Printf("media:  %s\n", utmvm.Home(iso))
-	for _, t := range utmvm.ISOTools() {
-		fmt.Printf("tool:   %-16s %s\n", t.Name, utmvm.Home(t.Where()))
+	// Every file `iso` can leave, and every tool it can install, named before
+	// anything is touched.
+	p := utmvm.DefaultPaths()
+	files := utmvm.ISOFiles(p)
+	var present []string
+	var total int64
+	for _, f := range files {
+		if fi, err := os.Stat(f); err == nil {
+			present = append(present, f)
+			total += fi.Size()
+			say("media:  %s (%s)", utmvm.Home(f), utmvm.HumanBytes(fi.Size()))
+		}
 	}
-	fmt.Println()
+	if len(present) == 0 {
+		say("media:  %s (nothing there)", utmvm.Home(p.Cache))
+	}
+	tools := utmvm.ISOTools()
+	for i := range tools {
+		say("tool:   %-16s %s", tools[i].Name, utmvm.Home(tools[i].Where()))
+	}
+	say("")
 
-	fi, statErr := os.Stat(iso)
-	if statErr == nil && !*force {
+	if total > 0 && !*force {
 		return fmt.Errorf("this deletes %s that costs 4.2 GB to re-fetch from a\n"+
 			"  source that rate-limits. Pass -force if you mean it",
-			utmvm.HumanBytes(fi.Size()))
+			utmvm.HumanBytes(total))
 	}
-	if statErr == nil {
-		// uchg lives on the inode and blocks unlink, so it is cleared first.
-		_ = utmvm.UnprotectISO(iso)
-		if err := os.Remove(iso); err != nil {
+	for _, f := range present {
+		_ = utmvm.ISOUnprotect(f) // uchg blocks unlink
+		if err := os.Remove(f); err != nil {
 			return err
 		}
-		_ = os.Remove(iso + ".scan")
-		fmt.Printf("  · removed the media (%s)\n", utmvm.HumanBytes(fi.Size()))
-	} else {
-		fmt.Println("  · no media there")
+		say("  · removed %s", utmvm.Home(f))
 	}
 
 	// The tools go whether or not the media was there. Undo runs to completion
 	// from any starting point — stopping early because one half was already
 	// gone would leave the other half behind for good.
-	for _, t := range utmvm.ISOTools() {
-		where, err := t.Remove()
+	for i := range tools {
+		where, err := tools[i].Remove()
 		switch {
 		case err != nil:
-			fmt.Printf("  · %s left in place: %v\n", t.Name, err)
+			say("  · %s left in place: %v", tools[i].Name, err)
 		case where != "":
-			fmt.Printf("  · removed %s from %s\n", t.Name, utmvm.Home(where))
+			say("  · removed %s from %s", tools[i].Name, utmvm.Home(where))
 		default:
-			fmt.Printf("  · %s was not installed\n", t.Name)
+			say("  · %s was not installed", tools[i].Name)
 		}
 	}
 	return nil
+}
+
+// stamped returns a printer that prefixes every line with seconds elapsed.
+func stamped() func(string, ...any) {
+	start := time.Now()
+	return func(f string, a ...any) {
+		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
+	}
 }

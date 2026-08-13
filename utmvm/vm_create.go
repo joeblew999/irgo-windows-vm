@@ -123,10 +123,10 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		return res, err
 	}
 
-	// 3. Media. Three ways to already have it, in order of preference, then
+	// 3. ISOGet. Three ways to already have it, in order of preference, then
 	// building one.
 	say("… checking Windows media (scans the ISO the first time; cached after)")
-	iso, isoDetail, isoSkipped, err := Media(MediaOptions{ISO: opts.ISO, Fetch: opts.Fetch}, paths, say)
+	iso, isoDetail, isoSkipped, err := ISOGet(ISOGetOptions{ISO: opts.ISO, Fetch: opts.Fetch}, paths, say)
 	if err != nil {
 		return res, stage("Windows media", false, "", err)
 	}
@@ -139,7 +139,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	// re-download of something rate-limited.
 	if st, sErr := ISOLinks(iso, nil); sErr == nil && st.Protected {
 		_ = stage("protect the media", true, "immutable", nil)
-	} else if pErr := ProtectISO(iso); pErr != nil {
+	} else if pErr := ISOProtect(iso); pErr != nil {
 		// Not fatal: an unprotected ISO still works, it is just easier to lose.
 		_ = stage("protect the media", false, "could not: "+pErr.Error(), nil)
 	} else {
@@ -267,10 +267,10 @@ func buildFromESD(esd, out string, paths Paths, say func(string, ...any)) error 
 	}
 	defer os.RemoveAll(media)
 
-	if err := ExpandESD(esd, media, func(step string) { say("      %s", step) }); err != nil {
+	if err := ISOExpandESD(esd, media, func(step string) { say("      %s", step) }); err != nil {
 		return err
 	}
-	return BuildISO(RemasterOptions{
+	return ISOBuild(ISORemasterOptions{
 		Source:   media,
 		Output:   out,
 		Label:    "WINDOWS_ARM64",

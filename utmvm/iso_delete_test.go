@@ -18,7 +18,7 @@ func TestProtectAndUnprotectRoundTrip(t *testing.T) {
 	if err := os.WriteFile(p, []byte("media"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = UnprotectISO(p) })
+	t.Cleanup(func() { _ = ISOUnprotect(p) })
 
 	st, err := ISOLinks(p, nil)
 	if err != nil {
@@ -27,17 +27,17 @@ func TestProtectAndUnprotectRoundTrip(t *testing.T) {
 	if st.Protected {
 		t.Fatal("a freshly written file reported as protected")
 	}
-	if err := ProtectISO(p); err != nil {
+	if err := ISOProtect(p); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ = ISOLinks(p, nil); !st.Protected {
-		t.Fatal("ProtectISO did not set the flag, or ISOLinks cannot see it")
+		t.Fatal("ISOProtect did not set the flag, or ISOLinks cannot see it")
 	}
-	if err := UnprotectISO(p); err != nil {
+	if err := ISOUnprotect(p); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ = ISOLinks(p, nil); st.Protected {
-		t.Error("UnprotectISO did not clear the flag")
+		t.Error("ISOUnprotect did not clear the flag")
 	}
 }
 
@@ -48,15 +48,15 @@ func TestProtectedISORefusesRemoval(t *testing.T) {
 	if err := os.WriteFile(p, []byte("media"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ProtectISO(p); err != nil {
+	if err := ISOProtect(p); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = UnprotectISO(p) })
+	t.Cleanup(func() { _ = ISOUnprotect(p) })
 
 	if err := os.Remove(p); err == nil {
 		t.Fatal("a protected ISO was removed; protection is doing nothing")
 	}
-	if err := UnprotectISO(p); err != nil {
+	if err := ISOUnprotect(p); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(p); err != nil {

@@ -64,7 +64,7 @@ const testCatalogXML = `<MCT>
 // shows the same build twenty times and "how many matched?" stops meaning
 // anything, which is what guards the refusal to download an ambiguous match.
 func TestParseCatalogDeduplicates(t *testing.T) {
-	all, err := ParseCatalogXML([]byte(testCatalogXML))
+	all, err := ISOParseCatalog([]byte(testCatalogXML))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestParseCatalogDeduplicates(t *testing.T) {
 }
 
 func TestFilterCatalog(t *testing.T) {
-	all, err := ParseCatalogXML([]byte(testCatalogXML))
+	all, err := ISOParseCatalog([]byte(testCatalogXML))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestFilterCatalog(t *testing.T) {
 		{"no match at all", "ARM64", "de-de", "", 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FilterCatalog(all, tc.arch, tc.lang, tc.edtn)
+			got := ISOFilterCatalog(all, tc.arch, tc.lang, tc.edtn)
 			if len(got) != tc.want {
 				t.Fatalf("got %d, want %d", len(got), tc.want)
 			}
@@ -104,12 +104,12 @@ func TestFilterCatalog(t *testing.T) {
 // Build is how one release is told from another, and there is no field for it —
 // only the filename.
 func TestCatalogEntryBuild(t *testing.T) {
-	all, _ := ParseCatalogXML([]byte(testCatalogXML))
+	all, _ := ISOParseCatalog([]byte(testCatalogXML))
 	const want = "26100.4349.250607-1500"
 	if got := all[0].Build(); got != want {
 		t.Errorf("Build() = %q, want %q", got, want)
 	}
-	if got := (CatalogEntry{FileName: "nonsense"}).Build(); got != "" {
+	if got := (ISOCatalogEntry{FileName: "nonsense"}).Build(); got != "" {
 		t.Errorf("Build() on a malformed name = %q, want empty", got)
 	}
 }
@@ -118,11 +118,11 @@ func TestCatalogEntryBuild(t *testing.T) {
 // WINDOWS 10 catalog and parses perfectly. Asserting they differ is cheap
 // insurance against somebody "tidying" the constant.
 func TestCatalogURLIsWindows11(t *testing.T) {
-	if CatalogURL == CatalogURLWindows10 {
-		t.Fatal("CatalogURL points at the Windows 10 catalog")
+	if ISOCatalogURL == ISOCatalogURLWindows10 {
+		t.Fatal("ISOCatalogURL points at the Windows 10 catalog")
 	}
-	if !contains(CatalogURL, "2156292") {
-		t.Errorf("CatalogURL = %q, expected the Windows 11 fwlink 2156292", CatalogURL)
+	if !contains(ISOCatalogURL, "2156292") {
+		t.Errorf("ISOCatalogURL = %q, expected the Windows 11 fwlink 2156292", ISOCatalogURL)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestFetchCatalogLive(t *testing.T) {
 	if os.Getenv("IRGO_TEST_NETWORK") == "" {
 		t.Skip("set IRGO_TEST_NETWORK=1 to fetch the real catalog")
 	}
-	all, err := FetchCatalog(2 * time.Minute)
+	all, err := ISOFetchCatalog(2 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestFetchCatalogLive(t *testing.T) {
 		t.Fatalf("catalog has %d images, which is too few to be the real one", len(all))
 	}
 
-	match := FilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
+	match := ISOFilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
 	if len(match) != 1 {
 		t.Fatalf("ARM64/en-us/consumer matched %d images, want exactly 1 — "+
 			"more than one means the filter no longer identifies a single download", len(match))

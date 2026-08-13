@@ -23,15 +23,15 @@ import (
 // shape of it. These were spread across four files, which is how the built-ISO
 // name came to be spelled three times.
 const (
-	// CatalogURL is Microsoft's Media Creation Tool catalog for Windows 11.
+	// ISOCatalogURL is Microsoft's ISOGet Creation ISOTool catalog for Windows 11.
 	//
 	// linkid=2156292 is Windows 11; LinkId=841361 is Windows 10 and looks close
 	// enough to grab by mistake — which is why the wrong one is named below
 	// rather than left as a number somebody might reintroduce.
-	CatalogURL = "https://go.microsoft.com/fwlink/?linkid=2156292"
+	ISOCatalogURL = "https://go.microsoft.com/fwlink/?linkid=2156292"
 
-	// CatalogURLWindows10 exists to be recognised, never fetched.
-	CatalogURLWindows10 = "https://go.microsoft.com/fwlink/?LinkId=841361"
+	// ISOCatalogURLWindows10 exists to be recognised, never fetched.
+	ISOCatalogURLWindows10 = "https://go.microsoft.com/fwlink/?LinkId=841361"
 
 	// isoName is what a downloaded or built Windows ISO is called on disk.
 	isoName = "win11-arm64.iso"
@@ -78,7 +78,7 @@ type ISOInfo struct {
 	SizeBytes int64
 }
 
-// InspectISO reports what matters about Windows install media.
+// ISOInspect reports what matters about Windows install media.
 //
 // Implementation note, because the obvious approach does not work: Windows 11
 // ISOs are UDF, not ISO9660 — they have to be, since install.wim exceeds
@@ -94,7 +94,7 @@ type ISOInfo struct {
 // isoVerdict caches what a scan found, keyed by size and mtime. The ISO is
 // 5.27 GB and immutable; re-reading all of it on every command to answer "is
 // this ARM64" cost 77 seconds per invocation.
-func cachedVerdict(path string) (ISOInfo, bool) {
+func isoCachedVerdict(path string) (ISOInfo, bool) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return ISOInfo{}, false
@@ -114,7 +114,7 @@ func cachedVerdict(path string) (ISOInfo, bool) {
 	return ISOInfo{SizeBytes: fi.Size(), IsARM64: arm == 1}, true
 }
 
-func storeVerdict(path string, info ISOInfo) {
+func isoStoreVerdict(path string, info ISOInfo) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return
@@ -126,18 +126,18 @@ func storeVerdict(path string, info ISOInfo) {
 	_ = os.WriteFile(path+scanSuffix, []byte(fmt.Sprintf("%d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm)), 0o644)
 }
 
-func InspectISO(path string) (ISOInfo, error) {
-	if v, ok := cachedVerdict(path); ok {
+func ISOInspect(path string) (ISOInfo, error) {
+	if v, ok := isoCachedVerdict(path); ok {
 		return v, nil
 	}
-	info, err := inspectISOSlow(path)
+	info, err := isoInspectSlow(path)
 	if err == nil {
-		storeVerdict(path, info)
+		isoStoreVerdict(path, info)
 	}
 	return info, err
 }
 
-func inspectISOSlow(path string) (ISOInfo, error) {
+func isoInspectSlow(path string) (ISOInfo, error) {
 	var info ISOInfo
 
 	f, err := os.Open(path)
@@ -153,8 +153,8 @@ func inspectISOSlow(path string) (ISOInfo, error) {
 	info.SizeBytes = st.Size()
 
 	needles := [][]byte{
-		encode8("BOOTAA64.EFI"), encode16be("bootaa64.efi"),
-		encode8("CDBOOT_NOPROMPT.EFI"), encode16be("cdboot_noprompt.efi"),
+		isoEncode8("BOOTAA64.EFI"), isoEncode16be("bootaa64.efi"),
+		isoEncode8("CDBOOT_NOPROMPT.EFI"), isoEncode16be("cdboot_noprompt.efi"),
 	}
 	found := make([]bool, len(needles))
 
@@ -188,7 +188,7 @@ func inspectISOSlow(path string) (ISOInfo, error) {
 					found[i] = true
 				}
 			}
-			if allTrue(found) {
+			if isoAllTrue(found) {
 				break
 			}
 			// Keep the tail so the next pass can match across the seam.
@@ -212,7 +212,7 @@ func inspectISOSlow(path string) (ISOInfo, error) {
 	return info, nil
 }
 
-func allTrue(b []bool) bool {
+func isoAllTrue(b []bool) bool {
 	for _, v := range b {
 		if !v {
 			return false
@@ -221,13 +221,13 @@ func allTrue(b []bool) bool {
 	return true
 }
 
-// encode8 is the plain 8-bit form UDF uses for names that fit in Latin-1.
-func encode8(s string) []byte { return []byte(strings.ToUpper(s)) }
+// isoEncode8 is the plain 8-bit form UDF uses for names that fit in Latin-1.
+func isoEncode8(s string) []byte { return []byte(strings.ToUpper(s)) }
 
-// encode16be is UDF's UTF-16BE form. Note big-endian: UDF differs from the
+// isoEncode16be is UDF's UTF-16BE form. Note big-endian: UDF differs from the
 // little-endian UTF-16 used elsewhere in Windows, and searching for the wrong
 // byte order silently finds nothing.
-func encode16be(s string) []byte {
+func isoEncode16be(s string) []byte {
 	out := make([]byte, 0, len(s)*2)
 	for _, r := range utf16.Encode([]rune(s)) {
 		out = append(out, byte(r>>8), byte(r))
@@ -253,8 +253,8 @@ func encode16be(s string) []byte {
 // refusing to overwrite media in use — is done here, so the part that can
 // damage something is the part we control.
 
-// Tool is an external program this package needs but cannot replace.
-type Tool struct {
+// ISOTool is an external program this package needs but cannot replace.
+type ISOTool struct {
 	Name    string // executable name
 	Formula string // Homebrew formula that provides it
 	Why     string
@@ -262,13 +262,13 @@ type Tool struct {
 }
 
 // Found reports whether the tool is installed.
-func (t Tool) Found() bool { return t.Path != "" }
+func (t ISOTool) Found() bool { return t.Path != "" }
 
 // Where is the tool's location: where it is, or where it would go.
 //
 // Never empty. "not installed" with no path cannot be checked and cannot be
 // undone by hand, which is the whole reason these commands print locations.
-func (t *Tool) Where() string {
+func (t *ISOTool) Where() string {
 	if t.resolve() {
 		return t.Path
 	}
@@ -277,7 +277,7 @@ func (t *Tool) Where() string {
 
 // resolve looks the executable up on PATH, recording where it was found. The
 // one place in this package that asks that question about an external tool.
-func (t *Tool) resolve() bool {
+func (t *ISOTool) resolve() bool {
 	p, err := exec.LookPath(t.Name)
 	if err != nil {
 		t.Path = ""
@@ -288,7 +288,7 @@ func (t *Tool) resolve() bool {
 }
 
 // Install is the command that provides it.
-func (t Tool) Install() string { return "brew install " + t.Formula }
+func (t ISOTool) Install() string { return "brew install " + t.Formula }
 
 // isoMasterers are the programs that can write a bootable Windows ISO, in
 // order of preference.
@@ -303,8 +303,8 @@ func (t Tool) Install() string { return "brew install " + t.Formula }
 // installation, and it does not work: two images mastered with it enumerate
 // correctly in UTM's firmware and then refuse to boot. CrystalFetch reached the
 // same conclusion — it bundles mkisofs and has its hdiutil line commented out.
-func isoMasterers() []Tool {
-	return []Tool{
+func isoMasterers() []ISOTool {
+	return []ISOTool{
 		{
 			Name:    "xorriso",
 			Formula: "xorriso",
@@ -318,10 +318,10 @@ func isoMasterers() []Tool {
 	}
 }
 
-// WimTool is the one thing with no Go alternative: reading LZMS-compressed ESD
+// ISOWimTool is the one thing with no Go alternative: reading LZMS-compressed ESD
 // archives. No Go implementation exists that is worth trusting.
-func WimTool() Tool {
-	t := Tool{
+func ISOWimTool() ISOTool {
+	t := ISOTool{
 		Name:    "wimlib-imagex",
 		Formula: "wimlib",
 		Why:     "reads Microsoft's .esd archives (LZMS compression, which no Go library implements).",
@@ -330,20 +330,20 @@ func WimTool() Tool {
 	return t
 }
 
-// FindMasterer returns the first available ISO masterer, or the list of
+// ISOFindMasterer returns the first available ISO masterer, or the list of
 // candidates when none is installed.
-func FindMasterer() (Tool, []Tool) {
+func ISOFindMasterer() (ISOTool, []ISOTool) {
 	all := isoMasterers()
 	for i := range all {
 		if all[i].resolve() {
 			return all[i], all
 		}
 	}
-	return Tool{}, all
+	return ISOTool{}, all
 }
 
-// ExpandESD lays a Microsoft .esd archive out as a directory of installation
-// media, ready for BuildISO.
+// ISOExpandESD lays a Microsoft .esd archive out as a directory of installation
+// media, ready for ISOBuild.
 //
 // The sequence is not guessable and each step has a reason. It follows the one
 // shipped, working reference — CrystalFetch's `esd2iso.sh`, itself Paul
@@ -361,8 +361,8 @@ func FindMasterer() (Tool, []Tool) {
 // boot.wim is LZX because Windows PE's loader reads it before anything that
 // understands LZMS exists; install.wim is LZMS because it is the 4 GB one and
 // compression is what keeps it near the disc size at all.
-func ExpandESD(esd, dir string, progress func(step string)) error {
-	wim := WimTool()
+func ISOExpandESD(esd, dir string, progress func(step string)) error {
+	wim := ISOWimTool()
 	if eErr := wim.Ensure(); eErr != nil {
 		return eErr
 	}
@@ -379,7 +379,7 @@ func ExpandESD(esd, dir string, progress func(step string)) error {
 		}
 	}
 
-	n, err := esdImageCount(wim.Path, esd)
+	n, err := isoESDImageCount(wim.Path, esd)
 	if err != nil {
 		return err
 	}
@@ -426,9 +426,9 @@ func ExpandESD(esd, dir string, progress func(step string)) error {
 	return nil
 }
 
-// esdImageCount reads how many images an ESD holds. There is no fixed number:
+// isoESDImageCount reads how many images an ESD holds. There is no fixed number:
 // it varies by release and by which editions Microsoft bundled.
-func esdImageCount(wimPath, esd string) (int, error) {
+func isoESDImageCount(wimPath, esd string) (int, error) {
 	out, err := exec.Command(wimPath, "info", esd).Output() //nolint:gosec // wimPath resolved by LookPath
 	if err != nil {
 		return 0, fmt.Errorf("utmvm: reading %s: %w", esd, err)
@@ -445,8 +445,8 @@ func esdImageCount(wimPath, esd string) (int, error) {
 	return 0, fmt.Errorf("utmvm: %s: could not find an image count in wimlib's output", esd)
 }
 
-// RemasterOptions configures BuildISO.
-type RemasterOptions struct {
+// ISORemasterOptions configures ISOBuild.
+type ISORemasterOptions struct {
 	// Source is a directory holding the complete media layout.
 	Source string
 
@@ -472,7 +472,7 @@ type RemasterOptions struct {
 
 // BootImage returns the El Torito image to use, and whether it is the
 // no-prompt variant.
-func (o RemasterOptions) BootImage() (rel string, noPrompt bool) {
+func (o ISORemasterOptions) BootImage() (rel string, noPrompt bool) {
 	const dir = "efi/microsoft/boot"
 	if o.NoPrompt {
 		if _, err := os.Stat(filepath.Join(o.Source, dir, "efisys_noprompt.bin")); err == nil {
@@ -482,8 +482,8 @@ func (o RemasterOptions) BootImage() (rel string, noPrompt bool) {
 	return dir + "/efisys.bin", false
 }
 
-// BuildISO writes a bootable Windows ARM64 ISO from a directory of media.
-func BuildISO(opts RemasterOptions, paths Paths) error {
+// ISOBuild writes a bootable Windows ARM64 ISO from a directory of media.
+func ISOBuild(opts ISORemasterOptions, paths Paths) error {
 	if fi, err := os.Stat(opts.Source); err != nil || !fi.IsDir() {
 		return fmt.Errorf("utmvm: source %s is not a directory", opts.Source)
 	}
@@ -494,7 +494,7 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 		return fmt.Errorf("utmvm: %s already exists — this never overwrites; move it aside", opts.Output)
 	}
 
-	tool, candidates := FindMasterer()
+	tool, candidates := ISOFindMasterer()
 	if !tool.Found() {
 		tool = candidates[0]
 		if eErr := tool.Ensure(); eErr != nil {
@@ -567,7 +567,7 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 	return nil
 }
 
-// BuildISOImage writes an ISO9660 image containing srcDir.
+// ISOBuildImage writes an ISO9660 image containing srcDir.
 //
 // The answer file must be on an ISO9660 CD, not a FAT disk. This is not a
 // preference — it was established by regression. An earlier version shipped the
@@ -579,7 +579,7 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 //
 // Joliet is enabled so long filenames survive; plain ISO9660 would truncate
 // autounattend.xml to 8.3 and Setup would never find it.
-func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
+func ISOBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	if sizeMiB < 16 {
 		sizeMiB = 16
 	}
@@ -617,7 +617,7 @@ func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
 		if info.IsDir() {
 			return fs.Mkdir(target)
 		}
-		return copyIntoISO(fs, path, target)
+		return isoCopyInto(fs, path, target)
 	}); err != nil {
 		return err
 	}
@@ -639,10 +639,10 @@ func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
 	}); err != nil {
 		return err
 	}
-	return trimToVolumeSize(imagePath)
+	return isoTrimToVolumeSize(imagePath)
 }
 
-// trimToVolumeSize cuts the image down to the size its Primary Volume
+// isoTrimToVolumeSize cuts the image down to the size its Primary Volume
 // Descriptor declares.
 //
 // go-diskfs needs a size up front and leaves whatever is left over as a tail of
@@ -653,7 +653,7 @@ func BuildISOImage(imagePath, srcDir string, sizeMiB int) error {
 //
 // Volume space size lives at offset 0x8050 as a little-endian block count, with
 // 2048-byte logical blocks.
-func trimToVolumeSize(path string) error {
+func isoTrimToVolumeSize(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
@@ -680,7 +680,7 @@ func trimToVolumeSize(path string) error {
 	return f.Truncate(want)
 }
 
-func copyIntoISO(fs filesystem.FileSystem, hostPath, target string) error {
+func isoCopyInto(fs filesystem.FileSystem, hostPath, target string) error {
 	src, err := os.Open(hostPath)
 	if err != nil {
 		return err
@@ -724,7 +724,7 @@ func copyIntoISO(fs filesystem.FileSystem, hostPath, target string) error {
 // Building an ISO is the only thing in this project that needs software it
 // cannot ship, so this is the only place that installs any. It is paired with
 // Remove: whatever `iso` puts on the machine, `iso-delete` takes off again.
-func (t *Tool) Ensure() error {
+func (t *ISOTool) Ensure() error {
 	if t.resolve() {
 		return nil
 	}
@@ -755,7 +755,7 @@ func (t *Tool) Ensure() error {
 // Only Homebrew installs are removed. A binary somewhere else was put there by
 // somebody for their own reasons, and a command called iso-delete has no
 // business deciding it knows better — so it says where it is and leaves it.
-func (t *Tool) Remove() (string, error) {
+func (t *ISOTool) Remove() (string, error) {
 	if !t.resolve() {
 		return "", nil // not here; nothing to undo
 	}
@@ -780,8 +780,8 @@ func (t *Tool) Remove() (string, error) {
 // that already had xorriso.
 //
 // In one place so `iso` and `iso-delete` cannot disagree about what they are.
-func ISOTools() []Tool {
-	tools := []Tool{WimTool()}
+func ISOTools() []ISOTool {
+	tools := []ISOTool{ISOWimTool()}
 	masterers := isoMasterers()
 	for i := range masterers {
 		if masterers[i].resolve() {
@@ -792,4 +792,19 @@ func ISOTools() []Tool {
 		return append(tools, masterers[0]) // none present: install the preferred one
 	}
 	return tools
+}
+
+// ISOFiles is everything `iso` can leave in the media directory, so
+// `iso-delete` cannot disagree with `iso` about what "the media" is.
+//
+// It did: iso built win11-arm64-built.iso and left a 4.2 GB .esd behind, while
+// iso-delete only knew win11-arm64.iso — so deleting the media removed nothing
+// and reported success.
+func ISOFiles(p Paths) []string {
+	var out []string
+	for _, n := range []string{isoName, builtISOName, esdName} {
+		f := filepath.Join(p.Cache, n)
+		out = append(out, f, f+scanSuffix)
+	}
+	return out
 }

@@ -714,10 +714,15 @@ machine-readable mode, not new logic.
 plus a working VM the user cares about is the one combination that must not be
 governed by a sentence in a document:
 
-- Refuse to operate on any VM whose name does not match the disposable test
-  pattern. `irgo-win11` is unreachable by construction, not by discipline.
-- Refuse to unprotect or overwrite the working ISO. The `uchg` flag already
-  says so; the harness must not be the thing that clears it.
+- Refuse to *mutate* any VM whose name does not match the disposable test
+  pattern. `irgo-win11` is unreachable by construction, not by discipline —
+  except for `suspend`/`resume`, which `RESULTS.md` measures against it and
+  which change no persistent state. Reads are always allowed.
+- Never clear `uchg` on media the harness did not protect, and never leave it
+  cleared. Teardown *must* clear it briefly — the bundle holds a hardlink to the
+  same inode, so removal is impossible otherwise — so the rule is
+  unprotect-delete-**reprotect**, with the reprotect on the failure path too.
+  "Never unprotect" would forbid the teardown the harness requires.
 - A wall-clock budget, and **stop on red**. A failed phase leaves its branch
   unmerged and the run halted — never ploughs on, never retries blind.
 - Resumable: a run that stopped at phase 9 resumes at phase 9.
@@ -743,7 +748,7 @@ Four of these break an unattended run outright:
 
 **1. The TCC permissions cannot be granted by a script.** Sending keystrokes,
 driving UTM over Apple Events and taking a screenshot are all consent dialogs.
-On a fresh machine the run stops at a dialog nobody is there to see. Phase 0
+On a fresh machine the run stops at a dialog nobody is there to see. Phase 1
 must **probe each permission and refuse to start** — not assume, since the
 failure mode is a hang, and a first-run grant is the one thing a person must do.
 
@@ -756,7 +761,7 @@ needs the display awake and unlocked, and must say so rather than time out.
 error, waits 15 s, and relaunches regardless of the *"a VM is still running"*
 modal that is exactly the case it should stop for. `setup` calls it
 unconditionally after creating a bundle. **On this machine that would kill a
-running `irgo-win11`.** Phase 0: refuse to restart UTM while any VM outside the
+running `irgo-win11`.** Phase 1: refuse to restart UTM while any VM outside the
 test pattern is started.
 
 **3. Protecting the ISO silently defeats the hardlink, then blocks cleanup.**
@@ -770,12 +775,12 @@ rm  → bundle holding an immutable hardlink ⇒ EPERM, directory left behind
 So every VM created after protection costs ~35 GB rather than ~30, and any
 bundle created *before* it cannot be deleted at all — `cleanup.go` never calls
 `UnprotectISO`. With **49 GiB free** that is one test VM, while phase 8 wants
-twelve sequential trials. Phase 0 must unprotect-delete-reprotect around
+twelve sequential trials. Phase 1 must unprotect-delete-reprotect around
 teardown, and assert free space against the *copy* cost before each trial.
 
 **4. A run that dies between `upstream:link` and `unlink` poisons every later
 build**, invisibly, because `go.work` is gitignored and absent from
-`git status`. Phase 0 restores it on exit, including the failure path, and
+`git status`. Phase 1 restores it on exit, including the failure path, and
 asserts it is absent before merging anything.
 
 **The harness tracks the CLI, capability by capability.** The harness is

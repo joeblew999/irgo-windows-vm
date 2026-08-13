@@ -736,6 +736,70 @@ FAT. Each costs a 45-minute install per trial, which is why nobody has run them
 and why the code asserts both answers. A human will not sit through twelve
 installs. A machine does not care.
 
+#### Never install Windows twice: the golden image
+
+The 45-minute install is the plan's real cost, and the first draft spent it
+twelve times over in phase 8 alone. It does not have to be spent more than once.
+
+**The VMs live on APFS, so a bundle clones copy-on-write.** Measured on this
+machine:
+
+```
+$ time cp -c big.img clone.img       # 3 GB
+0.003 total
+
+$ ls -lh                              3.0G big.img   3.0G clone.img
+$ du -sh .                            32K
+```
+
+Two 3 GB files, 32 KB of disk, three milliseconds. A 30 GB installed Windows
+disk clones the same way. So:
+
+- **Install Windows once** into a golden bundle. 45 minutes, paid a single time.
+- **Every test VM is a CoW clone of it** — near-instant, near-zero bytes. A
+  clone only consumes what it *writes*, so a boot-and-probe costs a few hundred
+  MB rather than 35 GB.
+- **Destroy the clone after each test.** Teardown is a directory removal, and
+  the golden image is untouched.
+
+This is what makes the disk arithmetic work at all: 49 GiB free will not hold
+two full VMs, but it holds a golden image and as many clones as the run needs.
+
+**Clone the *suspended* state, and most preconditions disappear.** Resume is
+~400 ms and — per `setup.go:172` — works with the Mac's screen locked, because
+it restores RAM and never reaches firmware. A cold boot cannot: keystrokes route
+through UTM's display window. So a golden image saved **suspended** means the
+majority of phases need no display, no keystrokes, no Accessibility grant and no
+unlocked screen. The TCC and screen-lock preconditions then bind only on the
+phases that genuinely drive a boot.
+
+**Batch the clones, restart UTM once.** UTM enumerates its bundle directory only
+at launch, so each new bundle would otherwise cost a `RestartUTM` — which, per
+the interlocks above, is the operation that must not run while another VM is
+started. Creating a phase's clones up front and restarting once turns twelve
+hazardous restarts into one guarded one.
+
+Two things the clone must not inherit — both already solved in `bundle.go`, and
+both must be applied by the clone path rather than reimplemented:
+
+- a **fresh UUID**, or UTM sees duplicates;
+- a **fresh MAC**, or clones collide on the shared network. Note `randomMAC`
+  discards its `rand.Read` error, which yields `52:54:00:00:00:00` for every
+  clone — harmless once, an L2 collision at clone scale. Phase 4's tri-state
+  work covers it.
+
+**What still needs a real install**, and cannot be cloned past: phase 8's three
+experiments test *installation itself*. But they do not need it to **finish** —
+boot success is observable in about two minutes from disk growth or the agent,
+so each trial aborts at first signal instead of running 45 minutes to a
+conclusion already known. Twelve trials become well under an hour.
+
+One full unattended install stays as the final gate, once, at the end.
+
+> **`clone` is a new primitive**, and by the rule above it earns its place: no
+> existing primitive does this, and it is the difference between a run that
+> costs twelve hours and one that costs two.
+
 #### Every assertion needs a negative control
 
 The harness is the only thing standing between an unattended run and 17 phases
@@ -1075,7 +1139,8 @@ exactly how that bug happened the first time.
 
 **Once, at the end — a fresh install.** Nothing above exercises it, phases 8,
 9 and 10 all touch it, and it is the only path whose failure costs 45 minutes to
-observe:
+observe. Everything before it runs against clones of the golden image, so this
+is the single full install in the entire run:
 
 ```sh
 irgo-winvm setup -vm refactor-test -install     # ~45 min, unattended

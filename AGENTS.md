@@ -86,9 +86,12 @@ cross-compiles.
 
 ## A test that cannot fail is not a test
 
-Every assertion needs a negative control: break the thing, watch the test go
-red, put it back. `mise run iso:test` does this for the ISO stage — eight
-mutations, each of which must be caught, or the task fails.
+Every assertion needs a negative control: **break the thing, watch the test go
+red, put it back.** Ten seconds, by hand, when you write the test. There was a
+mise task automating this across eight mutations; it was fifty lines of shell
+matching exact source text, so it broke on the first rename and once left a
+mutated file in a commit. The habit catches what matters — a test born vacuous —
+and the machinery only caught tests weakened later, which did not happen.
 
 This is not theory. A test for the scan cache passed against a mutation that
 disabled the check it was testing, because the case it built also changed the

@@ -524,10 +524,15 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 	// Typing is only safe when this code started the VM and knows it is booting
 	// from the install medium, which is RunInstall's job, not this one.
 	shot("running-no-agent")
-	return fmt.Errorf("%s is running but not answering after %s.\n"+
+	// No duration in this one, because none elapsed. It said "not answering
+	// after 10m0s" while failing in under a second — that is the configured
+	// timeout, not a measurement, and it reads as though the tool had waited
+	// ten minutes and given up when it had asked once and returned.
+	return fmt.Errorf("%s is already running and its guest agent is not answering.\n"+
 		"  Not typing at it: a running VM may be a working desktop whose agent\n"+
 		"  is busy, and keystrokes meant for a boot prompt land in whatever has\n"+
-		"  focus. Look at the screenshot above, or run vm-screen", vmRef, timeout)
+		"  focus. Look at the screenshot above, or run vm-screen.\n"+
+		"  The agent usually returns a minute or two after the desktop appears", vmRef)
 }
 
 // utmContainerDir is UTM's sandbox container, where it keeps everything it

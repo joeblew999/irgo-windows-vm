@@ -75,6 +75,8 @@ starts from nothing.
 
 ## The rest
 
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to set up, what to run, how to
+  land a change.
 - **[AGENTS.md](AGENTS.md)** — read before changing any of this. How the code is
   organised, and every trap that cost hours.
 - **[RESULTS.md](RESULTS.md)** — what has been measured, dated.

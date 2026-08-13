@@ -296,112 +296,147 @@ replacing it, and there is nothing there to lose.
 
 So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
 
+## Review of this plan's own flaws
+
+Written down because the plan was assembled incrementally and inherited exactly
+the failure it describes.
+
+**The ordering was wrong.** Phase 6b renamed the `utmvm` API *after* Phase 5
+rewrote the CLI against it — writing the CLI twice. **Every `utmvm` API change
+now lands before the CLI is touched.**
+
+**A whole phase was wasted work.** "Cut `up` and `start`" was a separate phase
+*before* the CLI rewrite. If the CLI is being written fresh, you simply do not
+write them. Folded in.
+
+**The numbering (0,1,2,3,4,4b,4c,5,6,6b,7,8) was itself the evidence** — the
+`b`/`c` suffixes are where things were bolted on instead of re-planned.
+Renumbered.
+
+**`probes build` in the CLI is probably wrong, and it exposes a deeper hole.**
+A `go install`ed binary has no `probe/`, `glaze-probes/` or `examples/` source
+tree, so it cannot compile them — the command cannot exist there. Worse, the
+whole probe story is already incoherent: `create -probes <dir>` bakes binaries
+into the payload CD, and an installed binary has no way to obtain those
+binaries. So `irgo-winvm probe` is broken for anyone who did not clone.
+
+That is a **distribution decision, not a placement one**, and it must be made
+before Phase 4:
+
+- **embed** the cross-compiled probes with `go:embed` — a self-contained binary,
+  at the cost of ~20 MB and a release process that cross-compiles first;
+- **download** them from a GitHub release, like the guest tools already are;
+- **accept** that probes are maintainer-only, and say so — then mise *is* their
+  correct home and the "product gap" identified above is not one.
+
+Until this is decided, `probes` stays in mise and the README stops implying
+otherwise.
+
+## Git strategy
+
+Each phase is a branch off `master`, merged only once verified. The reason is
+not ceremony: **CI cannot prove these phases correct.** Phases touching boot,
+run, media or setup have no unit coverage, so a green build means "compiles",
+not "works" — and the failures are silent.
+
+```sh
+git switch -c refactor/01-facts master
+# … work, verify …
+git switch master && git merge --no-ff refactor/01-facts
+```
+
+- **`--no-ff`**, so each phase is one revertable merge commit. When a VM-only
+  regression surfaces three phases later, `git revert -m 1 <merge>` takes back
+  exactly one phase.
+- **One phase per branch**, never two. The point of the sequence is that a
+  bisect lands on a single concern.
+- **Do not merge on CI alone** for phases marked *VM* below. Run the checks in
+  Verification first and put the output in the merge commit body — that is the
+  only durable record that it was actually run.
+- **Tag `pre-refactor` at `master` now.** A single known-good point that predates
+  everything, since `RESULTS.md`'s measurements were taken there.
+
 ## Phases
 
-Each is one commit, independently verifiable. Ordered so the properties land
-before the file moves, and the VM-dependent work comes last.
+Ordered so every `utmvm` API change lands before the CLI is rewritten against
+it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
 
-**Phase 0 — delete.** Eight symbols verified to have no caller: `BuildFATImage`,
-`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed in
-the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
-`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is
-kept today only so its finding is checkable — and the finding is that calling it
-can silently power-cut the guest. Do not ship a footgun; the measurement lives in
-`RESULTS.md`.
+| # | phase | size | verify |
+|---|---|---|---|
+| 1 | Delete dead code | S | CI |
+| 2 | One source of truth for facts | S | CI |
+| 3 | One retry primitive | S | CI |
+| 4 | Decide probe distribution | S | decision |
+| 5 | Idempotency contract | M | CI + twice-run test |
+| 6 | Reporting seam + `runner` interface | L | CI (unlocks unit tests) |
+| 7 | `context.Context` through long operations | M | **VM** |
+| 8 | Verbs, typed errors, locking | M | CI |
+| 9 | Group `utmvm` by subject (`git mv`) | S | CI |
+| 10 | Rewrite the CLI | L | **VM** |
+| 11 | Shrink the exported surface | S | CI |
+| 12 | Enforcement | M | CI |
 
-**Phase 1 — one source of truth for facts.** `guestFile()` shared by `run.go`
-and `Prune`; named timeout constants; ISO name and default VM name declared once
-in `paths.go`. Fixes the live prune bug.
+**1 — Delete dead code.** Eight symbols with no caller: `BuildFATImage`,
+`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed
+in the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
+`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is a
+footgun that reports success while power-cutting the guest; its finding stays in
+`RESULTS.md` and the trap table, which is where it is useful.
 
-**Phase 2 — one retry primitive.** Collapse the six loops.
+**2 — One source of truth for facts.** `guestFile()` shared by `run.go` and
+`Prune`, fixing the live drift bug; named timeout constants carrying their
+reason; ISO name and default VM name declared once in `paths.go`.
 
-**Phase 3 — idempotency contract.** `Ensure*` semantics on `Create`, `BuildISO`,
-`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skips
-completed images. `Setup` should shrink substantially as its subsystems start
-answering for themselves.
+**3 — One retry primitive.** Collapse the six hand-written loops.
 
-**Phase 4 — cut the command surface.** Delete `up` (86 lines duplicating
-`setup`, the largest remaining duplication) and `start` (powers a VM on
-headlessly, yielding a UEFI prompt nobody can type at — a footgun with a
-friendly name). Update `mise.toml`'s `vm:up` and `vm:iso-test` in the same
-commit.
+**4 — Decide probe distribution.** Embed, download, or maintainer-only. Blocks
+phase 10, because it decides whether `probes` is a CLI command at all.
 
-**Phase 4b — one reporting seam and a `runner` interface.** Replace the four
-progress mechanisms with one; move every `fmt.Printf`/`os.Stderr` write out of
-`utmvm` and into the CLI. Introduce the `runner` seam at the same time, since
-both are about who is allowed to talk to the outside world. This is what makes
-the package testable without a VM.
+**5 — Idempotency contract.** `Ensure` semantics on `Create`, `BuildISO`,
+`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skipping
+images already exported. `Setup` shrinks as its subsystems answer for
+themselves.
 
-**Phase 4c — `context.Context` through the long operations.** `Download`,
-`ExpandESD`, `BuildISO`, `RunInstall`, `EnsureReady`, `WaitForAgent*` and
-`Setup`. Ctrl-C should stop a 45-minute install cleanly rather than leaving
-partial state.
+**6 — Reporting seam and `runner` interface.** One reporting mechanism instead
+of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
+The `runner` seam lands here because both are about who may talk to the outside
+world. **This is the phase that makes the package testable without a VM** — do
+it before the risky ones, and add fakes for the paths that follow.
 
-**Phase 5 — rewrite the CLI.** Not a split: written fresh against the new
-`utmvm` API, old file deleted. 1144 lines at 12% comment density is flag
-plumbing with nothing learned embedded in it, and untangling boilerplate is
-slower than replacing it. The new shape is `main.go` (dispatch only) plus
-`cmd_{setup,vm,boot,guest,media}.go`, with one helper behind the 18 flagsets and
-10 copies of *resolve-find-handle*, so an unknown VM reads the same from every
-command — which it currently does not.
+**7 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
+`EnsureReady`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
+cleanly instead of leaving partial state. *VM* — cancellation during a real
+install is the only honest test.
 
-**Phase 6 — group `utmvm` by subject** with `git mv` so history follows:
-`media_*`, `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are
-genuinely coupled and splitting would force most of the 134 symbols to stay
-exported, defeating Phase 7.
+**8 — Verbs, typed errors, locking.** Fix `Ensure`'s five meanings:
+`EnsureReady` → `BootInstalled`, which is what it does and would not have been
+mistaken for `RunInstall`. Typed errors for the states `setup` should act on. A
+lockfile per VM bundle. Route the last `runtime.GOOS` through `CanCreateVMs`.
 
-**Phase 6b — fix the verbs, then the errors.** Give `Ensure`/`Fetch`/`Build`/
-`Run` fixed meanings and rename accordingly — `EnsureReady` becomes
-`BootInstalled`, which is what it does and would not have been mistaken for
-`RunInstall`. Add typed errors for the states `setup` should be able to act on.
-Add a lockfile per VM bundle. Route the last `runtime.GOOS` comparison through
-`CanCreateVMs`.
+**9 — Group `utmvm` by subject** with `git mv`: `media_*`, `deps_*`, `vm_*`,
+`host_*`. **No sub-packages** — the parts are coupled and splitting would force
+the exported surface to stay large, defeating phase 11.
 
-**Phase 7 — shrink the exported surface.** 134 exported symbols for one
-consumer. Grep `cmd/` for each; unexport what is absent. Expect 40–60 to go.
+**10 — Rewrite the CLI.** Written fresh against the now-final `utmvm` API, old
+file deleted; `up` and `start` simply not carried over. 1144 lines at 12%
+comment density is flag plumbing with nothing learned in it. New shape:
+`main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
+helper behind the 18 flagsets and 10 copies of *resolve-find-handle*. *VM*.
 
----
+**11 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
+symbols; unexport what is absent. Expect 40–60 to go.
 
-## Verification
+**12 — Enforcement.** See below.
 
-Every phase:
+### If it stops early
 
-```sh
-mise run check
-for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
-  GOOS=${t%%/*} GOARCH=${t##*/} CGO_ENABLED=0 go build -o /dev/null ./...
-done
-```
+Phases 1–3 are cheap, self-contained and fix a live bug; they are worth doing
+even if nothing else happens. **Phase 6 is the highest-value single phase** —
+without a `runner` seam this codebase cannot be tested, and every later phase is
+verified by hand. Phases 9–11 are cosmetic by comparison: stop before them
+without loss.
 
-**Idempotency is verified by running things twice.** This is the check the repo
-does not currently have, and Phase 3 should add it as a test:
-
-```sh
-irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
-irgo-winvm iso -protect && irgo-winvm iso -protect
-irgo-winvm build-iso -esd X -o Y && irgo-winvm build-iso -esd X -o Y   # must succeed
-irgo-winvm probes && irgo-winvm probes
-```
-
-A unit test can cover most of it without a VM: `Prune` twice, `Download` twice
-to an existing file, `BuildISO` twice against a fixture directory.
-
-**The prune bug gets a regression test in Phase 1** — generate a guest filename
-through `guestFile()` and assert `isOurArtefact` recognises it, so the two
-cannot drift again.
-
-Phases 4 and 5 need the real VM:
-
-```sh
-irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
-irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
-irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
-```
-
-The last must still report **~400 ms**. Seconds means a poll interval was lost —
-exactly how the bug happened the first time.
-
-## Phase 8 — make the mess impossible to repeat
+## Phase 12 — enforcement: make the mess impossible to repeat
 
 A cleanup that is not enforced decays back. This phase is the reason the others
 are worth doing.
@@ -412,7 +447,7 @@ byte formatter, `EnsureReady` where `RunInstall` was needed. Prevention has to
 work on that failure mode specifically: a convention nobody reads prevents
 nothing, so it goes in the file agents load automatically.
 
-### 8a. A linter that catches each mistake actually made
+### 12a. A linter that catches each mistake actually made
 
 `golangci-lint` is already available through mise. Enable exactly the checks
 that would have caught the bugs in this repo's history — not a default preset:
@@ -426,16 +461,18 @@ that would have caught the bugs in this repo's history — not a default preset:
 | `funlen`, `gocognit` | `runUp` at 86 lines doing five things |
 | `errcheck`, `gosec` | already clean; keep them clean |
 
-Thresholds are set from the code *after* Phase 7, so the gate starts green and
-any regression is a new failure rather than pre-existing noise.
+Land a **minimal config in Phase 1** with only the checks the code already
+passes, so the refactor itself is gated while churn is highest. Tighten the
+thresholds in Phase 12 once the code is final — saving all of it for the end
+leaves the noisiest period ungoverned.
 
-### 8b. Wire it into the gate, not just the docs
+### 12b. Wire it into the gate, not just the docs
 
 `.golangci.yml` at the root; `mise run check` gains a `lint` step; the existing
 `.github/workflows/check.yml` gains the same. A rule that only lives in prose is
 a rule that gets skipped at 2am.
 
-### 8c. Tests that encode the invariants
+### 12c. Tests that encode the invariants
 
 Three properties in this codebase are invisible to the compiler and have each
 already broken once:
@@ -450,7 +487,7 @@ The last is unusual and deliberate: 134 exported symbols accumulated because
 nothing ever objected. A budget makes growth a decision someone takes rather
 than a thing that happens.
 
-### 8d. `AGENTS.md` — the file that gets read
+### 12d. `AGENTS.md` — the file that gets read
 
 Rules for contributors, human and AI, in the location agents load without being
 asked. `CLAUDE.md` points at it so Claude Code picks it up too. It states the
@@ -476,3 +513,52 @@ things this repo has learned the hard way:
   a bad config with one generic "cannot import this VM" naming no field;
   `config_test.go` exists because that failure is undebuggable.
 - **Do not do this in one commit.**
+
+---
+
+## Verification
+
+**Every phase:**
+
+```sh
+mise run check && mise run lint
+for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
+  GOOS=${t%%/*} GOARCH=${t##*/} CGO_ENABLED=0 go build -o /dev/null ./...
+done
+```
+
+**Idempotency — run it twice.** The check this repo does not have; Phase 5 adds
+it as a test. Most of it needs no VM: `Prune` twice, `Download` twice to an
+existing file, `BuildISO` twice against a fixture.
+
+```sh
+irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
+irgo-winvm iso -protect && irgo-winvm iso -protect
+```
+
+**Phases 7 and 10 (*VM*)** — a green build means "compiles", not "works", and
+these paths fail silently:
+
+```sh
+irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
+irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
+irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
+```
+
+The last must still report **~400 ms**. Seconds means a poll interval was lost —
+exactly how that bug happened the first time.
+
+**Once, at the end — a fresh install.** Nothing above exercises it, phases 5 and
+7 both touch it, and it is the only path whose failure costs 45 minutes to
+observe:
+
+```sh
+irgo-winvm setup -vm refactor-test -install     # ~45 min, unattended
+irgo-winvm delete -vm refactor-test -force
+```
+
+Never against `irgo-win11`.
+
+**Rollback.** Each phase is one `--no-ff` merge, so a regression found late is
+`git revert -m 1 <merge>` — one concern, not a hand-unpick. `pre-refactor` tags
+the last commit whose `RESULTS.md` measurements were actually taken.

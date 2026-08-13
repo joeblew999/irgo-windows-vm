@@ -270,9 +270,18 @@ Four Go modules, deliberately not one: glaze and native stay out of the CLI's
 dependency graph, which is what lets it cross-compile with nothing installed.
 `mise run check` walks all four; `mise tasks` lists the rest.
 
+## Contributing
+
+**Read [AGENTS.md](AGENTS.md) first** — it is short, and it is aimed at
+contributors human and AI alike. Most of the duplication this repo has had to
+clean up was written by an agent that did not check what already existed, so the
+rules there are about searching before writing, treating the long comments as
+findings rather than decoration, and verifying against the VM rather than the
+compiler.
+
 See [RESULTS.md](RESULTS.md) for measured results per platform,
 [UPSTREAM.md](UPSTREAM.md) for what this repo has found in glaze and native, and
-[REFACTOR.md](REFACTOR.md) for the planned cleanup of this codebase.
+[REFACTOR.md](REFACTOR.md) for the planned cleanup and how it is enforced.
 
 ## Requirements
 

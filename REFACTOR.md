@@ -12,160 +12,157 @@ The harm is not aesthetic. Twice, duplication has hidden a real bug: `setup`
 called `EnsureReady` where it needed `RunInstall` (a fresh VM would have sat at
 a UEFI prompt until timeout), and three separate wait-for-agent loops meant a
 400 ms resume was measured with a 10-second poll. Both were found by
-consolidating, not by testing. There will be more.
+consolidating, not by testing.
 
-**Nothing depends on this repository yet.** No published API, no other consumer,
-no released binary anyone has installed. So this is a rewrite where a rewrite is
-warranted, not a migration: the plan deletes rather than deprecates, renames
-without aliases, and cuts the command surface instead of preserving it. The only
-thing that must survive is what `RESULTS.md` records as measured — those numbers
-have to still hold at the end.
+**Nothing depends on this repository yet** — no published API, no other
+consumer, no released binary anyone has installed. So this deletes rather than
+deprecates, renames without aliases, and cuts the command surface instead of
+preserving it. The only contract is what `RESULTS.md` records as measured.
 
-## What the audit found
-
-Measured 13 Aug 2026:
-
-| | |
-|---|---|
-| `cmd/irgo-winvm/main.go` | **1144 lines, one file, 23 subcommands** |
-| longest functions | `runUp` 86, `runISO` 73, `runBuildISO` 71, `runCreate` 65, `runFetchISO` 62 |
-| repeated boilerplate | 18 × `flag.NewFlagSet`, 10 × `vmRef`, 8 × `Find`, 6 × `Named` |
-| `utmvm` | **25 flat files, 134 exported symbols** — for one consumer |
-| host commands | **22 × `exec.Command`** across 8 files; `osascript` driven from two |
-| dead code | 8 symbols with no caller (verified: definition only) |
-
-Duplicate *function bodies* are already gone — a machine scan returns nothing.
-What remains is structural.
-
-## Principles
-
-1. **Delete first.** Every phase should end with fewer lines than it started.
-   The cheapest code to maintain is the code that is not there.
-2. **The measured results are the contract**, not the API. `RESULTS.md` says a
-   resume is ~400 ms, a probe passes on Windows ARM64, a self-built ISO
-   installs. Those must still be true. Everything else is free to change.
-3. **The safety net is thin.** Unit tests cover config, ISO parsing, the catalog
-   and prune. Everything else is only verified by running a real VM — so the
-   VM-touching phases come last, and each has an explicit check.
-4. **One seam per external thing.** `utmctl`, `osascript`, `brew` and the ISO
-   tools are four conversations with the host; each gets one implementation.
+This plan is organised by **the properties the code must have**, not by which
+files to move. Moving files is the last and least interesting part.
 
 ---
 
-## Phase 0 — Delete the dead code
+## The properties, and where they are violated today
 
-**Verified definition-only, no caller anywhere:**
+### 1. Idempotency is a bolted-on layer, not a property of operations
 
-| symbol | file |
+Every expensive operation here is one you will re-run: a 4.2 GB download, a
+45-minute install, a VM that reboots itself mid-session. So re-running must be
+safe and cheap. Today exactly **one** function has that property — `Setup` — and
+it gets it by wrapping primitives that actively refuse:
+
+| operation | re-run today |
 |---|---|
-| `BuildFATImage` | `fatimage.go` |
-| `GuestToolsInstallCommand` | `fatimage.go` — still carries the `start`-wildcard bug already fixed in the answer file |
-| `OpenDisplay`, `BootAssist` | `bootassist.go` |
-| `IfaceVirtIO` | `config.go` |
-| `SchemaConfigurationVersion` | `ensure.go` |
-| `EnsureISOTools` | `brew.go` — written and never called |
-| `SuspendToDisk` | `control.go` — keep the finding, delete the method |
+| `Create` | **fails** — `"already exists; remove it or choose another name"` (`bundle.go:86`) |
+| `BuildISO` | **fails** — `"already exists — this never overwrites"` (`isobuild.go:255`) |
+| `Download` | **fails** if the destination exists (`fetch.go:159`); resumes only via `.part` |
+| `boot` | **unsafe** — re-driving a live Setup sends keystrokes into its UI, which has destroyed an install |
+| `Setup` | idempotent, by doing everyone else's state checks itself |
 
-`SuspendToDisk` is the interesting one: it exists only so the finding is
-checkable, and the finding is that calling it can silently power-cut the guest.
-With no consumers there is no reason to ship a footgun — the measurement lives
-in `RESULTS.md` and the trap table, which is where it is useful.
+That is backwards. `Setup` is 338 lines largely because it re-implements
+"is this already done?" for four subsystems that should each answer for
+themselves.
 
-**Verify:** `mise run check`. Deleting something with a caller will not compile.
-
-## Phase 1 — Cut the command surface
-
-23 subcommands, several of which exist only because `setup` had not been written
-yet.
-
-**Delete:**
-- `up` — `setup` does create + restart UTM + install, and better. Its 86-line
-  body is the largest single duplication left.
-- `start` — powers a VM on headlessly, which on this firmware yields a UEFI
-  prompt nobody can type at. It is a footgun with a friendly name; `boot` and
-  `resume` are the two things anyone actually wants.
-
-**Keep, because each fails differently and is worth retrying alone:** `setup`,
-`doctor`, `targets`, `create`, `boot`, `install`, `suspend`, `resume`, `run`,
-`exec`, `probe`, `screenshot`, `status`, `list`, `delete`, `prune`, `iso`,
-`fetch-iso`, `build-iso`, `verify`.
-
-**Verify:** `mise run` tasks that referenced `up` must be updated in the same
-commit — `vm:up` and `vm:iso-test` both call it.
-
-## Phase 2 — Split the CLI by concern
-
-1144 lines in one file, with no signal about which commands are related.
-
-```
-main.go        usage and dispatch, nothing else (~110 lines)
-cmd_setup.go   setup, doctor, targets
-cmd_vm.go      create, delete, list, status, prune
-cmd_boot.go    boot, install, suspend, resume
-cmd_guest.go   run, exec, probe, screenshot
-cmd_media.go   iso, fetch-iso, build-iso, verify
-```
-
-Pure movement. `git diff --stat` should show every line deleted from `main.go`
-reappearing verbatim elsewhere.
-
-## Phase 3 — Kill the command boilerplate
-
-Ten commands repeat *resolve a reference, look it up, get a handle*, each with
-its own error wrapping, so the same failure reads differently depending on which
-command hit it.
+**Target:** every operation takes `ensure` semantics — already done is success,
+not an error — and reports which it was. The refusals that exist for *safety*
+(`CheckWritable` on immutable or hardlinked media) stay; they are a different
+thing from refusing to repeat work.
 
 ```go
-// cmd_common.go
-func newCmd(name string) *flag.FlagSet
-func vmFrom(fs *flag.FlagSet, args []string) (utmvm.Entry, utmvm.VM, error)
+// The shape every operation converges on.
+type Outcome struct {
+    Done    bool   // work was performed
+    Detail  string // what, or why it was skipped
+}
+func EnsureX(...) (Outcome, error)
 ```
 
-`vmRef` already does part of this — extend it rather than adding a second path.
-Ten call sites collapse from four lines to one.
+`Setup`'s stage reporting already has exactly this shape — lift it out of
+`setup.go` and make it the package's vocabulary.
 
-**Verify:** the error text for an unknown VM must be identical from every
-command, which it currently is not.
+### 2. DRY of *facts*, not just of code
 
-## Phase 4 — Group `utmvm` by subject
+Duplicate function bodies are gone — a machine scan returns nothing. What is
+duplicated now is knowledge, which is worse, because the copies drift silently.
 
-25 flat files. Seven are about media, three about acquiring dependencies, the
-rest about VM lifecycle — and nothing in the layout says so. Rename with `git
-mv` so history follows:
+**The live bug:** guest temp files are named in `run.go` by string concatenation
+(`irgo-i-`, `irgo-io-`, `irgo-ir-`, `irgo-l-`), and `cleanup.go:121-125`
+separately lists those prefixes so `Prune` can find them. Two sources of truth
+for one naming scheme. Add a prefix and `Prune` silently stops cleaning it —
+with no test that would notice.
 
-```
-media_catalog.go  media_fetch.go  media_build.go  media_guard.go  media_iso.go
-deps_utm.go       deps_tools.go                  (ensure/installutm/brew)
-vm_control.go     vm_create.go    vm_boot.go     vm_run.go       vm_clean.go
-host_paths.go     host_sysfile_{darwin,other}.go
-setup.go
-```
+| fact | copies | where |
+|---|---|---|
+| guest temp-file naming | **2 schemes** | `run.go` builds them, `cleanup.go` lists them |
+| `win11-arm64.iso` | 5 | `paths.go:83`, `external.go:90,99`, `setup.go:257`, comments |
+| default VM name `irgo-win11` | 3 | `setup.go:87`, `mise.toml`, `external.go:99` |
+| timeouts | **8 distinct literals** | `10m×3, 45m×2, 2m×2, 60m, 15m, 5m, 10s` — no policy anywhere |
 
-**No sub-packages.** The parts are genuinely coupled — media informs create,
-create informs boot — and splitting would force most of the 134 symbols to stay
-exported, which is the opposite of Phase 6.
+**Target:** one declaration per fact. A `guestFile(kind, stamp)` constructor that
+`Prune` also consumes, so the two cannot disagree. Named timeout constants with
+the reason attached (`agentPoll`, `installLimit`, `bootStall`), because
+`45*time.Minute` at a call site tells you nothing about why 45.
 
-## Phase 5 — One seam per external tool
+### 3. One retry primitive
 
-22 `exec.Command` sites. `osascript` is driven from both `bootassist.go` and
-`control.go` under different escaping assumptions — and the trap table records
-that `%q` double-escaping made every Go-driven boot silently fail. That bug
-returns whenever there are two implementations.
+Six hand-written poll/retry loops: `bootassist.go:110,196`, `control.go:202,269`,
+`install.go:136`, `cleanup.go:93`. Each picks its own interval and its own idea
+of what a timeout means. This is where the 10-second-poll bug lived.
 
-```go
-func utmctl(args ...string) (string, error)      // VM.run today; make it the only path
-func osascriptRun(script string) (string, error) // one escaping rule
-// brew and the ISO tools are already consolidated
-```
+**Target:** one `retry(limit, interval, fn)` — or `WaitForAgentEvery`'s shape
+generalised — used by all six. The interval becomes a decision made once, with a
+reason, rather than a literal typed six times.
 
-**Verify:** `boot -installed` exercises the `osascript` path the escaping bug
-lived in; `run -gui` exercises the scheduled-task path.
+### 4. Atomicity and resumability
 
-## Phase 6 — Shrink the exported surface
+Partly right already, and worth keeping deliberately rather than by accident:
 
-134 exported symbols for one consumer is not an API, it is an accident. For each
-exported symbol, grep `cmd/`; if absent and not used in a test, unexport it.
-Expect 40–60 to go. The CLI still compiling is the proof.
+- `Download` writes `.part` and renames — **good**, keep. It also keeps the file
+  on a hash mismatch rather than deleting 4 GB — **good**.
+- `BuildISO` removes a partial ISO on failure — **good**: a half-written image is
+  the right size to look plausible and fails later as an unbootable VM.
+- `ExpandESD` has **no** resume: a failure at image 6 of 8 redoes all six.
+- `Delete` removes files 30 s after asking QEMU to stop, whether or not it did.
+
+**Target:** state the guarantee for every operation that writes, and make
+`ExpandESD` skip images already exported.
+
+### 5. One seam per external thing
+
+22 `exec.Command` sites across 8 files. `osascript` is driven from both
+`bootassist.go` and `control.go` under different escaping assumptions — and the
+trap table records that `%q` double-escaping made every Go-driven boot silently
+fail. Two implementations is how that bug returns.
+
+**Target:** `utmctl(...)`, `osascriptRun(...)` — each the only place that knows
+how to quote for its tool. `brew` and the ISO tools are already consolidated.
+
+---
+
+## Phases
+
+Each is one commit, independently verifiable. Ordered so the properties land
+before the file moves, and the VM-dependent work comes last.
+
+**Phase 0 — delete.** Eight symbols verified to have no caller: `BuildFATImage`,
+`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed in
+the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
+`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is
+kept today only so its finding is checkable — and the finding is that calling it
+can silently power-cut the guest. Do not ship a footgun; the measurement lives in
+`RESULTS.md`.
+
+**Phase 1 — one source of truth for facts.** `guestFile()` shared by `run.go`
+and `Prune`; named timeout constants; ISO name and default VM name declared once
+in `paths.go`. Fixes the live prune bug.
+
+**Phase 2 — one retry primitive.** Collapse the six loops.
+
+**Phase 3 — idempotency contract.** `Ensure*` semantics on `Create`, `BuildISO`,
+`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skips
+completed images. `Setup` should shrink substantially as its subsystems start
+answering for themselves.
+
+**Phase 4 — cut the command surface.** Delete `up` (86 lines duplicating
+`setup`, the largest remaining duplication) and `start` (powers a VM on
+headlessly, yielding a UEFI prompt nobody can type at — a footgun with a
+friendly name). Update `mise.toml`'s `vm:up` and `vm:iso-test` in the same
+commit.
+
+**Phase 5 — split the CLI.** 1144 lines → `main.go` (dispatch only) plus
+`cmd_{setup,vm,boot,guest,media}.go`. Pure movement. Then collapse the boilerplate:
+18 flagsets and 10 copies of *resolve-find-handle* behind one helper, so an
+unknown VM reads the same from every command — which it currently does not.
+
+**Phase 6 — group `utmvm` by subject** with `git mv` so history follows:
+`media_*`, `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are
+genuinely coupled and splitting would force most of the 134 symbols to stay
+exported, defeating Phase 7.
+
+**Phase 7 — shrink the exported surface.** 134 exported symbols for one
+consumer. Grep `cmd/` for each; unexport what is absent. Expect 40–60 to go.
 
 ---
 
@@ -174,34 +171,114 @@ Expect 40–60 to go. The CLI still compiling is the proof.
 Every phase:
 
 ```sh
-mise run check                 # build, vet, test — all four modules
+mise run check
 for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
   GOOS=${t%%/*} GOARCH=${t##*/} CGO_ENABLED=0 go build -o /dev/null ./...
 done
 ```
 
-Phases 1 and 5 additionally need the VM, because they touch code with no unit
-coverage:
+**Idempotency is verified by running things twice.** This is the check the repo
+does not currently have, and Phase 3 should add it as a test:
 
 ```sh
-irgo-winvm setup                                   # must skip every stage
+irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
+irgo-winvm iso -protect && irgo-winvm iso -protect
+irgo-winvm build-iso -esd X -o Y && irgo-winvm build-iso -esd X -o Y   # must succeed
+irgo-winvm probes && irgo-winvm probes
+```
+
+A unit test can cover most of it without a VM: `Prune` twice, `Download` twice
+to an existing file, `BuildISO` twice against a fixture directory.
+
+**The prune bug gets a regression test in Phase 1** — generate a guest filename
+through `guestFile()` and assert `isOurArtefact` recognises it, so the two
+cannot drift again.
+
+Phases 4 and 5 need the real VM:
+
+```sh
 irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
 irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
 irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 ```
 
-The last must still report **~400 ms**. Seconds means a poll interval was lost
-in the move — which is exactly how the 10-second-poll bug happened the first
-time.
+The last must still report **~400 ms**. Seconds means a poll interval was lost —
+exactly how the bug happened the first time.
+
+---
+
+## Phase 8 — make the mess impossible to repeat
+
+A cleanup that is not enforced decays back. This phase is the reason the others
+are worth doing.
+
+**Most of this mess was made by an AI agent that did not read what already
+existed** — three wait-for-agent loops next to a `WaitForAgent` method, a fourth
+byte formatter, `EnsureReady` where `RunInstall` was needed. Prevention has to
+work on that failure mode specifically: a convention nobody reads prevents
+nothing, so it goes in the file agents load automatically.
+
+### 8a. A linter that catches each mistake actually made
+
+`golangci-lint` is already available through mise. Enable exactly the checks
+that would have caught the bugs in this repo's history — not a default preset:
+
+| linter | the bug it would have caught |
+|---|---|
+| `unused` | all 8 dead symbols in Phase 0, at the moment each lost its caller |
+| `dupl` | the 3 wait-for-agent loops, the 3 batch-file blocks, the 4 byte formatters |
+| `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3 |
+| `mnd` | the 8 unexplained timeout literals |
+| `funlen`, `gocognit` | `runUp` at 86 lines doing five things |
+| `errcheck`, `gosec` | already clean; keep them clean |
+
+Thresholds are set from the code *after* Phase 7, so the gate starts green and
+any regression is a new failure rather than pre-existing noise.
+
+### 8b. Wire it into the gate, not just the docs
+
+`.golangci.yml` at the root; `mise run check` gains a `lint` step; the existing
+`.github/workflows/check.yml` gains the same. A rule that only lives in prose is
+a rule that gets skipped at 2am.
+
+### 8c. Tests that encode the invariants
+
+Three properties in this codebase are invisible to the compiler and have each
+already broken once:
+
+```go
+TestGuestFileNamesArePrunable  // generate via guestFile(), assert Prune claims it
+TestOperationsAreIdempotent    // Download/BuildISO/Prune twice; second is a no-op
+TestExportedSurfaceBudget      // count exported symbols; fail if it grows
+```
+
+The last is unusual and deliberate: 134 exported symbols accumulated because
+nothing ever objected. A budget makes growth a decision someone takes rather
+than a thing that happens.
+
+### 8d. `AGENTS.md` — the file that gets read
+
+Rules for contributors, human and AI, in the location agents load without being
+asked. `CLAUDE.md` points at it so Claude Code picks it up too. It states the
+things this repo has learned the hard way:
+
+- **Search before you write.** `WaitForAgent`, `HumanBytes`, `Tool.resolve`,
+  `pushScript` all exist because someone eventually noticed the third copy.
+- **The comments are findings, not decoration.** Do not compress them.
+- **Idempotency is a contract**, not a feature of `setup`.
+- **Verify against the VM**, not the compiler, for anything touching boot, run
+  or media — those paths have no unit coverage and fail silently.
+- **One fact, one declaration.**
 
 ## What not to do
 
 - **Do not "tidy" the comments.** They record findings that cost hours and are
   not recoverable from the code: why the display is `virtio-ramfb-gl`, why image
-  3 needs `--boot`, why `--save-state` must never be called. They move with
-  their code.
-- **Do not touch `assets/`, the answer file, or the plist template in
-  `config.go`.** UTM rejects a bad config with one generic "cannot import this
-  VM" that names no field; `config_test.go` exists because that failure is
-  undebuggable.
-- **Do not do this in one commit.** One phase per commit, each verified.
+  3 needs `--boot`, why `--save-state` must never be called.
+- **Do not make `boot` idempotent by making it re-drive.** Re-sending keystrokes
+  into a live Setup has destroyed an install. Idempotent here means *detecting
+  that it need not act*, not repeating the action.
+- **Do not touch `assets/`, the answer file, or the plist template.** UTM rejects
+  a bad config with one generic "cannot import this VM" naming no field;
+  `config_test.go` exists because that failure is undebuggable.
+- **Do not do this in one commit.**

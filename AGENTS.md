@@ -72,6 +72,25 @@ lines of shell in a mise task, so anyone who followed the README's
 task runner hid it. If you find yourself writing shell logic in `mise.toml` that
 a user would want, it belongs in the CLI.
 
+## The primitives are the recovery toolkit
+
+The CLI has two layers. `setup` orchestrates; everything else is a primitive
+that does one thing with no orchestration around it.
+
+**Never delete a primitive for being low-level or misusable.** This project's
+normal case is failure *mid-sequence* — Windows reboots itself during Update and
+the agent drops, the install has two boot phases with a UEFI shell between them,
+UTM does not see a new bundle until relaunched. When `setup` dies at stage five
+you need to stand at that point and poke it: power on *without* driving a boot,
+drive a boot *without* creating anything, photograph the screen, run one command
+in the guest.
+
+`start` is the clearest case. It powers a VM on with no side effects and leaves
+a UEFI prompt — which reads like a footgun and is exactly what isolates whether
+the bundle, the firmware or the boot driver is at fault.
+
+A primitive is removed only when another primitive does the same thing.
+
 ## One fact, one declaration
 
 Names, paths, prefixes and timeouts get declared once. The failure mode is not

@@ -322,6 +322,45 @@ it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
 | 11 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
 | 12 | Tighten enforcement | M | CI | thresholds set from the finished code |
 
+### The CLI has two layers, and only one of them may be cut
+
+This is the correction to an earlier version of this plan, which proposed
+deleting `start` for "powering a VM on headlessly, yielding a UEFI prompt nobody
+can type at — a footgun with a friendly name". That judged it as a *user*
+command. Its real job is **diagnostic**.
+
+**Orchestration** — `setup`. One command that drives the whole sequence.
+
+**Primitives** — `create`, `start`, `boot`, `install`, `suspend`, `resume`,
+`delete`, `status`, `screenshot`, `exec`, `run`, `probe`, `iso`, `fetch-iso`,
+`build-iso`, `verify`, `list`, `prune`, `doctor`, `targets`. Each does exactly
+one thing with no orchestration around it.
+
+**The primitives are the recovery toolkit, and they are not optional.** This
+project's history is failure *mid-sequence*: Windows reboots itself during
+Update and the agent drops with "Port is not connected"; the install has two
+boot phases and lands back in the UEFI shell between them; UTM does not see a
+new bundle until relaunched; keystrokes miss the CD prompt. When `setup` dies at
+stage five of seven you do not want to re-run the orchestration — you want to
+stand at that point and poke it: power the VM on *without* driving a boot, drive
+a boot *without* creating anything, photograph the screen, run one command in
+the guest.
+
+`start` is exactly that: power on with no side effects, which is what you need
+to find out what the firmware does unaided, or to attach a display yourself, or
+to confirm a bundle is valid before blaming the boot driver. "Yields a prompt
+nobody can type at" is the *point* — it isolates the failure.
+
+The README already said this, and the earlier plan contradicted it:
+
+> `up` is `create` + `RestartUTM` + `boot`. **The steps stay separate underneath
+> because each fails differently and is worth retrying alone.**
+
+**So the rule is:** a primitive is removed only if another primitive does the
+same thing. Never because it is low-level, never because it can be misused. Only
+`up` goes, and only because it is orchestration that duplicates `setup` — not
+because it is small.
+
 The rule the order follows: **every `utmvm` API change lands before the CLI is
 written against it** (5–8 before 10), and **the phase that makes testing
 possible comes before the phases that need testing** (5 before 6–8).
@@ -372,7 +411,9 @@ lockfile per VM bundle. Route the last `runtime.GOOS` through `CanCreateVMs`.
 the exported surface to stay large, defeating phase 11.
 
 **10 — Rewrite the CLI.** Written fresh against the now-final `utmvm` API, old
-file deleted; `up` and `start` simply not carried over. 1144 lines at 12%
+file deleted. Every **primitive** is carried over unchanged (see below); only
+`up` is dropped, because it is orchestration and `setup` is the orchestration.
+1144 lines at 12%
 comment density is flag plumbing with nothing learned in it. New shape:
 `main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
 helper behind the 18 flagsets and 10 copies of *resolve-find-handle*. *VM*.
@@ -543,6 +584,11 @@ git switch master && git merge --no-ff refactor/01-facts
 - **Do not touch `assets/`, the answer file, or the plist template.** UTM rejects
   a bad config with one generic "cannot import this VM" naming no field;
   `config_test.go` exists because that failure is undebuggable.
+- **Do not delete a primitive because it looks like a footgun.** `start` powers
+  a VM on with no side effects and yields a UEFI prompt — which is exactly what
+  makes it useful when `setup` has failed and you need to isolate whether the
+  bundle, the firmware or the boot driver is at fault. The primitives are the
+  recovery toolkit for a project whose normal case is partial failure.
 - **Do not do this in one commit.**
 
 ---

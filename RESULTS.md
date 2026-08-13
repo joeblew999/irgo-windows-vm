@@ -142,7 +142,7 @@ Windows ARM64.
 ### The windowed half — `examples/nativeall`, windows/arm64, `-gui`
 
 The rows that used to say *skipped* here. Run in the VM with
-`mise run vm:run .bin/nativeall-arm64.exe`, exit code 0:
+`irgo-winvm run .bin/nativeall-arm64.exe`, exit code 0:
 
 | capability | windows/arm64 | darwin/arm64 |
 |---|---|---|
@@ -216,7 +216,7 @@ disk grew 14 → 27 GB), dropping the agent with `Port is not connected`.
 The blocker itself is gone. `nativeall` above opens a WebView2 window in the
 VM and drives a native file dialog through it, so WebView2 works on ARM64 and
 `-gui` reaches the interactive session. What remains is to run the two probes
-and record what they print — `mise run vm:probe-gui` does all three.
+and record what they print — `irgo-winvm run -gui` does the last.
 
 Two constraints learned in the attempt, both now understood rather than guessed:
 

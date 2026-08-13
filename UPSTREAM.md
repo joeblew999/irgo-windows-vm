@@ -12,13 +12,13 @@ rewritten later.
 
 Fixes are prepared in local clones at
 `~/workspace/go/src/github.com/crgimenes/{glaze,native}`, which
-`mise run upstream:clone` creates and `mise run upstream:link` makes every
+`the upstream clones` creates and `the upstream clones` makes every
 module in this repo build against. **Nothing has been pushed or proposed
 upstream yet** — that is a separate, deliberate act.
 
 A fix is not listed as verified here until it has been *run*: their tests, our
 tests, and the probe binary built from the edit executing on Windows 11 ARM64
-in the VM. `mise run upstream:verify` does the first three, `mise run vm:run`
+in the VM. `the upstream clones` does the first three, `irgo-winvm run`
 the last.
 
 ---

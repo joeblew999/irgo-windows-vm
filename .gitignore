@@ -16,3 +16,4 @@
 # writes one to test against local glaze/native clones and removes it again.
 go.work
 go.work.sum
+.bin/

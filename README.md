@@ -101,7 +101,7 @@ irgo-winvm doctor                                # UTM, tools, and every file ou
 irgo-winvm targets                               # what this machine can test
 
 irgo-winvm status -vm irgo-win11                 # state, IP, whether the agent answers
-irgo-winvm probe  -vm irgo-win11                 # run the probes, print the report
+irgo-winvm run  -vm irgo-win11                 # run the probes, print the report
 
 # Between runs, suspend instead of stopping: resume is ~400 ms and needs no
 # keystrokes, where a cold boot is ~2 minutes of driving the UEFI shell.
@@ -191,18 +191,18 @@ code and ours together, and prove the fix on Windows without waiting for a
 release, a merge, or a reply:
 
 ```sh
-mise run upstream:clone      # glaze and native, next to this repo
-mise run upstream:link       # every module now builds against those clones
-mise run check               # ... edit their code and ours ...
-mise run upstream:verify     # their tests, our tests, Windows binaries from the edit
-mise run vm:run .bin/nativeall-upstream-arm64.exe   # the actual proof
-mise run upstream:diff       # what you changed — this is the pull request
-mise run upstream:unlink     # back to the released modules
+the upstream clones      # glaze and native, next to this repo
+the upstream clones       # every module now builds against those clones
+`go build ./... && go test ./utmvm/...`               # ... edit their code and ours ...
+the upstream clones     # their tests, our tests, Windows binaries from the edit
+irgo-winvm run .bin/nativeall-upstream-arm64.exe   # the actual proof
+the upstream clones       # what you changed — this is the pull request
+the upstream clones     # back to the released modules
 ```
 
 The switch is a gitignored `go.work`, never a `replace` in a `go.mod`: a
 `replace` is a tracked file, and one committed by accident points the whole
-project at a path on somebody's laptop. `mise run upstream:status` says which
+project at a path on somebody's laptop. `the upstream clones` says which
 of the two you are currently building, because a fix that "works" against a
 stale module cache is worse than no fix at all.
 
@@ -257,8 +257,8 @@ a re-download.
 to *see* any of this rather than read a table:
 
 ```sh
-mise run example:try   # on the Mac
-mise run vm:try        # the same window, inside Windows
+irgo-winvm example:try   # on the Mac
+irgo-winvm try        # the same window, inside Windows
 ```
 
 A tray icon you click, all four native file dialogs, a menu bar whose items
@@ -268,7 +268,7 @@ report, which is what the VM runs.
 
 Four Go modules, deliberately not one: glaze and native stay out of the CLI's
 dependency graph, which is what lets it cross-compile with nothing installed.
-`mise run check` walks all four; `mise tasks` lists the rest.
+`go build ./... && go vet ./... && go test ./utmvm/...` walks all four.
 
 ## Contributing
 

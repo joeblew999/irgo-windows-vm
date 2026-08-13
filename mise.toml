@@ -145,6 +145,10 @@ run = [
 description = "The analysers, with everything they found already fixed"
 run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
 
+[tasks."help"]
+description = "irgo-winvm help"
+run = "go run ./cmd/irgo-winvm help"
+
 [tasks."iso:create"]
 description = "irgo-winvm iso-create"
 run = "go run ./cmd/irgo-winvm iso-create"

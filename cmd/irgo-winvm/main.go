@@ -30,6 +30,23 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `irgo-winvm — build a Go program on your Mac, run it on real Windows.
 
+  iso-create    iso-delete
+  vm-create     vm-delete
+  app-create    app-delete
+
+  vm-screen     doctor      version
+
+irgo-winvm help  explains what these do and the order they go in.
+`)
+}
+
+// runHelp is the explanation. Separate from usage because a person who typed
+// the command wrong wants the list, and a person who typed `help` wants the
+// story — and putting the story in front of the first group buries the list
+// they were looking for.
+func runHelp() error {
+	fmt.Print(`irgo-winvm — build a Go program on your Mac, run it on real Windows.
+
 Three steps, in this order. Each one is cheap to repeat: if it is already
 done, it says so and stops.
 
@@ -49,12 +66,16 @@ When something is wrong:
 
      vm-screen    save a PNG of the VM's screen — the only way to see a
                   boot that is stuck, since it looks identical from here
-     doctor       what is installed, what is missing, what to run next
+     doctor       what is installed, what is missing, and where this run
+                  wrote its log and screenshots
 
 Your .exe is anything you built with GOOS=windows GOARCH=arm64. The probes
 in probe/ and glaze-probes/ are examples of that, and what this repository
 uses to find out what breaks in glaze and native on Windows.
+
+Every command takes -h for its flags.
 `)
+	return nil
 }
 
 func run(args []string) error {
@@ -77,14 +98,13 @@ func run(args []string) error {
 		return runISODelete(args[1:])
 	case "vm-screen":
 		return runVMScreen(args[1:])
+	case "help", "-h", "--help":
+		return runHelp()
 	case "version":
 		fmt.Println(version)
 		return nil
 	case "doctor":
 		return runDoctor()
-	case "-h", "--help", "help":
-		usage()
-		return nil
 	default:
 		usage()
 		return fmt.Errorf("unknown subcommand %q", args[0])

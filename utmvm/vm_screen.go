@@ -136,6 +136,21 @@ func ShotDir() string { return filepath.Join(appRoot(), shotDirName) }
 // running-no-agent, booting-1 — survives intact.
 var shotName = regexp.MustCompile(`-\d{8}-\d{6}-(.+)\.png$`)
 
+// notAStage names the captures that are not points in a VM's lifecycle.
+//
+// Everything else here is somewhere a VM passed through on its own — booting,
+// copying, ready, stalled. These two are not: `vm-screen` is a person asking
+// for a picture, and `probe` is a console window from an app run. Publishing
+// them as stages put two files in the documentation that document nothing, and
+// they came back every time the task was run.
+//
+// A skip list rather than an allow list, so a stage added to the boot or
+// install path is published without anyone remembering to come here.
+var notAStage = map[string]bool{
+	"vm-screen": true,
+	"probe":     true,
+}
+
 // Promote copies the most recent shot of each stage into dstDir, named for the
 // stage alone.
 //
@@ -172,6 +187,9 @@ func Promote(dstDir string) ([]string, error) {
 			continue
 		}
 		stage := m[1]
+		if notAStage[stage] {
+			continue
+		}
 		// Names sort chronologically because the timestamp is fixed-width, so
 		// the greatest string is the most recent without stat'ing anything.
 		if name > newest[stage] {

@@ -30,10 +30,12 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -253,27 +255,45 @@ func rewriteLinks(raw []byte, repo string) []byte {
 // it. Prose claiming both is worth much less than the pictures.
 func copyScreens(root, out string) ([]string, error) {
 	srcDir := filepath.Join(root, "docs", "screens")
-	entries, err := os.ReadDir(srcDir)
+	dstDir := filepath.Join(out, "screens")
+
+	// Walked, not listed. The screenshots are filed by what they show — vm/ for
+	// the machine's own lifecycle, glaze/ for a program running on it — and a
+	// flat ReadDir skips directories, so every one of them would have silently
+	// vanished from the site the moment they were sorted into folders.
+	//
+	// Subdirectories are preserved in the output, so docs/screens/vm/x.png is
+	// published as screens/vm/x.png and the markdown's link rewriting stays a
+	// straight prefix swap.
+	var names []string
+	err := filepath.WalkDir(srcDir, func(p string, d fs.DirEntry, wErr error) error {
+		if wErr != nil {
+			return wErr
+		}
+		if d.IsDir() || !strings.HasSuffix(strings.ToLower(d.Name()), ".png") {
+			return nil
+		}
+		rel, rErr := filepath.Rel(srcDir, p)
+		if rErr != nil {
+			return rErr
+		}
+		dst := filepath.Join(dstDir, rel)
+		if mErr := os.MkdirAll(filepath.Dir(dst), 0o755); mErr != nil {
+			return mErr
+		}
+		if cErr := copyFile(p, dst); cErr != nil {
+			return cErr
+		}
+		names = append(names, filepath.ToSlash(rel))
+		return nil
+	})
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	dstDir := filepath.Join(out, "screens")
-	if mErr := os.MkdirAll(dstDir, 0o755); mErr != nil {
-		return nil, mErr
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".png") {
-			continue
-		}
-		if cErr := copyFile(filepath.Join(srcDir, e.Name()), filepath.Join(dstDir, e.Name())); cErr != nil {
-			return nil, cErr
-		}
-		names = append(names, e.Name())
-	}
+	sort.Strings(names) // glaze/ before vm/, and stable between runs
 	return names, nil
 }
 

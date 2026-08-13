@@ -2,7 +2,7 @@
 
 ## A self-built ISO installs Windows — verified 12 Aug 2026
 
-![Windows 11 installing from an ISO this repo built](docs/screens/self-built-iso-installing-windows.png)
+![Windows 11 installing from an ISO this repo built](docs/screens/vm/self-built-iso-installing.png)
 
 That is UTM, booted from an ISO mastered by `irgo-winvm build-iso`, installing
 unattended. It settles every open question about replacing CrystalFetch:

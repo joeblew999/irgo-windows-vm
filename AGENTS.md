@@ -202,7 +202,7 @@ nobody sees; a truncated ISO produces a VM that will not boot.
 | El Torito marked BIOS (`-b`) | correctly sized, correctly named, **does not boot**. UEFI needs `-e` |
 | `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs |
 | `utmctl start` then keystrokes | headless VM has no display, and UTM routes input through it — keystrokes vanish |
-| driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell. Keystrokes land in whatever has focus — see `docs/screens/keystrokes-into-a-running-desktop.png`, three Bing tabs searching for the EFI path |
+| driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell. Keystrokes land in whatever has focus — see `docs/screens/vm/keystrokes-into-a-running-desktop.png`, three Bing tabs searching for the EFI path |
 | `utmctl delete` | prints its failure and **exits 0** |
 | `utmctl exec` | never returns the guest's output and always exits 0. Everything that needs output goes through a batch file that captures it to a file the host then pulls |
 | `utmctl exec` with a whole command line as one string | the agent looks for a file by that entire name and answers "No such file or directory" — indistinguishable from a dead agent |

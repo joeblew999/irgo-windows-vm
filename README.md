@@ -87,9 +87,9 @@ Each stage of `vm-create`, photographed as it ran:
 
 | | |
 |---|---|
-| ![Windows 11 installing unattended](docs/screens/vm-create-installing-windows.png) | ![The VM booting](docs/screens/vm-create-booting.png) |
+| ![Windows 11 installing unattended](docs/screens/vm/installing-windows.png) | ![The VM booting](docs/screens/vm/booting.png) |
 | **`vm-create -install`** — Windows installing, unattended | **booting** — nobody typed anything |
-| ![The desktop, ready](docs/screens/vm-create-desktop-ready.png) | ![glaze-all running on Windows ARM64](docs/screens/glaze-all-running-on-windows-arm64.png) |
+| ![The desktop, ready](docs/screens/vm/desktop-ready.png) | ![glaze-all running on Windows ARM64](docs/screens/glaze/glaze-all-every-capability.png) |
 | **ready** — the guest agent is answering | **`app-create -gui`** — a Go app on Windows ARM64 |
 
 That last one is the point of the whole repository: a program built on the Mac,

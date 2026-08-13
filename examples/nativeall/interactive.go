@@ -113,7 +113,7 @@ func runInteractive() {
 
 // logf pushes a line into the page's log, and to stdout as well.
 //
-// Both, not either: in the VM this is launched by `irgo-winvm run -gui`, which
+// Both, not either: in the VM this is launched by `irgo-winvm app-create -gui`, which
 // hands back the process's output and nothing else. Without the stdout copy,
 // everything asynchronous — a tray click, a menu choice, a second copy's
 // arguments — would be visible only to whoever is looking at the Windows

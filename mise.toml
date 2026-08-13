@@ -5,13 +5,18 @@ golangci-lint = "2.11.2"
 
 # Maintainer tasks. A user of the binary never needs this file.
 #
-# Namespaced by what they drive:
+# Namespaced by what they drive, and alphabetical:
 #
+#   iso:*   the Windows media
+#   vm:*    the VM
+#   app:*   your binary on that VM
 #   go:*    the Go toolchain and the analysers
-#   iso:*   the iso-create and iso-delete commands, and their tests
+#   doctor  what is here; belongs to no stage because it reports on all of them
 #
 # The command tasks are the commands and nothing else. If a task here does more
-# than call the binary, that logic belongs in the binary.
+# than call the binary, that logic belongs in the binary — which is why iso:test,
+# vm:test and app:test are the only ones with a script: they are checks, not
+# capabilities a user needs.
 
 [tasks."app:create"]
 description = "irgo-winvm app-create"

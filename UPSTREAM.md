@@ -18,7 +18,7 @@ upstream yet** — that is a separate, deliberate act.
 
 A fix is not listed as verified here until it has been *run*: their tests, our
 tests, and the probe binary built from the edit executing on Windows 11 ARM64
-in the VM. `the upstream clones` does the first three, `irgo-winvm run`
+in the VM. `the upstream clones` does the first three, `irgo-winvm app-create`
 the last.
 
 ---

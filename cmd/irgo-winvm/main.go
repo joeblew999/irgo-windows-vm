@@ -250,7 +250,7 @@ func runAppCreate(args []string) error {
 		return err
 	}
 	if *name == "" || fs.NArg() == 0 {
-		return fmt.Errorf("usage: irgo-winvm run -vm <name> <local.exe> [args...]")
+		return fmt.Errorf("usage: irgo-winvm app-create -vm <name> <local.exe> [args...]")
 	}
 	e, err := utmvm.Find(*name)
 	if err != nil {

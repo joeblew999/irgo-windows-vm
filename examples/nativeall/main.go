@@ -14,7 +14,7 @@
 //
 // The interactive ones need a desktop session and a run loop, which is why this
 // is a glaze app rather than a console tool, and why it must be launched with
-// `irgo-winvm run -gui`. Under the QEMU guest agent alone it runs as SYSTEM in
+// `irgo-winvm app-create -gui`. Under the QEMU guest agent alone it runs as SYSTEM in
 // session 0, where there is no window station and every windowed call fails.
 //
 // It exits on its own with a status line per capability and a non-zero code if
@@ -391,7 +391,7 @@ func report() int {
 
 func main() {
 	// Unattended is the default because that is how this is run in the VM, by
-	// `irgo-winvm run -gui`, where nobody is there to answer a dialog. -i is the
+	// `irgo-winvm app-create -gui`, where nobody is there to answer a dialog. -i is the
 	// other half: the same capabilities, on demand, so a person can actually use
 	// them rather than read a table saying they worked.
 	hands := flag.Bool("i", false, "interactive: drive each capability by hand instead of running a report")

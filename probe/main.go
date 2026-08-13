@@ -5,7 +5,7 @@
 // Headless on purpose: this is what can run under the QEMU guest agent, which
 // executes as SYSTEM in session 0 where there is no window station at all. The
 // windowed half — tray, menus, file dialogs, app icon — is examples/nativeall,
-// which needs `irgo-winvm run -gui`.
+// which needs `irgo-winvm app-create -gui`.
 //
 // Side-effect policy: the clipboard is saved and restored; nothing opens a
 // browser, and no tray icon is left behind.

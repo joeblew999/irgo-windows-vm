@@ -67,6 +67,15 @@ jobs:
             [ -z "$f" ] && continue
             if [ ! -e "$f" ]; then echo "broken link: $f"; broken=1; fi
           done
+
+          # An absolute URL glued onto a repository path. The check above cannot
+          # see these — it only inspects local hrefs, and the result is a
+          # syntactically valid absolute URL — so every outbound link on the
+          # site was broken this way and the build stayed green.
+          if grep -rhoE 'href="[^"]*/blob/main/[a-zA-Z][a-zA-Z0-9+.-]*:' ./*.html; then
+            echo "above: an absolute URL was rewritten as a repository path"
+            broken=1
+          fi
           exit $broken
 
       - uses: actions/upload-pages-artifact@v5.0.0

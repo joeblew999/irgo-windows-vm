@@ -192,6 +192,7 @@ run = [
   "go -C examples test ./...",
   "go -C site build -o {{config_root}}/.bin/host/ ./...",
   "go -C site vet ./...",
+  "go -C site test ./...",
 
   # The CLI must compile for every host a developer might be on: `targets`
   # exists to tell someone on Windows or Linux what their machine can do, and a

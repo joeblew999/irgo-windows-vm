@@ -176,9 +176,28 @@ func build(root, out, repo string) error {
 	return nil
 }
 
-// localLink matches a markdown link to something in the repository: anything
-// that is not absolute, not a bare anchor, and not a mail link.
-var localLink = regexp.MustCompile(`\]\(([^)#:][^)#]*?)(#[^)]*)?\)`)
+// anyLink matches every markdown link target. Which ones to rewrite is decided
+// in code, not by the pattern — see hasScheme.
+var anyLink = regexp.MustCompile(`\]\(([^)#]*?)(#[^)]*)?\)`)
+
+// hasScheme reports whether a link target is absolute: https:, mailto:, and so
+// on. RFC 3986 says a scheme is a letter followed by letters, digits, +, - or .
+// up to the first colon.
+//
+// This decides what is left alone, and the first version got it wrong in a way
+// that only shows on the published site. The pattern excluded ":" as the FIRST
+// character of a target, which was meant to skip absolute URLs — but in
+// "https://example.com" the colon is the sixth character, so every external
+// link matched as a repository path and was rewritten to
+//
+//	https://github.com/OWNER/REPO/blob/main/https://example.com
+//
+// Every outbound link on the site was broken. The link checker did not catch it
+// because the result is a syntactically fine absolute URL, and it only inspects
+// local ones.
+func hasScheme(target string) bool { return schemeRE.MatchString(target) }
+
+var schemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
 
 // rewriteLinks points every in-repository link at wherever that thing actually
 // is once the site is built. Three destinations, and getting any of them wrong
@@ -197,10 +216,15 @@ func rewriteLinks(raw []byte, repo string) []byte {
 	for _, p := range pages {
 		generated[p.Src] = p.Out
 	}
-	return localLink.ReplaceAllFunc(raw, func(m []byte) []byte {
-		sub := localLink.FindSubmatch(m)
+	return anyLink.ReplaceAllFunc(raw, func(m []byte) []byte {
+		sub := anyLink.FindSubmatch(m)
 		target, anchor := string(sub[1]), string(sub[2])
 
+		// Left exactly as written: anything absolute, a root-relative path, and
+		// a bare anchor like (#evidence).
+		if target == "" || hasScheme(target) || strings.HasPrefix(target, "/") {
+			return m
+		}
 		if out, ok := generated[target]; ok {
 			return []byte("](" + out + anchor + ")")
 		}

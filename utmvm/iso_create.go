@@ -497,27 +497,15 @@ func isoRefuseUnsafeDest(dest string) error {
 
 	msg := fmt.Sprintf("utmvm: %s already exists (%s)", dest, HumanBytes(fi.Size()))
 
+	// The link count alone, not a search for the other names.
+	//
+	// This used to call isoSearchDirs, which knows where UTM keeps its bundles
+	// — so the ISO code reached into VM territory to decorate a message. The
+	// filesystem already reports how many names an inode has, which is the
+	// fact that matters: writing here empties all of them. Where the others
+	// are is a question for whoever owns those directories.
 	if _, nlink, ok := inodeInfo(dest); ok && nlink > 1 {
-		st, sErr := isoLinks(dest, isoSearchDirs())
-		if sErr == nil {
-			// Not len(Found)-1: dest may not be among Found at all, because the
-			// search covers ~/Downloads and UTM's bundles, and dest is usually
-			// .cache — which is neither. Count what is actually about to be
-			// listed rather than assuming dest is in the list.
-			var others []string
-			for _, p := range st.Found {
-				if abs, aErr := filepath.Abs(dest); aErr != nil || p != abs {
-					others = append(others, p)
-				}
-			}
-			if len(others) > 0 {
-				msg += fmt.Sprintf("\n  and it is the SAME FILE as %d other name(s), including media a VM boots from:", len(others))
-				for _, p := range others {
-					msg += "\n    " + Home(p)
-				}
-				msg += "\n  Writing here would empty all of them."
-			}
-		}
+		msg += fmt.Sprintf("\n  and it is ONE file with %d names — writing here empties every one.", nlink)
 	}
 	return fmt.Errorf("%s\n  Move it aside, or choose another -o path. This will not overwrite it.", msg)
 }

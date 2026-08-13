@@ -316,7 +316,7 @@ func probeFileDialog(w glaze.WebView) {
 func report() int {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Printf("\nnative capability probe (all) — %s/%s\n\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("\nwindowed capability probe — %s/%s\n(the headless four are probe/)\n\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("%-24s %-12s %s\n", "CAPABILITY", "STATUS", "DETAIL")
 	fmt.Println(strings.Repeat("-", 78))
 	failed := 0
@@ -361,11 +361,11 @@ func runReport() {
 		os.Exit(report())
 	}
 	defer w.Destroy()
-	w.SetTitle("irgo native probe")
+	w.SetTitle("irgo windowed probe")
 	w.SetSize(520, 320, glaze.HintNone)
 	w.SetHtml(`<!doctype html><meta charset="utf-8">
 <body style="font:14px system-ui;padding:2rem">
-<h2>irgo native probe</h2><p>Exercising every native capability, then exiting.</p>
+<h2>irgo windowed probe</h2><p>Exercising every capability that needs a window, then exiting.</p>
 <p style="color:#666">Run with <code>-i</code> to try them by hand instead.</p></body>`)
 
 	go func() {

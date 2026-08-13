@@ -43,10 +43,14 @@ Two more, for when something is wrong:
 Anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`. That is the whole
 contract — `app-create` pushes it, runs it, and prints what it printed.
 
-`probe/` and `glaze-probes/` are examples of exactly that, and are what this
-repository runs to find out what breaks in glaze and native on Windows.
-`mise run app:probe` builds one and runs it, which is the entire point of the
-project in one command.
+`probe/`, `glaze-probes/` and `examples/` hold four such programs, and they are
+what this repository runs to find out what breaks in glaze and native on
+Windows. `mise run app:create:probe` builds one and runs it, which is the entire
+point of the project in one command; `mise tasks` lists the other three.
+
+They are split by what a capability *needs*, with one owner each — `probe/` is
+headless, so the guest agent runs it with no desktop at all, and the rest need
+`-gui` because a tray icon or a file dialog cannot exist without a window.
 
 `doctor` reports what is present and changes nothing.
 

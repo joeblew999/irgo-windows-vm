@@ -19,27 +19,76 @@ golangci-lint = "2.11.2"
 # capabilities a user needs.
 
 [tasks."app:create"]
-description = "irgo-winvm app-create"
+description = "irgo-winvm app-create — your own .exe"
 run = "go run ./cmd/irgo-winvm app-create"
 
+# One pair per program this repository can put on a VM.
+#
+# There are four, not one: examples/ holds glaze-all alone, but probe/ and
+# glaze-probes/ are runnable too and are the ones that actually answer the
+# question this project exists to ask. Naming each of them means `mise tasks`
+# lists what can be run, rather than leaving three of the four discoverable only
+# by reading directories.
+#
+# They are ordinary uses of app:create above and get no special treatment in the
+# tool: a probe is a Windows binary, and app-create runs any Windows binary.
+# What differs between them is only where the source is and whether it needs a
+# desktop, so that is all these tasks say.
+#
+# -gui or not is the split enforced in the code: without it the guest agent runs
+# the binary as SYSTEM in session 0, where there is no window station and every
+# windowed call fails.
+#
+# Output goes to .bin/win/, which is gitignored, and the delete half names the
+# same path without rebuilding — app-delete only needs to know what to remove.
+
+[tasks."app:create:glaze-all"]
+description = "examples/glaze-all — every windowed capability, on the VM"
+run = [
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
+  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/glaze-all.exe",
+]
+
+[tasks."app:create:probe"]
+description = "probe/ — the headless native capabilities, on the VM"
+run = [
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o {{config_root}}/.bin/win/probe.exe .",
+  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/probe.exe",
+]
+
+[tasks."app:create:verify"]
+description = "glaze-probes/verify — the portless app:// path, on the VM"
+run = [
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C glaze-probes build -o {{config_root}}/.bin/win/verify.exe ./verify",
+  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/verify.exe",
+]
+
+[tasks."app:create:verify-events"]
+description = "glaze-probes/verifyevents — the Events bridge, on the VM"
+run = [
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C glaze-probes build -o {{config_root}}/.bin/win/verify-events.exe ./verifyevents",
+  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/verify-events.exe",
+]
+
 [tasks."app:delete"]
-description = "irgo-winvm app-delete"
+description = "irgo-winvm app-delete — your own .exe"
 run = "go run ./cmd/irgo-winvm app-delete"
 
-[tasks."app:probe"]
-description = "Build the native capability probe and run it on the VM"
-run = '''
-set -e
-VM=${VM:-irgo-win11}
-BIN=${TMPDIR:-/tmp}/nativeprobe-arm64.exe
+[tasks."app:delete:glaze-all"]
+description = "Take glaze-all off the VM"
+run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/glaze-all.exe"
 
-# The probe is not special: it is a Windows binary, and app-create runs any
-# Windows binary. This is what the whole repository exists to do -- build a
-# glaze or native program on the Mac, run it on real Windows, read the result.
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
-echo "built $BIN"
-go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
-'''
+[tasks."app:delete:probe"]
+description = "Take probe off the VM"
+run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/probe.exe"
+
+[tasks."app:delete:verify"]
+description = "Take verify off the VM"
+run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/verify.exe"
+
+[tasks."app:delete:verify-events"]
+description = "Take verify-events off the VM"
+run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/verify-events.exe"
 
 [tasks."app:test"]
 description = "Put a binary on a VM, run it, and remove it"
@@ -57,19 +106,19 @@ if ! utmctl ip-address "$VM" >/dev/null 2>&1; then
   exit 1
 fi
 
-BIN=$(mktemp -d)/hello.exe
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
-
+# Through the named tasks, not a hand-rolled build of the same thing. This ran
+# `go build` into a mktemp hello.exe, which tested a path no user takes and
+# would have kept passing after app:create:probe broke.
 echo "=== create: push it and run it ==="
-go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
+mise run app:create:probe
 
 echo
 echo "=== delete: take it off again ==="
-go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
+mise run app:delete:probe
 
 echo
 echo "=== deleting again is success, not an error ==="
-go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
+mise run app:delete:probe
 
 echo
 echo "app create and delete cycle complete"

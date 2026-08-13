@@ -25,6 +25,29 @@ const guestTemp = `C:\Windows\Temp`
 // did not.
 const guestPublic = `C:\Users\Public`
 
+// Two prefixes for the files this package leaves in the guest, and they must
+// never overlap.
+//
+// scratchPrefix marks what app-delete is allowed to sweep: helper files left
+// behind by a run that did not finish. execPrefix marks the transport that
+// app-delete itself runs on — the batch file being executed, the file its
+// output is being written to, and the exit code the host is waiting for.
+//
+// Both were "irgo-", in the same directory, so `del C:\Windows\Temp\irgo-*`
+// deleted the machinery running it. Two symptoms, neither of which pointed
+// here: app-delete failed at random, because whether `del` reported an error
+// depended on which of its own files were still open; and a listing printed
+// `del`'s "Could Not Find C:\...\hello.exe" as though it were a filename,
+// because the output file it was reading had been destroyed mid-write and what
+// came back was another command's.
+//
+// The glob is a prefix match, so the separator matters: `irgo-*` requires a
+// literal "-" in the fifth position and therefore cannot match "irgox-".
+const (
+	scratchPrefix = "irgo-"
+	execPrefix    = "irgox-"
+)
+
 // Push copies a local file into the guest.
 //
 // utmctl's file push reads the payload from stdin rather than taking a source
@@ -128,10 +151,12 @@ func appExec(vmRef string, argv []string, timeout time.Duration) (AppResult, err
 		timeout = 10 * time.Minute
 	}
 
+	// execPrefix, not scratchPrefix: these three are live for the duration of
+	// the call, and app-delete sweeps scratchPrefix with a glob.
 	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
-	batFile := guestTemp + `\irgo-` + stamp + `.bat`
-	outFile := guestTemp + `\irgo-out-` + stamp + `.txt`
-	rcFile := guestTemp + `\irgo-rc-` + stamp + `.txt`
+	batFile := guestTemp + `\` + execPrefix + stamp + `.bat`
+	outFile := guestTemp + `\` + execPrefix + `out-` + stamp + `.txt`
+	rcFile := guestTemp + `\` + execPrefix + `rc-` + stamp + `.txt`
 
 	if err := pushScript(vmRef, batFile, batchFile(argv, outFile, rcFile)); err != nil {
 		return res, err

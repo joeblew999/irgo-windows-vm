@@ -605,6 +605,31 @@ Worse, `probes` — 13 lines that cross-compile every Windows probe — exists
 all**, and `create -probes <dir>` needs binaries they have no way to obtain. So
 `irgo-winvm probe` is already broken for anyone who did not clone.
 
+**And CI reimplements mise rather than calling it.** `.github/workflows/check.yml`
+rebuilds, re-vets and re-tests all four modules in inline shell — the same logic
+as `mise run check`, written twice, and **already diverged**: CI writes binaries
+to `/tmp/ci-bin`, mise to `.bin/host/`. The cross-compile matrix and the probe
+cross-build exist only in CI, so a maintainer cannot run locally what CI will
+fail on.
+
+> **mise is the single source of truth for what "checked" means, and CI calls
+> it.** CI installs mise and runs `mise run check`, `mise run lint`,
+> `mise run cross`. It does not restate a single build step.
+
+That is consistent with mise being maintainer-only rather than in tension with
+it: **CI is maintainer infrastructure.** Someone using the binary never runs CI
+either.
+
+It does impose one constraint. The tasks CI calls run on Linux and macOS, so
+**they must contain nothing macOS-specific** — no UTM, no `osascript`, no
+`hdiutil`. That splits `mise.toml` cleanly in two, and the split is worth making
+explicit because it is the same boundary as the rest of the plan:
+
+| class | tasks | who runs it |
+|---|---|---|
+| **portable** | `check`, `lint`, `cross`, `fuzz` | CI, on every OS, and maintainers |
+| **macOS-only** | `vm:*`, `iso:*`, `upstream:*` | maintainers, never CI |
+
 > **`mise` is a maintainer tool for this repository. Nothing else.**
 > A person using the binary never installs mise. A developer on a project that
 > *uses* this tool never installs mise. Only someone changing **this** repo does.
@@ -962,6 +987,17 @@ review found land here: **`mise run lint` does not exist** — no task, no
 nothing runs; and phase 1's negative controls must not reference fixes that
 arrive later. The two that did (`-b`/`-e`, and the `AgentReady` gate) move to
 phases 6 and 9, which is where both the fix and its control belong.
+
+**CI is inverted here too**, because every phase's gate is a mise task and CI
+must be running the same one. `check.yml` stops restating build steps and calls
+`mise run check`, `mise run lint`, `mise run cross`; the cross-compile matrix
+and probe cross-build move out of the workflow into portable tasks, so a
+maintainer can run locally exactly what CI runs. The `/tmp/ci-bin` versus
+`.bin/host/` divergence disappears with the duplication that caused it.
+
+Keep the two recorded findings in `check.yml`'s comments — why the matrix exists
+(a macOS-only syscall broke the Linux build invisibly) and why the catalog job
+is `continue-on-error` — by moving them to the tasks, not deleting them.
 
 **2 — Guards and the filesystem foundation.** Tri-state `inodeInfo`,
 `fileFlags`, `diskUsage`, `statfsAvailable`: an explicit *unknown* callers must

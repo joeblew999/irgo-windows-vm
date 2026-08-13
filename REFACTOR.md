@@ -578,6 +578,7 @@ seam phase 6 installs. Fixing it before then means verifying by hand against a
 
 | # | phase | size | verify | why here |
 |---|---|---|---|---|
+| **0** | **The harness — make every check an assertion** | **L** | self | **nothing else can run unattended until this exists** |
 | 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
 | 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
 | 3 | One retry primitive | S | CI | no dependencies |
@@ -595,6 +596,92 @@ seam phase 6 installs. Fixing it before then means verifying by hand against a
 | 15 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
 | 16 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
 | 17 | Tighten enforcement | M | CI | thresholds set from the finished code |
+
+**0 — The harness.** The whole plan is to run unattended, and exactly one thing
+prevents that: four phases are verified by a person watching Windows install.
+That is not a property of the work. It is the absence of assertions — and it is
+why these bugs survived, because `BootAssistWatched` ignoring the disk it exists
+to watch would have been caught the first time anything checked what it did.
+
+Convert every "watch it" into a "assert it":
+
+| verified by eyes today | assertion that replaces it |
+|---|---|
+| the install completed | `Inspect` reports `PhaseReady` within budget |
+| the boot took | agent responds, **or** disk grew past the threshold |
+| suspend/resume is fast | timed; fail over 2 s (it measures ~400 ms) |
+| the probe ran | probes emit **JSON**; parse and assert per capability |
+| Setup got no stray keys | *(white-box; arrives with phases 6 and 8)* |
+
+Probes already report `OK`/`UNSUPPORTED`/`ERROR` per capability — they need a
+machine-readable mode, not new logic.
+
+**Safety interlocks, in code rather than prose.** Unattended plus destructive
+plus a working VM the user cares about is the one combination that must not be
+governed by a sentence in a document:
+
+- Refuse to operate on any VM whose name does not match the disposable test
+  pattern. `irgo-win11` is unreachable by construction, not by discipline.
+- Refuse to unprotect or overwrite the working ISO. The `uchg` flag already
+  says so; the harness must not be the thing that clears it.
+- A wall-clock budget, and **stop on red**. A failed phase leaves its branch
+  unmerged and the run halted — never ploughs on, never retries blind.
+- Resumable: a run that stopped at phase 9 resumes at phase 9.
+
+**This is black-box only, deliberately** — end-to-end assertions over the real
+CLI. The white-box checks (*was any keystroke sent while the agent was up?*)
+need the phase 6 seam, which does not exist yet. Building phase 0 on it would be
+circular; building it black-box now is what lets phases 1–5 run unattended
+tonight.
+
+**And it makes the expensive experiments affordable for the first time.** Phase
+8 must settle three contradictions by experiment — how many keypresses the
+prompt needs, which EFI loader boots, whether Setup reads the answer file from
+FAT. Each costs a 45-minute install per trial, which is why nobody has run them
+and why the code asserts both answers. A human will not sit through twelve
+installs. A machine does not care.
+
+#### Every assertion needs a negative control
+
+The harness is the only thing standing between an unattended run and 17 phases
+merged green on nothing. So the harness itself has to be verified, and **this
+repository is the argument for why**:
+
+| check | what it actually does |
+|---|---|
+| `RunInGuest` | returns `ExitCode: 0`, `err == nil` when the output pull fails — *a suite that ran nothing looks like a suite that passed* |
+| `Prune` | declares `error`, can never return non-nil |
+| `BuildISO` | stats the output and prints its size. No readback, no mount, no El Torito check |
+| `BootAssistOn` | `return nil` after five failed boot attempts |
+| `catalog_test.go:121` | asserts two compile-time constants differ — cannot fail |
+| every `if ok && bad` guard | does not fire when the question cannot be answered |
+
+Six checks that pass whether or not the thing they check works. That is the
+house style being corrected, and a harness written in it would be worse than no
+harness, because it would carry authority.
+
+**So: no assertion lands without a negative control — a deliberate break that
+must turn it red.** Revert the fix, run the check, watch it fail, restore. An
+assertion that stays green against its own mutation is decoration and is deleted
+the day it is written.
+
+```
+assert: suspend/resume < 2 s        break: remove the poll interval     ⇒ must fail
+assert: install reaches PhaseReady  break: skip the answer file         ⇒ must fail
+assert: no keys while agent up      break: drop the AgentReady gate     ⇒ must fail
+assert: probe capability = OK       break: point at an unpatched glaze  ⇒ must fail
+assert: ISO boots                   break: master it with -b not -e     ⇒ must fail
+```
+
+The last two are worth their cost on their own: the first is a standing
+regression test for the upstream fixes, and the second finally exercises the
+`mkisofs` fallback path, which has produced a non-bootable ISO for its entire
+existence with nothing to say so.
+
+This is the same negative control that proved the glaze `New` hang was real
+rather than assumed — the fix was stashed, the hang returned, the fix was
+restored. It cost two minutes and it is the difference between a measurement and
+a belief.
 
 **1 — Lint baseline, then delete.** Land `.golangci.yml` with only the checks
 the code already passes, and turn on `unused` so it *identifies* the dead code
@@ -879,7 +966,8 @@ irgo-winvm iso -protect && irgo-winvm iso -protect
 ```
 
 **Phases 8, 9, 11 and 15 (*VM*)** — a green build means "compiles", not "works", and
-these paths fail silently:
+these paths fail silently. Phase 0 turns each of these into an assertion with a
+negative control; until it exists they are run by hand:
 
 ```sh
 irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
@@ -907,7 +995,8 @@ Never against `irgo-win11`.
 
 A branch per phase, merged only once verified. **CI cannot prove these phases
 correct** — the VM-dependent paths have no unit coverage until phase 6, and
-green means "compiles".
+green means "compiles". Phase 0's harness is what closes that gap, which is why
+it precedes every phase that changes behaviour.
 
 ```sh
 git switch -c refactor/06-check-ensure master
@@ -960,9 +1049,59 @@ The pattern that does work, per phase:
    stated goal, and is told to look for a second implementation of something
    that already exists. This is the adversarial step, and it is the one that
    catches the failure mode this whole document is about.
-4. **Verify** — CI, or the VM commands above. Output into the merge commit.
+4. **Verify** — phase 0's harness. Output into the merge commit.
 
 Step 3 is the one to keep if any are dropped.
+
+### The unattended loop
+
+With phase 0 in place the whole plan runs without a person. Per phase, in order,
+never concurrently:
+
+```
+branch  →  read  →  write  →  review  →  verify  →  merge --no-ff
+                                  │          │
+                              findings   red ⇒ STOP
+                              feed back   (branch kept, run halts)
+```
+
+Four rules make walking away safe:
+
+- **Stop on red, never retry blind.** A failed verify halts the run with the
+  branch intact. The next session resumes at that phase. An unattended agent
+  that "fixes" a failing verification it does not understand is how a refactor
+  becomes a rewrite.
+- **Review is blocking, not advisory.** With nobody reading the diffs, step 3 is
+  the *only* thing standing where a human reviewer would. It gets a fresh agent,
+  the phase's stated goal, `AGENTS.md`, and one instruction above all others:
+  *find the second implementation of something that already exists.*
+- **One phase per merge, `--no-ff`.** A wrong turn discovered six phases later
+  is `git revert -m 1 <merge>`. This is what makes unattended architectural work
+  recoverable rather than a bisect through a night's commits.
+- **`RESULTS.md` numbers are gates, not decoration.** Suspend/resume drifting
+  from ~400 ms to seconds fails the phase. That regression happened once
+  already, from a lost poll interval, and only a number caught it.
+
+- **The harness proves itself before it gates anything.** Phase 0 merges only
+  when every assertion has failed against its own negative control at least
+  once. A green harness that has never been red is an untested harness.
+
+**All seventeen phases run unattended.** Nothing in the refactor needs a person
+once phase 0 exists — that is the whole point of building it first.
+
+The one act that stays outside the loop is **pushing the prepared glaze and
+native fixes to crgimenes**, because it is outward-facing and irreversible: it
+puts work under someone else's name in someone else's repository. That is not a
+technical limitation and it is not part of these phases — it is a single
+standing authorisation, given once, after which the ledger in `UPSTREAM.md` can
+be worked automatically like everything else.
+
+**One risk worth stating plainly.** Phases 6, 7 and 13 are design, not
+mechanism, and an unattended agent that designs them wrongly gets the rest of
+the plan built on the mistake. The mitigations are real but partial — blocking
+review, one revertable merge per phase, stop-on-red, and a harness with negative
+controls. If any part of this is worth reading afterwards, it is those three
+merges.
 
 ---
 

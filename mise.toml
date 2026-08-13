@@ -1,17 +1,22 @@
 # Maintainer tasks. A user of the binary never needs this file.
+#
+# The iso:* tasks are the CLI commands and nothing else. If a task here does
+# more than call the binary, that logic belongs in the binary.
 
-[tasks.iso]
+[tasks."iso:get"]
+description = "irgo-winvm iso"
+run = "go run ./cmd/irgo-winvm iso"
+
+[tasks."iso:delete"]
+description = "irgo-winvm iso-delete"
+run = "go run ./cmd/irgo-winvm iso-delete"
+
+[tasks."iso:test"]
 description = "The ISO tests, plus the mutations that prove they verify anything"
 run = '''
 set -e
 go test ./utmvm/ -run 'TestVerdict|TestInspectISO|TestProtect|TestISOLinks|TestISO' -v
 
-# Mutations run in a throwaway git worktree, never in your checkout.
-#
-# An earlier version edited the real files and restored them on exit. That is
-# one interrupt away from leaving broken code in place, and it happened: a
-# commit landed with `if size != fi.Size() || false`, a cache that never
-# invalidates, which is precisely the defect these mutations exist to catch.
 W=$(mktemp -d)/mut
 git worktree add -q --detach "$W" HEAD
 trap 'git worktree remove --force "$W" >/dev/null 2>&1 || true' EXIT
@@ -20,7 +25,7 @@ cd "$W"
 echo
 echo "=== mutations: each must be CAUGHT, or the tests above prove nothing ==="
 fail=0
-check() { # file from to label
+check() {
   python3 -c "
 import sys
 p,a,b=sys.argv[1],sys.argv[2],sys.argv[3]
@@ -28,7 +33,7 @@ s=open(p).read()
 assert a in s, 'pattern gone: '+a[:40]
 open(p,'w').write(s.replace(a,b,1))" "$1" "$2" "$3"
   printf '  %-42s ' "$4"
-  if ! go build ./... >/dev/null 2>&1; then echo 'BROKEN MUTATION (does not compile)'; fail=1
+  if ! go build ./... >/dev/null 2>&1; then echo 'BROKEN MUTATION'; fail=1
   elif go test ./utmvm/ -run 'TestVerdict|TestInspectISOUses|TestProtect|TestISOLinks' >/dev/null 2>&1; then
     echo 'SURVIVED — nothing tests this'; fail=1
   else echo caught; fi
@@ -38,15 +43,15 @@ open(p,'w').write(s.replace(a,b,1))" "$1" "$2" "$3"
 check utmvm/iso.go 'if size != fi.Size() ||' 'if false ||' 'cache ignores size changes'
 check utmvm/iso.go '|| mod != fi.ModTime().UnixNano() {' '|| false {' 'cache ignores mtime changes'
 check utmvm/iso.go 'if size != fi.Size() || mod != fi.ModTime().UnixNano() {' 'if false {' 'cache never invalidates'
-check utmvm/iso.go 'if v, ok := cachedVerdict(path); ok {' 'if v, ok := cachedVerdict(path); !ok {' 'cache is never used'
-check utmvm/iso_delete.go 'func ProtectISO(path string) error { return chflags(path, true) }' 'func ProtectISO(path string) error { return nil }' 'ProtectISO does nothing'
-check utmvm/iso_delete.go 'func UnprotectISO(path string) error { return chflags(path, false) }' 'func UnprotectISO(path string) error { return nil }' 'UnprotectISO does nothing'
+check utmvm/iso.go 'if v, ok := isoCachedVerdict(path); ok {' 'if v, ok := isoCachedVerdict(path); !ok {' 'cache is never used'
+check utmvm/iso_delete.go 'func ISOProtect(path string) error { return isoChflags(path, true) }' 'func ISOProtect(path string) error { return nil }' 'ISOProtect does nothing'
+check utmvm/iso_delete.go 'func ISOUnprotect(path string) error { return isoChflags(path, false) }' 'func ISOUnprotect(path string) error { return nil }' 'ISOUnprotect does nothing'
 check utmvm/iso_delete.go 'st.Links = int(nlink)' 'st.Links = 1
 	_ = nlink' 'Links always reports 1'
 check utmvm/iso_delete.go 'st.Protected = flags&uchgFlag != 0' 'st.Protected = false
 		_ = flags' 'Protected always false'
 
 echo
-if [ "$fail" -ne 0 ]; then echo "a mutation survived — the ISO tests do not verify what they claim"; exit 1; fi
-echo "all mutations caught — the ISO tests verify rather than decorate"
+if [ "$fail" -ne 0 ]; then echo "a mutation survived"; exit 1; fi
+echo "all mutations caught"
 '''

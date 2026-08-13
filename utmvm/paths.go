@@ -46,35 +46,37 @@ type Paths struct {
 	Screens string
 }
 
-// DefaultPaths resolves the layout, applying environment overrides.
+// DefaultPaths is the layout. One place, no overrides.
+//
+// Every directory used to be settable by an IRGO_* environment variable, which
+// meant the tool put things somewhere different depending on the shell it was
+// launched from — and it silently did: media built in one shell was invisible
+// to the next, and `iso` reported no media on a machine that had 5 GB of it.
+//
+// A second way to answer "where does the ISO live" is a second answer. There is
+// one now.
 //
 // It never creates anything: a command that only reads should not leave
 // directories behind, and the one that needs scratch space asks for it.
 func DefaultPaths() Paths {
-	root := envOr("IRGO_ROOT", "")
-	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
 	}
+	base := filepath.Join(home, "Library", "Application Support", "irgo-winvm")
 
 	p := Paths{
-		Root:     root,
-		Cache:    envOr("IRGO_CACHE_DIR", userDataDir("media")),
-		Bin:      envOr("IRGO_BIN_DIR", filepath.Join(root, ".bin")),
-		Work:     envOr("IRGO_WORK_DIR", userDataDir("work")),
-		Upstream: envOr("IRGO_UPSTREAM_DIR", defaultUpstreamDir()),
-		Screens:  envOr("IRGO_SCREENS_DIR", filepath.Join(root, "docs", "screens")),
+		Root:    base,
+		Cache:   filepath.Join(base, "media"),
+		Bin:     filepath.Join(base, "bin"),
+		Work:    filepath.Join(base, "work"),
+		Screens: filepath.Join(base, "screens"),
 	}
 
 	// UTM decides this one, not us: it only reads bundles from its own
-	// container. An override exists because a bundle can be built elsewhere and
-	// moved, but the default is the only place UTM will look.
-	p.VMs = envOr("IRGO_VM_DIR", "")
-	if p.VMs == "" {
-		if d, err := DefaultVMDir(); err == nil {
-			p.VMs = d
-		}
+	// container, so there is nothing to choose.
+	if d, dErr := DefaultVMDir(); dErr == nil {
+		p.VMs = d
 	}
 	return p
 }
@@ -188,32 +190,10 @@ func hasDotDot(rel string) bool {
 	return rel == ".." || len(rel) >= 3 && rel[:3] == "../"
 }
 
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 func defaultUpstreamDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, "workspace", "go", "src", "github.com", "crgimenes")
-}
-
-// userDataDir is where media and scratch live: a fixed per-user location, not a
-// directory under whatever the working directory happened to be.
-//
-// The ISO is 5.27 GB and rate-limited at the source. Keying its location to the
-// process's cwd meant running the binary from anywhere else could not find it
-// and would fetch another copy — which is exactly the accident a `go install`
-// user hits first, since they have no repository to stand in.
-func userDataDir(sub string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".irgo-winvm", sub)
-	}
-	return filepath.Join(home, "Library", "Application Support", "irgo-winvm", sub)
 }

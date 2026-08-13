@@ -229,18 +229,14 @@ plus the result. A laptop cannot always host all of that, so none of it is
 hardcoded — every directory is overridable, and `irgo-winvm doctor` prints where
 each one currently resolves to:
 
-| variable | what | default |
-|---|---|---|
-| `IRGO_ROOT` | everything below defaults under this | the working directory |
-| `IRGO_CACHE_DIR` | ISOs and other large downloads | `<root>/.cache` |
-| `IRGO_BIN_DIR` | cross-compiled probe binaries | `<root>/.bin` |
-| `IRGO_WORK_DIR` | scratch for building images | `<root>/.work` |
-| `IRGO_VM_DIR` | UTM bundles | UTM's Documents folder |
-| `IRGO_UPSTREAM_DIR` | glaze and native clones | `~/workspace/go/src/github.com/crgimenes` |
+Everything lives under `~/Library/Application Support/irgo-winvm`: `media`
+for ISOs, `work` for scratch, `bin` for built binaries, `screens` for
+screenshots. VMs go where UTM keeps them, because UTM reads nowhere else.
 
-```sh
-IRGO_WORK_DIR=/Volumes/big/irgo-work irgo-winvm fetch-iso -o /Volumes/big/win11.iso
-```
+There is nothing to configure. Environment overrides existed and were
+removed: they meant the tool put things somewhere different depending on
+which shell launched it, so media built in one shell was invisible to the
+next.
 
 This is also a safety boundary. Writing an image refuses three things outright,
 because each is a different mistake and each costs a 4 GB re-download from a

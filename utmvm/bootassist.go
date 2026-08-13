@@ -67,12 +67,16 @@ func BootAssist(vmRef string, target BootTarget) error {
 // diskPath is empty no progress check is possible and every candidate is tried,
 // which is only safe before an OS exists.
 func BootAssistWatched(vmRef string, target BootTarget, diskPath string) error {
-	return BootAssistOn(vmRef, target, "")
+	return bootAssist(vmRef, target, "", diskPath)
 }
 
 // BootAssistOn drives the shell using a specific filesystem, e.g. "fs2:".
 // Empty means fs0:, where the install medium has always been found.
 func BootAssistOn(vmRef string, target BootTarget, override string) error {
+	return bootAssist(vmRef, target, override, "")
+}
+
+func bootAssist(vmRef string, target BootTarget, override, diskPath string) error {
 	var paths []string
 	switch target {
 	case BootInstalled:
@@ -103,7 +107,9 @@ func BootAssistOn(vmRef string, target BootTarget, override string) error {
 	// loop stops. The installer case is different because Setup's UI appears
 	// while typing may still be in flight, which is what destroyed an install.
 	if target == BootInstalled && override == "" {
-		for _, fsn := range []string{"fs2:", "fs3:", "fs1:", "fs4:", "fs0:"} {
+		order := []string{"fs2:", "fs3:", "fs1:", "fs4:", "fs0:"}
+		start, _ := diskUsage(diskPath)
+		for _, fsn := range order {
 			if err := typeBootCommand(vmRef, fsn, paths[0]); err != nil {
 				return err
 			}
@@ -112,9 +118,21 @@ func BootAssistOn(vmRef string, target BootTarget, override string) error {
 				if Named(vmRef).AgentReady() {
 					return nil
 				}
+				// The disk is watched as well as the agent. With
+				// Options.NoGuestTools the agent NEVER answers, so waiting on it
+				// alone meant the loop moved to the next filesystem and typed a
+				// boot path into a Windows that had already started — the exact
+				// thing the comment above says cannot happen.
+				if diskPath != "" {
+					if now, ok := diskUsage(diskPath); ok && now > start+(64<<20) {
+						return nil
+					}
+				}
 			}
 		}
-		return nil
+		// Exhausting every candidate is a failure. Returning nil here reported
+		// success after five failed boots and 200 seconds of keystrokes.
+		return fmt.Errorf("utmvm: none of %v booted %s", order, vmRef)
 	}
 
 	// ONE attempt. Not a loop.
@@ -178,6 +196,12 @@ func OpenDisplay(bundlePath string) error {
 // of life — disk writes during an install, or the guest agent once installed.
 func BootAndWait(vmRef string, target BootTarget, diskPath string, timeout time.Duration) error {
 	vm := Named(vmRef)
+	// Nothing is typed at a guest that is already answering. RunInstall gates on
+	// this; BootAndWait did not, so `boot` against a healthy logged-in Windows
+	// sent fs0:, an EFI path and eight Enters straight into the desktop.
+	if vm.AgentReady() {
+		return nil
+	}
 	if st, _ := vm.Status(); !strings.EqualFold(st, "started") {
 		// Must be StartWithDisplay: keystrokes go nowhere on a headless VM.
 		if err := vm.StartWithDisplay(); err != nil {
@@ -192,12 +216,15 @@ func BootAndWait(vmRef string, target BootTarget, diskPath string, timeout time.
 	}
 
 	deadline := time.Now().Add(timeout)
-	start, _ := diskUsage(diskPath)
+	// ok is honoured: discarding it pinned the baseline at 0 for an unreadable
+	// path, so the growth check silently never fired and every boot burned the
+	// full timeout before reporting "no disk activity".
+	start, baseOK := diskUsage(diskPath)
 	for time.Now().Before(deadline) {
 		if vm.AgentReady() {
 			return nil
 		}
-		if now, ok := diskUsage(diskPath); ok && now > start+(64<<20) {
+		if now, ok := diskUsage(diskPath); ok && baseOK && now > start+(64<<20) {
 			return nil // Setup is writing; the boot took
 		}
 		time.Sleep(15 * time.Second)

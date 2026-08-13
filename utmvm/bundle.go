@@ -110,17 +110,29 @@ func Create(opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	mac, err := randomMAC()
+	if err != nil {
+		return "", err
+	}
 	cfg := Config{
 		Name:       opts.Name,
 		UUID:       uuid,
 		MemoryMiB:  opts.MemoryMiB,
 		CPUCount:   opts.CPUCount,
-		MACAddress: randomMAC(),
+		MACAddress: mac,
 		NoGPUAccel: opts.NoGPUAccel,
 	}
 
-	id1, _ := newUUID()
-	id2, _ := newUUID()
+	// Checked: an empty Identifier renders a plist UTM rejects with the generic
+	// "cannot import this VM" that names no field (see config.go).
+	id1, err := newUUID()
+	if err != nil {
+		return "", err
+	}
+	id2, err := newUUID()
+	if err != nil {
+		return "", err
+	}
 	cfg.Drives = append(cfg.Drives,
 		Drive{ID: id1, ImageName: "disk.img", Type: DriveDisk, Interface: IfaceNVMe},
 		Drive{ID: id2, ImageName: "install.iso", Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
@@ -218,8 +230,12 @@ func newUUID() (string, error) {
 
 // randomMAC returns a QEMU-range locally administered address, so it can never
 // collide with real hardware on the network.
-func randomMAC() string {
+func randomMAC() (string, error) {
 	var b [3]byte
-	rand.Read(b[:])
-	return fmt.Sprintf("52:54:00:%02X:%02X:%02X", b[0], b[1], b[2])
+	// Checked, unlike before: on failure every VM got 52:54:00:00:00:00, which
+	// is a guaranteed L2 collision between any two of them on a shared network.
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("utmvm: generating a MAC address: %w", err)
+	}
+	return fmt.Sprintf("52:54:00:%02X:%02X:%02X", b[0], b[1], b[2]), nil
 }

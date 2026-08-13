@@ -183,12 +183,11 @@ func releaseImmutable(paths, searchIn []string) []string {
 // The cost of being strict is a stale file surviving. The cost of being loose
 // is unbounded, so the trade is not close.
 var ourTempPrefixes = []string{
-	"irgo-winvm-payload-", // staged payload trees
-	"irgo-catalog-",       // extracted Microsoft catalogs
-	"irgo-i-",             // interactive-run batch files
-	"irgo-l-",             // scheduled-task launchers
-	"irgo-",               // remaining batch files and images
-	"utmvm-windowid-",     // the AppleScript helper for screenshots
+	"irgo-winvm-payload-", // staged payload trees      (payload.go)
+	"irgo-catalog-",       // extracted Microsoft catalogs (catalog.go)
+	"irgo-utm-",           // the UTM .dmg download       (installutm.go)
+	"irgo-script-",        // batch files pushed to guests (run.go)
+	"utmvm-windowid-",     // AppleScript screenshot helper (screenshot.go)
 }
 
 func isOurArtefact(name string) bool {
@@ -203,9 +202,13 @@ func isOurArtefact(name string) bool {
 func Prune(dirs ...string) (int64, []string, error) {
 	var freed int64
 	var removed []string
+	var errs []string
 	for _, d := range dirs {
 		entries, err := os.ReadDir(d)
 		if err != nil {
+			// Reported, not swallowed: an unreadable directory used to yield
+			// "0 removed, no error", which reads as "nothing to do".
+			errs = append(errs, fmt.Sprintf("%s: %v", d, err))
 			continue
 		}
 		for _, e := range entries {
@@ -214,13 +217,21 @@ func Prune(dirs ...string) (int64, []string, error) {
 				continue
 			}
 			p := filepath.Join(d, name)
-			if info, err := e.Info(); err == nil {
-				freed += info.Size()
+			// Size BEFORE removal, counted only if removal succeeds, and by
+			// walking: these are directories, whose own entry size is ~96 bytes
+			// while the tree beneath can be gigabytes. That number is printed
+			// to the user as "reclaimed".
+			size, _ := walkBundle(p)
+			if rmErr := os.RemoveAll(p); rmErr != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", p, rmErr))
+				continue
 			}
-			if err := os.RemoveAll(p); err == nil {
-				removed = append(removed, p)
-			}
+			freed += size
+			removed = append(removed, p)
 		}
+	}
+	if len(errs) > 0 {
+		return freed, removed, fmt.Errorf("utmvm: prune: %s", strings.Join(errs, "; "))
 	}
 	return freed, removed, nil
 }

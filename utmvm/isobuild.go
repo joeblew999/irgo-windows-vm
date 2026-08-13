@@ -292,12 +292,18 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 		}
 	case "mkisofs":
 		// cdrtools does write UDF, which is what Microsoft's own media uses.
+		//
+		// -e, not -b, for the same reason as above: -b marks a BIOS entry, which
+		// a UEFI-only ARM64 machine ignores. This branch said -b and so produced
+		// a correctly sized, correctly named, non-bootable ISO.
 		args = []string{
 			"-udf", "-iso-level", "3",
 			"-V", label,
-			"-b", boot, "-no-emul-boot",
+			"-e", boot, "-no-emul-boot",
 			"-o", opts.Output, opts.Source,
 		}
+	default:
+		return fmt.Errorf("utmvm: no argument recipe for ISO masterer %q", tool.Name)
 	}
 
 	cmd := exec.Command(tool.Path, args...) //nolint:gosec // arguments are built above, not user-supplied strings

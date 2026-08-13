@@ -19,9 +19,9 @@ func TestPruneOnlyRemovesOurOwn(t *testing.T) {
 	ours := []string{
 		"irgo-winvm-payload-123",
 		"irgo-catalog-abc",
-		"irgo-i-xyz.bat",
-		"irgo-l-xyz.bat",
-		"irgo-9876.bat",
+		"irgo-script-i-xyz.bat",
+		"irgo-script-xyz.bat",
+		"irgo-utm-9876",
 		"utmvm-windowid-42.swift",
 	}
 	// Names that used to be deleted and must not be. A disk image in /tmp is

@@ -42,7 +42,7 @@ const guestPublic = `C:\Users\Public`
 // Three call sites did this by hand and each could drop the temp file on a
 // different error path.
 func pushScript(vmRef, guestPath, script string) error {
-	tmp, err := os.CreateTemp("", "irgo-*.bat")
+	tmp, err := os.CreateTemp("", "irgo-script-*.bat")
 	if err != nil {
 		return err
 	}

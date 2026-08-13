@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — irgo-windows-vm</title>
+<meta name="description" content="{{.Blurb}}">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="wordmark" href="index.html">irgo-windows-vm</a>
+  <nav>
+    {{range .Nav}}<a href="{{.Href}}"{{if .Current}} class="current" aria-current="page"{{end}}>{{.Title}}</a>{{end}}
+    <a class="gh" href="{{$.Repo}}">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <article class="prose">
+    {{.Body}}
+  </article>
+
+  {{if .Screens}}
+  <section class="evidence">
+    <h2 id="evidence">Evidence</h2>
+    <p>Not mock-ups. A Mac built the installer, installed Windows on it
+    unattended, and photographed the result — including the failure that put
+    three Bing tabs on the desktop.</p>
+    <div class="shots">
+      {{range .Screens}}
+      <figure>
+        <a href="screens/{{.}}"><img src="screens/{{.}}" alt="{{.}}" loading="lazy"></a>
+        <figcaption>{{.}}</figcaption>
+      </figure>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+</main>
+
+<footer>
+  <p>Generated from the markdown in the repository — if this page is wrong, the
+  markdown is wrong. <a href="{{.Repo}}">Source</a> ·
+  <a href="{{.Repo}}/releases">Releases</a> ·
+  <a href="{{.Repo}}/blob/main/LICENSE">MIT</a></p>
+</footer>
+
+</body>
+</html>

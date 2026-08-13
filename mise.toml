@@ -190,6 +190,8 @@ run = [
   "go -C examples build -o {{config_root}}/.bin/host/ ./...",
   "go -C examples vet ./...",
   "go -C examples test ./...",
+  "go -C site build -o {{config_root}}/.bin/host/ ./...",
+  "go -C site vet ./...",
 
   # The CLI must compile for every host a developer might be on: `targets`
   # exists to tell someone on Windows or Linux what their machine can do, and a
@@ -288,6 +290,20 @@ go run ./cmd/irgo-winvm iso-create
 echo
 echo "iso create and delete cycle complete"
 '''
+
+[tasks."site:build"]
+description = "Render the markdown into site/dist"
+# Generated from the markdown that is already the source of truth for each
+# subject, never hand-written, so the site cannot drift from the repository.
+# If a page is wrong, the markdown is wrong -- fix it there.
+run = "go -C site run . -root .. -out dist"
+
+[tasks."site:serve"]
+description = "Build the site and serve it at http://localhost:8080 to check it"
+# Building and serving are one command on purpose: a separate server can be
+# pointed at a stale dist from an earlier run, and checking a site that no
+# longer matches the markdown is worse than not checking it.
+run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8080}"
 
 [tasks."vm:create"]
 description = "irgo-winvm vm-create"

@@ -1,0 +1,160 @@
+/* One stylesheet, no framework, no fonts fetched from anywhere.
+   The site is documentation about a tool that runs offline; it should not need
+   a CDN to render. */
+
+:root {
+  --bg: #fbfbfa;
+  --fg: #1a1a19;
+  --muted: #5c5c57;
+  --rule: #e3e2dd;
+  --accent: #0a5c3e;
+  --code-bg: #f2f1ec;
+  --warn-bg: #fdf6e3;
+  --max: 46rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --fg: #e6e6e3;
+    --muted: #9b9b95;
+    --rule: #2c2e33;
+    --accent: #6ee7b7;
+    --code-bg: #1e2024;
+    --warn-bg: #2a2416;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* --- header ------------------------------------------------------------- */
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.wordmark {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+.top nav { display: flex; flex-wrap: wrap; gap: 1.1rem; font-size: 0.9rem; }
+.top nav a { color: var(--muted); text-decoration: none; }
+.top nav a:hover { color: var(--fg); }
+.top nav a.current { color: var(--accent); font-weight: 600; }
+.top nav a.gh { margin-left: auto; }
+
+/* --- content ------------------------------------------------------------ */
+
+main { padding: 0 1.5rem 4rem; }
+.prose, .evidence { max-width: var(--max); margin: 0 auto; }
+
+.prose h1 { font-size: 2rem; letter-spacing: -0.02em; margin: 2.5rem 0 0.5rem; }
+.prose h2 { font-size: 1.35rem; margin: 2.5rem 0 0.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+.prose h3 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+.prose h1 + p { color: var(--muted); font-size: 1.1rem; }
+
+.prose a { color: var(--accent); text-underline-offset: 2px; }
+.prose strong { font-weight: 650; }
+
+.prose code {
+  background: var(--code-bg);
+  padding: 0.12em 0.35em;
+  border-radius: 3px;
+  font: 0.875em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.prose pre {
+  background: var(--code-bg);
+  padding: 1rem 1.1rem;
+  border-radius: 6px;
+  overflow-x: auto;       /* long commands scroll, the page does not */
+  border: 1px solid var(--rule);
+}
+.prose pre code { background: none; padding: 0; }
+
+.prose blockquote {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1.1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--warn-bg);
+}
+
+/* Tables carry most of the hard-won detail in this project — the trap tables,
+   the measurements. They must stay readable and must never widen the page. */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  display: block;
+  overflow-x: auto;
+}
+.prose th, .prose td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.prose th { font-weight: 650; white-space: nowrap; }
+.prose tbody tr:hover { background: var(--code-bg); }
+
+.prose img { max-width: 100%; height: auto; border-radius: 6px; }
+.prose hr { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+
+/* --- evidence ----------------------------------------------------------- */
+
+.evidence { margin-top: 3rem; }
+.evidence h2 { font-size: 1.35rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+.evidence > p { color: var(--muted); }
+
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+.shots figure { margin: 0; }
+.shots img {
+  width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  display: block;
+  background: var(--code-bg);
+}
+.shots figcaption {
+  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  margin-top: 0.4rem;
+  word-break: break-all;
+}
+
+/* --- footer ------------------------------------------------------------- */
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+footer p { max-width: var(--max); margin: 0 auto; }
+footer a { color: var(--accent); }

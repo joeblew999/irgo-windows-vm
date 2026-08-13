@@ -20,3 +20,16 @@ go.work.sum
 
 # Release artefacts, built by mise run go:build.
 /dist/
+
+# Probe binaries built into their own source directory. `go build` with no -o
+# drops one next to main.go, and probe/nativeprobe was committed that way — a
+# 4.5 MB build artefact in a repository whose largest real file is a screenshot.
+/probe/nativeprobe
+/glaze-probes/verify
+/glaze-probes/verifyevents
+/examples/glaze-all/glaze-all
+
+# The generated site. Built by `mise run site:build` from the markdown, which is
+# the source of truth; committing the output would be the second copy the
+# generator exists to avoid.
+/site/dist/

@@ -1,0 +1,72 @@
+# Publish the site to GitHub Pages.
+#
+# Same shape as the other two workflows: install mise, call the task. The site
+# is built by `mise run site:build`, so what CI publishes is exactly what
+# `mise run site:serve` shows you locally — there is no build step here that a
+# maintainer cannot run.
+#
+# The site is GENERATED from the repository's markdown and is never committed.
+# README, RESULTS, UPSTREAM, AGENTS and CONTRIBUTING are each the source of
+# truth for their subject, and the site renders them. If a page is wrong, the
+# markdown is wrong; there is no second copy to fix.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Read the repo, write Pages. Nothing else — this workflow publishes docs and
+# has no business with contents:write, which release.yml needs and this does not.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and let a running one finish. Cancelling a
+# half-finished deploy is how a site ends up serving a partial upload.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # ubuntu, not macOS: this only renders markdown. The macOS runners exist in
+    # the other workflows because the code they test drives UTM, and none of
+    # that is involved here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v4.2.4
+      - uses: actions/configure-pages@v6.0.0
+
+      - name: build the site
+        run: mise run site:build
+
+      # Fails the build rather than publishing a site whose pages 404 at each
+      # other. Every local href in the output must name a file that exists —
+      # the licence link was broken exactly this way and only turned up because
+      # it was checked by hand.
+      - name: check every local link resolves
+        working-directory: site/dist
+        run: |
+          broken=0
+          for f in $(grep -rho 'href="[^"#:]*"' ./*.html | sed 's/href="//;s/"//' | sort -u); do
+            [ -z "$f" ] && continue
+            if [ ! -e "$f" ]; then echo "broken link: $f"; broken=1; fi
+          done
+          exit $broken
+
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.0

@@ -170,6 +170,19 @@
         </LocalAccounts>
       </UserAccounts>
 
+      <!--
+        The dev/dev password above and below is not a leaked credential, and is
+        not meant to be changed into a strong one.
+
+        Setup needs it in plaintext to create the account and log in without
+        anybody typing, which is the whole point of an unattended install. It
+        guards a throwaway local VM with no inbound route from anywhere but this
+        Mac, and it is deliberately obvious so nobody mistakes it for a secret
+        that matters or reuses this file for a machine where one would.
+
+        RDP is enabled below for the same VM. Do not copy this answer file to
+        anything reachable from a network you do not control.
+      -->
       <AutoLogon>
         <Username>dev</Username>
         <Enabled>true</Enabled>

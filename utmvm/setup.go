@@ -40,6 +40,10 @@ type SetupOptions struct {
 	// Install drives the unattended Windows installation, which takes about 45
 	// minutes. Off by default for the same reason.
 	Install bool
+
+	// MediaOnly stops after the Windows media exists. `iso` is this: media is
+	// the slow, rate-limited part, worth getting once and keeping.
+	MediaOnly bool
 }
 
 // SetupStage is one step, and what happened to it.
@@ -125,6 +129,9 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		return res, err
 	}
 	res.ISO = iso
+	if opts.MediaOnly {
+		return res, nil
+	}
 
 	// 4. Protect it. Free, and the difference between a slip and a 4.2 GB
 	// re-download of something rate-limited.

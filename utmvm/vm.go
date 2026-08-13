@@ -212,6 +212,24 @@ func linkOrCopy(src, dst string) error {
 	if err := os.Link(src, dst); err == nil {
 		return nil
 	}
+
+	// An immutable source cannot be hardlinked: ln returns EPERM, and the copy
+	// below then silently spends 5.27 GB per VM on a file that was meant to be
+	// shared. Measured, not assumed — a bundle built from the protected ISO came
+	// out at 5.1 GB with install.iso showing one link instead of two.
+	//
+	// So the flag is lifted just long enough to make the link, and restored
+	// whatever happens. uchg is per-inode, so this briefly unprotects the
+	// original too; that window is one syscall wide.
+	if flags, ok := fileFlags(src); ok && flags&uchgFlag != 0 {
+		if uErr := UnprotectISO(src); uErr == nil {
+			linkErr := os.Link(src, dst)
+			_ = ProtectISO(src)
+			if linkErr == nil {
+				return nil
+			}
+		}
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -1182,15 +1200,22 @@ func walkBundle(root string) (bytes int64, immutable []string) {
 // The stop comes first and is deliberate: removing files under a running QEMU
 // leaves the process writing to deleted inodes, so the space is not returned
 // until it exits and UTM is left with a phantom entry.
-func Delete(ref string, force bool) (Removal, error) {
+func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
+	step := func(f string, a ...any) {
+		if log != nil {
+			log(f, a...)
+		}
+	}
 	r, err := InspectRemoval(ref)
 	if err != nil {
 		return r, err
 	}
+	step("· found %s (%s)", r.Name, HumanBytes(r.TotalBytes))
 	if r.Running {
 		if !force {
 			return r, fmt.Errorf("%s is running; stop it first or pass -force", r.Name)
 		}
+		step("… stopping it")
 		vm := Named(ref)
 		_ = vm.Stop()
 		for i := 0; i < 15; i++ {
@@ -1215,10 +1240,16 @@ func Delete(ref string, force bool) (Removal, error) {
 	// that is not found is a survivor that is not re-protected.
 	dp := DefaultPaths()
 	_, immutable := walkBundle(r.Path)
+	if len(immutable) > 0 {
+		step("… releasing %d protected file(s) so the bundle can be removed", len(immutable))
+	}
 	reprotect := releaseImmutable(immutable, append(ISOSearchDirs(), dp.Cache, dp.Work))
 	defer func() {
 		for _, p := range reprotect {
 			_ = ProtectISO(p)
+		}
+		if len(reprotect) > 0 {
+			step("· re-protected %d shared file(s)", len(reprotect))
 		}
 	}()
 
@@ -1233,8 +1264,10 @@ func Delete(ref string, force bool) (Removal, error) {
 	// utmctl's failure is not visible in its exit status — `utmctl delete` on a
 	// phantom prints "couldn't be removed" and exits 0 — so the bundle is
 	// checked afterwards rather than the error being trusted.
+	step("… asking UTM to delete it, so no phantom entry is left")
 	_ = exec.Command("utmctl", "delete", r.UUID).Run()
 	if _, err := os.Stat(r.Path); err == nil {
+		step("… UTM left the bundle behind; removing it")
 		if rmErr := os.RemoveAll(r.Path); rmErr != nil {
 			return r, fmt.Errorf("removing %s: %w", r.Path, rmErr)
 		}

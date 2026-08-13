@@ -60,9 +60,9 @@ func DefaultPaths() Paths {
 
 	p := Paths{
 		Root:     root,
-		Cache:    envOr("IRGO_CACHE_DIR", filepath.Join(root, ".cache")),
+		Cache:    envOr("IRGO_CACHE_DIR", userDataDir("media")),
 		Bin:      envOr("IRGO_BIN_DIR", filepath.Join(root, ".bin")),
-		Work:     envOr("IRGO_WORK_DIR", filepath.Join(root, ".work")),
+		Work:     envOr("IRGO_WORK_DIR", userDataDir("work")),
 		Upstream: envOr("IRGO_UPSTREAM_DIR", defaultUpstreamDir()),
 		Screens:  envOr("IRGO_SCREENS_DIR", filepath.Join(root, "docs", "screens")),
 	}
@@ -201,4 +201,19 @@ func defaultUpstreamDir() string {
 		return ""
 	}
 	return filepath.Join(home, "workspace", "go", "src", "github.com", "crgimenes")
+}
+
+// userDataDir is where media and scratch live: a fixed per-user location, not a
+// directory under whatever the working directory happened to be.
+//
+// The ISO is 5.27 GB and rate-limited at the source. Keying its location to the
+// process's cwd meant running the binary from anywhere else could not find it
+// and would fetch another copy — which is exactly the accident a `go install`
+// user hits first, since they have no repository to stand in.
+func userDataDir(sub string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".irgo-winvm", sub)
+	}
+	return filepath.Join(home, "Library", "Application Support", "irgo-winvm", sub)
 }

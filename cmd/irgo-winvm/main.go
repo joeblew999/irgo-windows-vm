@@ -31,6 +31,8 @@ func usage() {
   vm-delete    -> back to nothing
   run          put a binary on it and run it
   run-delete   -> remove what run put there
+  iso          get the Windows media (download or build)
+  iso-delete   -> remove it
   doctor       what is here; changes nothing
 
 Every command takes -h.
@@ -51,6 +53,10 @@ func run(args []string) error {
 		return runRun(args[1:])
 	case "run-delete":
 		return runRunDelete(args[1:])
+	case "iso":
+		return runISO(args[1:])
+	case "iso-delete":
+		return runISODelete(args[1:])
 	case "doctor":
 		return runDoctor()
 	case "-h", "--help", "help":
@@ -290,7 +296,7 @@ func runDelete(args []string) error {
 			r.Path, utmvm.HumanBytes(r.TotalBytes), r.Running)
 		return nil
 	}
-	r, err := utmvm.Delete(ref, *force)
+	r, err := utmvm.Delete(ref, *force, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) })
 	if err != nil {
 		return err
 	}
@@ -375,5 +381,59 @@ func runRunDelete(args []string) error {
 		return err
 	}
 	fmt.Printf("cleaned %s\n", e.Name)
+	return nil
+}
+
+// runISO gets the Windows media, which is the slowest and most rate-limited
+// step in `vm`. Separate so it can be done once and kept.
+func runISO(args []string) error {
+	fs := flag.NewFlagSet("iso", flag.ExitOnError)
+	fetch := fs.Bool("fetch", false, "download from Microsoft (~4.2 GB) if nothing local works")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p := utmvm.DefaultPaths()
+	res, err := utmvm.Setup(utmvm.SetupOptions{
+		ISO:      "",
+		Fetch:    *fetch,
+		MediaOnly: true,
+	}, p, func(s string) { fmt.Println(s) })
+	if err != nil {
+		return err
+	}
+	fmt.Printf("media: %s\n", res.ISO)
+	return nil
+}
+
+// runISODelete removes the media, which is protected on purpose, so it says so
+// rather than failing with EPERM.
+func runISODelete(args []string) error {
+	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
+	force := fs.Bool("force", false, "remove it even though it is protected")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p := utmvm.DefaultPaths()
+	iso := p.ISO()
+	st, err := utmvm.ISOLinks(iso, utmvm.ISOSearchDirs())
+	if err != nil {
+		return fmt.Errorf("no media at %s", iso)
+	}
+	if st.Links > 1 {
+		fmt.Printf("  · %d other name(s) share this file; removing this one frees nothing\n", st.Links-1)
+	}
+	if st.Protected {
+		if !*force {
+			return fmt.Errorf("%s is protected — 4.2 GB to re-fetch. Pass -force if you mean it", iso)
+		}
+		fmt.Println("  … clearing the protection flag")
+		if uErr := utmvm.UnprotectISO(iso); uErr != nil {
+			return uErr
+		}
+	}
+	if err := os.Remove(iso); err != nil {
+		return err
+	}
+	fmt.Printf("removed %s — %s\n", iso, utmvm.HumanBytes(st.Bytes))
 	return nil
 }

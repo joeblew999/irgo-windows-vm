@@ -546,33 +546,43 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 		return opts.ISO, filepath.Base(opts.ISO), true, nil
 	}
 
-	// Already in the cache, under either name.
+	// Every step announces itself BEFORE doing the work, with what it is about
+	// to try. A command that prints nothing for fifty seconds is
+	// indistinguishable from one that has hung, and the first thing anybody
+	// asks when this goes wrong is "what was it doing".
+	say("STEP 1/4  looking for media already here")
 	for _, candidate := range []string{
 		ISOPath(),
 		ISOBuiltPath(),
 	} {
 		if _, sErr := os.Stat(candidate); sErr != nil {
+			say("          not there: %s", Home(candidate))
 			continue
 		}
+		say("          found %s — checking it is ARM64 (reads the whole file the first time)", Home(candidate))
 		info, iErr := ISOInspect(candidate)
 		if iErr != nil || !info.IsARM64 {
 			say("  … %s is not ARM64 media; ignoring it", filepath.Base(candidate))
 			continue
 		}
+		say("          it is ARM64 — using it, nothing to do")
 		return candidate, filepath.Base(candidate), true, nil
 	}
 
 	// An ESD already downloaded — build from it rather than downloading again.
 	esd := ISOESDPath()
+	say("STEP 2/4  looking for a downloaded .esd to build from")
 	if _, sErr := os.Stat(esd); sErr == nil {
 		built := ISOBuiltPath()
-		say("  … building an ISO from the .esd already in the cache")
+		say("          found %s — skipping the 4.2 GB download", Home(esd))
+		say("STEP 4/4  expanding it and mastering a bootable ISO")
 		if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 			return "", "", false, bErr
 		}
 		return built, filepath.Base(built), false, nil
 	}
 
+	say("          not there: %s", Home(esd))
 	if !opts.Fetch {
 		return "", "", false, fmt.Errorf(
 			"no Windows media found.\n"+
@@ -581,7 +591,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 			Home(ISOPath()))
 	}
 
-	// ISODownload, then build.
+	say("STEP 3/4  asking Microsoft which build to download")
 	all, cErr := ISOFetchCatalog(2 * time.Minute)
 	if cErr != nil {
 		return "", "", false, cErr
@@ -591,7 +601,8 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 		return "", "", false, fmt.Errorf("catalog matched %d ARM64 en-us images, expected exactly 1", len(match))
 	}
 	e := match[0]
-	say("  … downloading %s (%s)", e.Build(), HumanBytes(e.Size))
+	say("          build %s, %s", e.Build(), HumanBytes(e.Size))
+	say("          downloading to %s", Home(esd))
 	if err := os.MkdirAll(ISODir(), 0o755); err != nil {
 		return "", "", false, err
 	}
@@ -604,6 +615,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	}
 
 	built := ISOBuiltPath()
+	say("STEP 4/4  expanding it and mastering a bootable ISO at %s", Home(built))
 	if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 		return "", "", false, bErr
 	}
@@ -622,9 +634,11 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 	}
 	defer os.RemoveAll(media)
 
-	if err := ISOExpandESD(esd, media, func(step string) { say("      %s", step) }); err != nil {
+	say("          expanding %s into %s", Home(esd), Home(media))
+	if err := ISOExpandESD(esd, media, func(step string) { say("            %s", step) }); err != nil {
 		return err
 	}
+	say("          mastering the ISO with xorriso (takes a minute)")
 	return ISOBuild(ISORemasterOptions{
 		Source:   media,
 		Output:   out,

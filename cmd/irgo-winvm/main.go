@@ -410,6 +410,7 @@ func runISO(args []string) error {
 	say := stamped()
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
+	say("STEP 0/4  the two programs an ISO build needs")
 	// The two external programs building an ISO needs. Installed here, and
 	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
 	// takes off. Every path printed, because "installed" without a location
@@ -454,20 +455,29 @@ func runISODelete(args []string) error {
 	// deleted, not an inventory. The earlier version printed the same lines
 	// under "media:" and "tool:" and then refused, which read as a status
 	// report followed by an unrelated complaint.
+	say("STEP 1/3  looking for media files")
 	var files []string
 	var bytes int64
 	for _, f := range utmvm.ISOFiles() {
-		if fi, err := os.Stat(f); err == nil {
-			files = append(files, f)
-			bytes += fi.Size()
+		fi, err := os.Stat(f)
+		if err != nil {
+			say("          not there: %s", utmvm.Home(f))
+			continue
 		}
+		say("          found %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
+		files = append(files, f)
+		bytes += fi.Size()
 	}
+	say("STEP 2/3  looking for the tools iso installed")
 	tools := utmvm.ISOTools()
 	var installed []int
 	for i := range tools {
 		if tools[i].Found() {
+			say("          found %-16s %s", tools[i].Name, utmvm.Home(tools[i].Path))
 			installed = append(installed, i)
+			continue
 		}
+		say("          not installed: %s", tools[i].Name)
 	}
 
 	if len(files) == 0 && len(installed) == 0 {
@@ -479,13 +489,13 @@ func runISODelete(args []string) error {
 		return nil
 	}
 
-	say("would delete:")
+	say("STEP 3/3  would delete:")
 	for _, f := range files {
 		fi, _ := os.Stat(f)
-		say("  %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
+		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), utmvm.Home(f))
 	}
 	for _, i := range installed {
-		say("  %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
+		say("          %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
 	}
 
 	if !*force {
@@ -503,8 +513,9 @@ func runISODelete(args []string) error {
 		return fmt.Errorf("%s\n  Pass -force to do it", msg)
 	}
 
-	say("")
+	say("STEP 3/3  deleting")
 	for _, f := range files {
+		say("          clearing the immutable flag on %s", utmvm.Home(f))
 		_ = utmvm.ISOUnprotect(f) // uchg blocks unlink
 		if err := os.Remove(f); err != nil {
 			return err
@@ -514,12 +525,15 @@ func runISODelete(args []string) error {
 	// The tools go whether or not the media was there: an undo has to run to
 	// completion from any starting point.
 	for i := range tools {
+		if tools[i].Found() {
+			say("          uninstalling %s (brew uninstall %s)", tools[i].Name, tools[i].Formula)
+		}
 		where, err := tools[i].Remove()
 		switch {
 		case err != nil:
-			say("  · %s left in place: %v", tools[i].Name, err)
+			say("          · %s left in place: %v", tools[i].Name, err)
 		case where != "":
-			say("  · uninstalled %s from %s", tools[i].Name, utmvm.Home(where))
+			say("          · uninstalled %s from %s", tools[i].Name, utmvm.Home(where))
 		}
 	}
 	return nil

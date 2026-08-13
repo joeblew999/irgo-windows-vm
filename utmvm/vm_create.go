@@ -69,20 +69,27 @@ type SetupResult struct {
 // and is indistinguishable from "did nothing" unless it says so.
 func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error) {
 	var res SetupResult
+	began := time.Now()
 	say := func(f string, a ...any) {
 		if log != nil {
-			log(fmt.Sprintf(f, a...))
+			log(fmt.Sprintf("[%6.1fs] ", time.Since(began).Seconds()) + fmt.Sprintf(f, a...))
 		}
 	}
+	last := time.Now()
 	stage := func(name string, skipped bool, detail string, err error) error {
+		took := time.Since(last)
+		last = time.Now()
+		if took > 200*time.Millisecond {
+			detail = fmt.Sprintf("%s  [%s]", detail, took.Round(time.Millisecond))
+		}
 		res.Stages = append(res.Stages, SetupStage{name, skipped, detail, err})
 		switch {
 		case err != nil:
-			say("  ✗ %s: %v", name, err)
+			say("✗ %s: %v", name, err)
 		case skipped:
-			say("  · %s — already done (%s)", name, detail)
+			say("· %s — already done (%s)", name, detail)
 		default:
-			say("  ✓ %s — %s", name, detail)
+			say("✓ %s — %s", name, detail)
 		}
 		return err
 	}
@@ -96,6 +103,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	res.VM = opts.VMName
 
 	// 1. The hypervisor. Nothing else can be checked without it.
+	say("… checking UTM")
 	in, err := EnsureUTM()
 	if err != nil {
 		return res, stage("UTM", false, "", err)
@@ -109,7 +117,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	hadTools := true
 	if _, tErr := GuestToolsISO(); tErr != nil {
 		hadTools = false
-		say("  … downloading UTM guest tools (~120 MB)")
+		say("… downloading UTM guest tools (~120 MB)")
 	}
 	gt, gErr := EnsureGuestTools()
 	if gErr != nil {
@@ -121,6 +129,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 
 	// 3. Media. Three ways to already have it, in order of preference, then
 	// building one.
+	say("… checking Windows media (scans the ISO the first time; cached after)")
 	iso, isoDetail, isoSkipped, err := ensureMedia(opts, paths, say)
 	if err != nil {
 		return res, stage("Windows media", false, "", err)
@@ -172,7 +181,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		// UTM enumerates its bundle directory only at launch, so a VM written
 		// while it is running does not exist as far as utmctl is concerned —
 		// with no error saying so. This is the step nobody discovers alone.
-		say("  … restarting UTM so it sees the new VM")
+		say("… restarting UTM so it sees the new VM")
 		if rErr := RestartUTM(); rErr != nil {
 			return res, stage("restart UTM", false, "", rErr)
 		}
@@ -193,7 +202,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	// where a cold boot cannot, because UTM routes the keystrokes that drive
 	// the UEFI shell through a display window.
 	if vm.IsPaused() {
-		say("  … resuming from suspend")
+		say("… resuming from suspend")
 		if rErr := vm.Resume(); rErr != nil {
 			return res, stage("resume", false, "", rErr)
 		}
@@ -218,7 +227,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	// reboots, and lands back in the UEFI shell needing a different boot, off
 	// the ESP this time. EnsureReady does not know about the second phase, so a
 	// fresh VM would sit at a shell prompt until the timeout.
-	say("  … installing Windows unattended; this takes about 45 minutes")
+	say("… installing Windows unattended; this takes about 45 minutes")
 	e, fErr := Find(opts.VMName)
 	if fErr != nil {
 		return res, stage("install Windows", false, "", fErr)

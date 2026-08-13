@@ -593,10 +593,34 @@ hardlinked destination is refused; an immutable one is refused; an
 *unanswerable* one is refused; and on a `!darwin` build `CheckWritable` still
 refuses rather than degrading to the directory test.
 
-**5 — Decide probe distribution.** Embed with `go:embed`, download from a
-release like the guest tools already are, or admit probes are maintainer-only —
-in which case mise is their correct home. A decision, not code; do it early so
-phase 14 is not blocked.
+**5 — Probe distribution. DECIDED: build on demand in the CLI.**
+
+`irgo-winvm probe -build` cross-compiles the four probes, taking over the 13
+lines of shell that currently live only in `mise.toml` — which is why anyone who
+ran `go install …@latest` cannot build probes at all today, and why
+`create -probes <dir>` asks for binaries they have no way to obtain.
+
+The reasoning that settled it: **the probes are this repo's self-test, not a
+user feature.** A user's workflow is `go build -o my.exe && irgo-winvm run
+my.exe`; they never need ours. So requiring a Go toolchain costs nothing real —
+every `go install` user has one by definition, and anyone building a Windows
+`.exe` to test in the VM already has one too.
+
+Rejected, with reasons worth keeping:
+
+- **`go:embed`** — works offline and needs no toolchain, but adds ~22 MB (arm64
+  only; ~48 MB for both arches) and puts committed `.exe` files in the repo that
+  drift from the source they were built from. That is precisely the *one fact,
+  two declarations* failure the rest of this plan is removing.
+- **Download from a release** — the right shape, and matches how guest tools
+  already work, but there is no remote, nothing is pushed and no release exists.
+  Keep it as the **fallback for release-binary users** once those exist; the
+  `-build` path is what makes it optional rather than blocking.
+- **Maintainer-only** — honest and smallest, but deletes the demonstration of
+  what this tool is for.
+
+Implemented in phase 14 with the rest of the CLI, so it is written once. What
+lands here is the decision and the `mise.toml` task marked for deletion.
 
 **6 — Reporting seam and `runner` interface.** One reporting mechanism instead
 of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.

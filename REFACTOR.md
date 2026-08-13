@@ -280,7 +280,7 @@ coverage is thin: it is structural, not laziness.
 
 ### This is two systems wearing one coat
 
-The largest structural problem in the repo, and the one that made the phase 5
+The largest structural problem in the repo, and the one that made the probe-distribution
 decision come out wrong the first time.
 
 | | **System A — VM management** | **System B — the probe suite** |
@@ -335,7 +335,7 @@ every `utmvm` fix a probe discovers would need releasing before the probe could
 consume it. For one maintainer that is friction paid daily for a benefit already
 held.
 
-Phase 13 gives the separation that matters, and gives it *harder* than a split
+Phase 12 gives the separation that matters, and gives it *harder* than a split
 would: a test that fails if `utmvm` names a probe, glaze, native or crgimenes. A
 repo boundary is enforced by nothing.
 
@@ -348,9 +348,9 @@ repo boundary is enforced by nothing.
   churns.
 
 None hold today. If one does later, the split costs a `git mv` and a `go.mod`,
-because phase 13 will already have removed every symbol that crosses.
+because phase 12 will already have removed every symbol that crosses.
 
-**Two module defects to fix while there** (phase 13, since both are boundary
+**Two module defects to fix while there** (phase 12, since both are boundary
 facts): `probe/go.mod` declares `module nativeprobe` — unqualified, unlike its
 two siblings, so it cannot be referred to by path; and the four modules declare
 three Go versions (`1.25.0` at root, `1.26.5` elsewhere), which makes CI's
@@ -585,7 +585,7 @@ The untested list is every file that touches a VM, media or setup: `control`,
 `external`, `installutm`, `iso`, `fatimage`, and both `sysfile_*`.
 
 Only `config`, `isoimage`, `catalog`, `assets`, `bootassist` and the prune
-regression have any. This is the strongest argument for phase 6: **without the
+regression have any. This is the strongest argument for phase 3: **without the
 `runner` seam, 22 files cannot be tested at all**, and every phase after it is
 verified by hand against a 45-minute install.
 
@@ -621,40 +621,77 @@ instruction is a lie.
 
 ## Phases
 
-Two rules set the order: **every `utmvm` API change lands before the CLI is
-written against it** (7–12 before 14), and **the phase that makes testing
-possible comes before the phases that need testing** (6 before everything
-risky).
+Phases are sliced **by capability**, not by kind of change.
 
-The reading pass added three phases (4, 8, 9). Phase 4 moved early because it is
-live data-loss and needs no VM. Phase 8 is the *most severe* defect found and
-deliberately does **not** come first: proving that no keystroke is sent to a
-running guest requires observing what was sent, which is precisely the `runner`
-seam phase 6 installs. Fixing it before then means verifying by hand against a
-45-minute install, which is how these bugs survived.
+An earlier draft sliced horizontally — all the linting, then all the guards,
+then all the context plumbing — and a cold review found what that shape
+produces: phase 1 deleted code phase 8 needed, four phases rewrote a CLI a later
+phase deleted, and a dozen recorded defects belonged to no phase at all. Work
+was destroyed and defects fell between the slices.
 
-| # | phase | size | verify | why here |
+So each capability phase **finishes a thing**: its defects, its
+`Check`/`Ensure`/`Clean`, its tests, and its final CLI surface, in one branch.
+`main.go` shrinks toward pure dispatch as each capability claims its commands,
+so no CLI work is written twice.
+
+Three rules set the order:
+
+1. **Foundation before capabilities.** A capability cannot implement
+   `Check`/`Ensure`/`Clean` before that contract exists, or be tested before the
+   seam exists.
+2. **Capabilities in dependency order**, ending with `setup`, which orchestrates
+   all of them and is therefore last.
+3. **Nothing is deleted until everything that might need it is done.** Dead-code
+   removal moves to the end — that is where the earlier draft went wrong.
+
+| # | | phase | verify | owns |
 |---|---|---|---|---|
-| **0** | **The harness — make every check an assertion** | **L** | self | **nothing else can run unattended until this exists** |
-| 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
-| 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
-| 3 | One retry primitive | S | CI | no dependencies |
-| 4 | **Guards become tri-state** | M | CI | **live data-loss; needs no VM, so it goes early** |
-| 5 | Decide probe distribution | S | decision | blocks 14 |
-| 6 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
-| 7 | `Check`/`Ensure` split, `VMState`, pure `doctor` | L | CI | **the keystone; fixes the live `doctor` bug** |
-| 8 | **Boot driver correctness** | M | **VM** | **most severe defect** — but needs 6's seam to be provable |
-| 9 | **Download and media integrity** | M | CI + **VM** | needs 6's seam; independent of 7 |
-| 10 | Idempotency through `Ensure`; `setup` becomes thin | M | CI + twice-run | needs 7's `Ensure` to exist |
-| 11 | `context.Context` through long operations | M | **VM** | signature change, after 7–10 settle |
-| 12 | Verbs, typed errors, locking | M | CI | last API change before the CLI |
-| 13 | **Separate the two systems** | M | CI | **decides what the CLI is**; after the API work, before 15 |
-| 14 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
-| 15 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
-| 16 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
-| 17 | Tighten enforcement | M | CI | thresholds set from the finished code |
+| 1 | **F** | Harness, lint, and `mise run lint` | self + negative controls | the gate everything else runs through |
+| 2 | **F** | Guards and the filesystem foundation | CI | `sysfile_*`, `paths`, `diskspace`, `isoguard` |
+| 3 | **F** | The seam: `runner` and reporting | CI | every `exec` and every `Printf` in `utmvm` |
+| 4 | **F** | The contract: `Check`/`Ensure`/`Clean` | CI | typed errors, `context`, retry, `VMState` |
+| 5 | **C** | Host and dependencies | CI | UTM, brew, guest tools, `doctor`, `targets` |
+| 6 | **C** | Media | CI + VM | catalog, fetch, ESD, `build-iso`, protect, inspect |
+| 7 | **C** | Bundle and configuration | CI + VM | `create`, `delete`, plist, payload, `prune` |
+| 8 | **C** | Control | CI + VM | `start`, `stop`, `suspend`, `resume`, `status`, `list` |
+| 9 | **C** | Boot and install | **VM** | `bootassist`, `install`, and the three experiments |
+| 10 | **C** | Guest execution | CI + VM | `run`, `exec`, push/pull, the injection fix |
+| 11 | **C** | Setup | **VM** | orchestration, made thin by calling down |
+| 12 | **Z** | The two systems, and the modules | CI | System B out of `utmvm`; module names and versions |
+| 13 | **Z** | Dead code and the exported surface | CI | **all deletions happen here, not earlier** |
+| 14 | **Z** | Docs, `README`, `RESULTS`, mise | CI | the false claim, the 20 wrappers |
+| 15 | **Z** | Enforcement | CI | linters, invariant tests, `AGENTS.md` |
 
-**0 — The harness.** The whole plan is to run unattended, and exactly one thing
+### Every recorded defect has exactly one owner
+
+The cold review's most valuable finding was defects with no phase. This table is
+the fix, and it is the checklist a phase closes against:
+
+| defect | phase |
+|---|---|
+| `sysfile_other.go`'s inverted comment; every `ok &&` guard; `hasDotDot` on Windows | 2 |
+| `CheckWritable` stat-error = writable; `isoguard` `Protected` on failure | 2 |
+| four progress mechanisms; `utmvm` writing to stdout; five byte formatters | 3 |
+| six retry loops; `Ensure` meaning five things; no `context`; one sentinel error | 4 |
+| `doctor` installs UTM; unverified `.dmg`, no `codesign`/`spctl`; guest-tools ISO unchecked | 5 |
+| download length/fsync/rename-clobber; `mkisofs` `-b`; `ExpandESD` appending; `iso` scanning `.` | 6 |
+| `ProtectISO` defeating its own hardlink; unprotect-before-delete | 6 + 7 |
+| `Delete` by display name not UUID; proceeding after a failed stop; `randomMAC` | 7 |
+| **all six `Prune` defects**, including the `"irgo-"` catch-all and mis-counted `freed` | 7 |
+| `BundlePath(name)`; bundle layout concatenated in the CLI four times | 7 |
+| `RestartUTM` quitting with VMs running; `WaitForAgentEvery` never probing | 8 |
+| `BootAssistWatched`'s dead `diskPath`; `nil` after five failures; no `AgentReady` gate | 9 |
+| **`BootEntryWritten`** — the heuristic `setup` uses to choose recover vs reinstall | 9 |
+| the keypress / loader / FAT contradictions, settled by experiment | 9 |
+| **guest command injection** (`run.go:269`); `schtasks` failure invisible; guest litter | 10 |
+| `setup` as a parallel implementation; `chflags` on a user-supplied `-iso` | 11 |
+| `ProbeDir` → `StageDir`; glaze/native/crgimenes out of `utmvm`; `module nativeprobe`; three Go versions | 12 |
+| twelve dead symbols; 134-symbol exported surface | 13 |
+| README's false headline; CLI commands in prose; 20 mise wrappers; `vm:up` | 14 |
+| `control.go:61`'s backwards fallback; doc comments on wrong declarations; `NewConfig` | owning capability |
+
+
+**1 — The harness.** The whole plan is to run unattended, and exactly one thing
 prevents that: four phases are verified by a person watching Windows install.
 That is not a property of the work. It is the absence of assertions — and it is
 why these bugs survived, because `BootAssistWatched` ignoring the disk it exists
@@ -741,15 +778,13 @@ build**, invisibly, because `go.work` is gitignored and absent from
 `git status`. Phase 0 restores it on exit, including the failure path, and
 asserts it is absent before merging anything.
 
-**Pin the harness to the surface that survives phase 15.** The harness is
-black-box over the CLI, and phase 15 rewrites the CLI — so an assertion written
-against a convenient flag breaks two-thirds of the way through the run, at the
-point where the code is least verified. This is safe only because the plan
-already guarantees the surface: **primitives are removed only when another
-primitive does the same thing**, and just `up` and `probe` go. So the harness
-uses primitives and `setup`, never `up`, never `probe`, and never a flag the
-plan does not name. Phase 15 keeps the harness green by construction rather than
-by repair.
+**The harness tracks the CLI, capability by capability.** The harness is
+black-box over the CLI, and each capability phase rewrites its own commands —
+so the harness moves with it, in the same branch, as part of that phase's
+definition of done. That is the advantage of slicing by capability: the CLI is
+never replaced wholesale under a harness that cannot follow. Primitives are
+removed only when another primitive does the same thing, so the surface the
+harness asserts on is stable by rule, not by luck.
 
 **Preconditions are numbers, not adjectives.** The harness refuses to start
 unless it can state each one:
@@ -764,8 +799,8 @@ unless it can state each one:
 
 **This is black-box only, deliberately** — end-to-end assertions over the real
 CLI. The white-box checks (*was any keystroke sent while the agent was up?*)
-need the phase 6 seam, which does not exist yet. Building phase 0 on it would be
-circular; building it black-box now is what lets phases 1–5 run unattended
+need the phase 3 seam, which does not exist yet. Building phase 1 on it would be
+circular; building it black-box now is what lets phases 2–4 run unattended
 tonight.
 
 **And it makes the expensive experiments affordable for the first time.** Phase
@@ -778,7 +813,7 @@ installs. A machine does not care.
 #### Install Windows once, then use the commands you already have
 
 The 45-minute install is the plan's real cost, and an early draft of this
-section spent it twelve times in phase 8 and then proposed a new `clone`
+section spent it twelve times in phase 9 and then proposed a new `clone`
 primitive to avoid that. Both were wrong, and wrong in the way this whole
 document is about: **reaching for new machinery instead of the commands that
 already exist.**
@@ -789,7 +824,7 @@ Windows that answers. So:
 
 > **One test VM, created once, reused across all seventeen phases.**
 
-That is the whole strategy. It requires no new code, and phase 10 is what makes
+That is the whole strategy. It requires no new code, and phase 11 is what makes
 the idempotency it leans on trustworthy.
 
 The work splits three ways, and only one part is expensive:
@@ -798,10 +833,11 @@ The work splits three ways, and only one part is expensive:
 |---|---|
 | bundle operations — `create`, `delete`, `config`, `prune`, `iso` | an empty bundle. **Seconds.** No Windows involved |
 | guest operations — `run`, `exec`, `suspend`, `resume`, probes | **one** installed VM, reused. Paid once |
-| install operations — phase 8's three experiments | real installs, **aborted at first signal** |
+| install operations — phase 9's three experiments | real installs, **aborted at first signal** |
 
 Most of what looked like it needed cloning never needed Windows installed at
-all. And phase 8's experiments do not need the install to *finish*: boot success
+all. And phase 9's experiments do not need the install to *finish* in every case:
+boot success
 is observable in about two minutes from disk growth or the agent, so each trial
 stops once the answer is known. Twelve trials come in under an hour.
 
@@ -871,7 +907,7 @@ Two axes of reversibility, and the plan needs both:
 `prune` deserves its own note: it is irreversible, operates on the shared system
 temp directory, and its prefix list contains `"irgo-"`, which matches every
 other entry including files a concurrently running `pushScript` has open. Until
-phase 2 fixes that, the harness must not call it with `os.TempDir()`.
+phase 7 fixes that, the harness must not call it with `os.TempDir()`.
 
 #### Every assertion needs a negative control
 
@@ -915,195 +951,115 @@ rather than assumed — the fix was stashed, the hang returned, the fix was
 restored. It cost two minutes and it is the difference between a measurement and
 a belief.
 
-**1 — Lint baseline, then delete.** Land `.golangci.yml` with only the checks
-the code already passes, and turn on `unused` so it *identifies* the dead code
-rather than a grep being trusted. Then delete the twelve symbols with no caller:
-`BuildFATImage`, `copyIntoFS`, `GuestToolsInstallCommand` (still carries a
-`start`-wildcard bug already fixed in the answer file), `OpenDisplay`,
-`BootAssist`, `BootAssistWatched`, `IfaceVirtIO`,
-`SchemaConfigurationVersion`, `EnsureISOTools`, `HumanSize`,
-`CatalogURLWindows10`, `SuspendToDisk`.
+**1 — Harness, lint, and the gate.** Detailed above. Two blockers the cold
+review found land here: **`mise run lint` does not exist** — no task, no
+`.golangci.yml` — while every phase is gated on it, so it is created here or
+nothing runs; and phase 1's negative controls must not reference fixes that
+arrive later. The two that did (`-b`/`-e`, and the `AgentReady` gate) move to
+phases 6 and 9, which is where both the fix and its control belong.
 
-Three carry a finding worth keeping before the code goes: `SuspendToDisk`
-reports success while power-cutting the guest; `EnsureISOTools` exists to fail
-fast on both ISO tools at once, and its absence is why you currently discover
-the second is missing ten minutes into expanding a 4 GB archive — so phase 9
-should call it rather than delete it; and `CatalogURLWindows10` is referenced
-only by a test asserting two compile-time constants differ, which cannot fail.
-Move each finding to `RESULTS.md` or the relevant comment first.
+**2 — Guards and the filesystem foundation.** Tri-state `inodeInfo`,
+`fileFlags`, `diskUsage`, `statfsAvailable`: an explicit *unknown* callers must
+handle, so `ok &&` cannot silently mean *allow*. `CheckWritable` refuses on
+unknown. `hasDotDot` uses `filepath.Separator`. `sysfile_other.go`'s comment is
+rewritten to match what its callers actually do.
 
-**2 — One source of truth for facts.** `guestFile()` shared by `run.go` and
-`Prune`, fixing the live drift; named timeout constants carrying their reason;
-ISO name and default VM name declared once in `Paths`.
+**Watch CI:** `sysfile_other` returns unknown for everything, so "refuse on
+unknown" makes every guarded write refuse on Linux — where `check.yml` runs
+`go test ./utmvm/...`. The tests must assert the *refusal*, not skip it.
 
-**3 — One retry primitive.** Collapse the six loops.
+**3 — The seam.** One reporting mechanism instead of four; every `Printf` and
+`os.Stderr` write leaves `utmvm`. Every `exec` — `utmctl`, **`osascript`**,
+`hdiutil`, `plutil` — goes through a `runner`. `osascript` matters as much as
+`utmctl`: phase 9's central assertion is *which keystrokes were sent*, and that
+is unobservable otherwise. **This is what makes the package testable**, so it
+precedes every capability.
 
-**4 — Guards become tri-state.** `inodeInfo`, `fileFlags`, `diskUsage` and
-`statfsAvailable` return an explicit *unknown* that callers must handle, so
-`ok &&` cannot silently mean *allow*. `CheckWritable` refuses on unknown by
-default; anything choosing otherwise says so at the call site. Fix
-`hasDotDot` to use `filepath.Separator`, `isoguard.go`'s `Protected` to be
-tri-state, and `bundle.go:80`'s vanishing space check. Rewrite
-`sysfile_other.go`'s inverted comment to match what its callers do.
+**4 — The contract.** `Check`/`Ensure`/`Clean` defined once, with the verbs
+given fixed meanings — `EnsureReady` becomes `BootInstalled`, which is what it
+does and would not have been mistaken for `RunInstall`. Typed errors for the
+states `setup` must act on. `context.Context` through the long operations. One
+retry primitive replacing six loops. `VMState` replacing nine ad-hoc answers to
+*is this VM usable*. A lockfile per bundle.
 
-Testable with temp files, hardlinks and `chflags` — **no VM**, which is why it
-precedes phase 6 despite being a real fix rather than a cleanup. Tests: a
-hardlinked destination is refused; an immutable one is refused; an
-*unanswerable* one is refused; and on a `!darwin` build `CheckWritable` still
-refuses rather than degrading to the directory test.
+Nothing here changes behaviour; it defines the shape phases 5–11 implement.
 
-**5 — Probe distribution. DECIDED: System B owns its own build; mise sequences
-the two systems.**
+**5–11 — the capabilities.** Each is one branch and closes the same checklist:
 
-The first version of this decision put `probe -build` in `irgo-winvm`. That was
-wrong, and wrong in the way the section above describes: it accepted the premise
-that probes are the VM tool's business. They are not. `irgo-winvm probe` and
-`create -probes` are **System B inside System A's CLI** and both go.
+1. fix every defect the table above assigns to it;
+2. implement its `Check` (pure), `Ensure` (acts), `Clean` (removes what `Ensure`
+   created);
+3. unit tests through the phase-3 seam, plus the harness assertions and their
+   negative controls;
+4. write its **final** CLI commands into `cmd_<capability>.go` and delete the
+   corresponding block from `main.go`;
+5. record any measurement it settles in `RESULTS.md`, dated.
 
-So:
+**Done** = its defects closed, `Clean` provably removes what `Ensure` made
+(assert a clean tree afterwards), its CLI commands final, harness green.
 
-- **System B builds its own probes**, from its own source, with its own entry
-  point. Not 13 lines of shell in `mise.toml`, which is what made
-  `go install …@latest` produce a binary that could not build probes at all.
-- **System A gains nothing.** It already has the whole feature:
-  `create -stage <dir>` puts files on the payload medium and `run <exe>` runs
-  one. Neither needs to know what a probe is.
-- **mise sequences them** — build the probes, ensure the VM, run each, collect
-  results. That is a maintainer workflow over two tools, which is exactly what
-  mise is for.
+Notes where a capability is more than its defect list:
 
-> **mise may *sequence* the two systems. It may not *implement* either.**
->
-> This is the sharpened form of the existing rule, and it is what the earlier
-> failure was really about: the harm was not that probe-building lived in mise,
-> it was that mise **implemented** it, so the capability existed nowhere else and
-> `go install` users silently got less. Sequencing two CLIs breaks nothing,
-> because each remains complete on its own.
+- **5 Host** — `doctor`, `status`, `targets` and `verify` become `Check`-only,
+  fixing the live bug where a diagnostic installs UTM and downloads 120 MB.
+- **6 Media** — `Clean` is the phase's own hardest test: a failed fetch must
+  leave no `.part`, a failed build no partial ISO. Settle `-b`/`-e` by booting
+  what the `mkisofs` fallback produces, which has never been done.
+- **7 Bundle** — `Delete` resolves by UUID and unprotects before removing, which
+  is what makes the harness's teardown possible at all. `Prune` gets all six
+  fixes; until it does, the harness must not point it at `os.TempDir()`.
+- **8 Control** — `stop` is added. `VM.Stop()` exists and no command exposes it,
+  so today you can power a VM on and not off.
+- **9 Boot** — the most severe defects, and the three experiments. Each trial
+  needs a real install, but the keypress question is about *surplus* presses
+  landing in Setup's UI **after** boot succeeds, so those trials must run
+  **past** the boot signal. Aborting early measures the one thing never in
+  doubt.
+- **11 Setup** — rewritten to call only what the primitives call. 338 lines to
+  roughly 40. The test asserts each stage resolves to its primitive's entry
+  point.
 
-Rejected, with reasons worth keeping:
+**12 — The two systems, and the modules.** `ProbeDir` → `StageDir`; the glaze,
+native and probe entries out of `external.go`; `IRGO_UPSTREAM_DIR` and the
+hardcoded `crgimenes` default out of `paths.go`. The boundary test greps
+`utmvm`'s own source — and must match **identifiers**, not prose, or it fires on
+"native ARM64" and forces the comment edits *What not to do* forbids.
 
-- **`go:embed` into `irgo-winvm`** — adds ~22 MB (arm64 only; ~48 MB both
-  arches) and commits `.exe` files that drift from their source. Doubly wrong
-  now: it would embed System B's artefacts in System A's binary.
-- **Download from a release** — right shape for System B once a remote exists.
-  Blocked today: no remote, nothing pushed, no release.
+Also the module defects: `probe/go.mod` declares `module nativeprobe`,
+unqualified unlike its siblings; four modules declare three Go versions. Settle
+on one and record why.
 
-Lands here: the decision, `-probes` renamed to `-stage`, and the mise task
-rewritten to sequence rather than implement.
+**13 — Dead code and the exported surface.** **All deletions happen here**, and
+that is the point: the earlier draft deleted `BuildFATImage` in phase 1 and then
+needed it for phase 9's FAT experiment. By now every capability is finished, so
+what is unused is genuinely unused.
 
-**6 — Reporting seam and `runner` interface.** One reporting mechanism instead
-of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
-The `runner` seam lands here because both are about who may talk to the outside
-world. **This is what makes the package testable without a VM**, which is why it
-precedes everything risky: from here on, phases are verified by tests rather
-than by hand.
+Note `unused` does **not** report exported identifiers, and eleven of the twelve
+are exported — the same is true of `unparam`. So this phase cannot lean on the
+linter alone: it greps `cmd/`, System B and the harness for each symbol.
+`CatalogURLWindows10`'s test goes with it.
 
-Note the seam must cover `osascript` too, not just `utmctl` — phase 8's central
-assertion is *which keystrokes were sent*, and that is unobservable otherwise.
+**14 — Docs.** The README's opening claim is false and gets corrected, not
+quietly kept. CLI commands come out of prose entirely — `-h` is generated and
+cannot drift. The 20 mise wrappers go, including `vm:up`, which invokes a
+command this plan deletes. `RESULTS.md` gains every measurement phases 6 and 9
+settled.
 
-**7 — `Check`/`Ensure`, `VMState`, pure `doctor`.** The keystone. Every
-capability gets a pure `Check` and an acting `Ensure` built on it. `VMState`
-replaces the nine ad-hoc answers to "is this VM usable". `doctor`, `status`,
-`targets` and `verify` are rewired to `Check` only — fixing the live bug where
-`doctor` installs UTM. Add the test that no REPORT command reaches an
-`Ensure*`/`Fetch*`/`Install*`.
-
-**8 — Boot driver correctness.** The most severe defect found, and the one that
-has already destroyed an install. Delete `BootAssistWatched`'s dead `diskPath`
-or make it real — do not keep a parameter that names a safety property it does
-not have. The installed-Windows loop must not advance to the next candidate
-while the guest may be booting, and must return an error when it exhausts them
-instead of `nil`. `BootAndWait` gates on `AgentReady` before typing, as
-`RunInstall` already does. `diskUsage`'s `ok` is honoured (phase 4 makes it
-impossible to ignore).
-
-Then **resolve the three contradictions by experiment, not by editing prose**:
-how many keypresses the prompt actually needs, whether `cdboot_noprompt.efi` or
-`bootaa64.efi` boots, and whether Setup reads `autounattend.xml` from FAT. Each
-is currently asserted in two places with opposite answers, so one of each pair
-is a lie and the code cannot say which. Record the answers in `RESULTS.md` with
-a date and delete the losing claim.
-
-**VM.** The unit tests assert what was sent through the phase-6 seam — *no
-keystrokes when the agent is already up*, *an error when candidates are
-exhausted* — but only a real install proves the keypress count.
-
-**9 — Download and media integrity.** `Download` compares `done` to
-`ContentLength` and fails on a short read; `f.Sync()` before close; the
-destination guard re-checked immediately before `os.Rename`, not hours earlier;
-`ContentLength == -1` handled rather than producing a negative total. Delete
-416 as a dead end by removing the stale `.part`. Then the missing hashes:
-publish or pin one for the UTM `.dmg` and the guest-tools ISO, or state in the
-code why unverified is acceptable — and stop printing `verified sha1` when
-nothing was verified. Fix `mkisofs`'s `-b` → `-e` and give the `switch` a
-`default` that errors.
-
-**CI + VM.** Truncation and rename-clobber are unit-testable against a local
-server; the `-b`/`-e` fix is only proven by booting the ISO that fallback path
-produces — which has, as far as the record shows, never been done.
-
-**10 — Idempotency, and `setup` becomes thin.** `Ensure` semantics on `Create`,
-`BuildISO`, `Download`; `ExpandESD` skipping images already exported. Then
-`setup` is rewritten to call *only* what its primitives call — deleting
-`ensureMedia`, using `BootAndWait` where `boot` does. 338 lines to roughly 40,
-a list of steps and their outcomes. Add the test asserting each stage resolves
-to the same entry point as its primitive.
-
-**11 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
-`BootAndWait`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
-cleanly. *VM* — cancellation during a real install is the only honest test.
-
-**12 — Verbs, typed errors, locking.** Give `Ensure`/`Fetch`/`Build`/`Run` fixed
-meanings: `EnsureReady` becomes `BootInstalled`, which is what it does and would
-not have been mistaken for `RunInstall`. Typed errors for the states `setup`
-should act on. A lockfile per VM bundle. Route `bundle.go:15` through
-`CanCreateVMs`. `Delete` resolves the bundle by UUID rather than rebuilding a
-path from the display name, and `UnprotectISO`s before removing.
-
-**13 — Separate the two systems.** `utmvm` stops naming anything from System B.
-`ProbeDir` becomes `StageDir` on `Options`, `PayloadOptions` and `SetupOptions`
-— the feature is *stage these files on the payload medium*, which is what it
-always was. `external.go` loses the "probe binaries", "glaze clone" and "native
-clone" entries; `paths.go` loses `IRGO_UPSTREAM_DIR` and the hardcoded
-`github.com/crgimenes` default. Both move to System B, their only consumer.
-`config.go:117`'s GPU finding stays but stops citing probes as the reason.
-
-Then the enforcement, which is the point: **a test that fails if `utmvm`
-mentions a probe, glaze, native or crgimenes.** Grep the package's own source at
-test time. That boundary is invisible to the compiler and will not hold without
-one.
-
-Before the CLI (15) because it decides what the CLI *is* — one binary or two —
-and after the API work (7–12) so the rename lands on final signatures.
-
-**14 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
-`deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are coupled and
-splitting would force the exported surface to stay large, defeating phase 16.
-
-**15 — Rewrite the CLI.** Written fresh against the now-final API, old file
-deleted. Every primitive carried over unchanged; only `up` dropped. New shape:
-`main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
-helper behind the 18 flagsets and 10 copies of *resolve-find-handle*, so an
-unknown VM reads the same from every command — which it currently does not.
-
-**16 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
-symbols; unexport what is absent. Expect 40–60 to go.
-
-**17 — Tighten enforcement.** Below.
+**15 — Enforcement.** Below.
 
 ### If it stops early
 
-Phases 1–4 are cheap, self-contained and fix live bugs — **phase 4 is data-loss
-and needs no VM**, so it is the best value per hour in the plan. **Phase 6 is
-the highest-value single phase**: without a `runner` seam nothing here can be
-tested, and every later phase has to be verified by hand against a real VM.
-**Phases 7 and 8 fix bugs that are shipping today**, 8 being the one that has
-already destroyed an install. Phases 14–16 are cosmetic by comparison: stop
-before them without loss.
+**Phase 1 is not optional** — it is the gate, and two of its contents are live
+blockers. **Phases 2 and 3 are the highest value per hour**: phase 2 is data
+loss and needs no VM, phase 3 is what makes anything testable. **Phases 9 and 10
+fix what is shipping today** — the boot driver that has already destroyed an
+install, and the only security defect in the document.
 
----
+Phases 12–14 are tidying by comparison; stopping before them costs nothing but
+tidiness. Stopping mid-capability is safe by construction, because each owns its
+own `Clean`.
 
-## Phase 17 in detail — enforcement
+## Phase 15 in detail — enforcement
 
 A cleanup that is not enforced decays back. **Most of this mess was made by an
 agent that did not read what already existed**, so prevention has to work on
@@ -1130,7 +1086,8 @@ history:
 parameter which *names a safety property the body does not implement*, which is
 how `diskPath` came to be documented, passed, and ignored.
 
-Land a minimal config in **phase 1** so the refactor itself is gated while churn
+Land a minimal config in **phase 1** (with the `mise run lint` task that does not
+yet exist) so the refactor itself is gated while churn
 is highest; tighten thresholds here once the code is final.
 
 ### Tests that encode the invariants
@@ -1188,7 +1145,8 @@ for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
 done
 ```
 
-**Idempotency — run it twice.** Phase 10 adds it as a test; most needs no VM
+**Idempotency — run it twice.** Phase 4's contract and each capability's `Clean`
+make it checkable; most needs no VM
 (`Prune` twice, `Download` twice to an existing file, `BuildISO` twice against a
 fixture).
 
@@ -1197,8 +1155,8 @@ irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
 irgo-winvm iso -protect && irgo-winvm iso -protect
 ```
 
-**Phases 8, 9, 11 and 15 (*VM*)** — a green build means "compiles", not "works", and
-these paths fail silently. Phase 0 turns each of these into an assertion with a
+**The VM-verified capabilities (6–11)** — a green build means "compiles", not "works", and
+these paths fail silently. Phase 1 turns each of these into an assertion with a
 negative control; until it exists they are run by hand:
 
 ```sh
@@ -1210,8 +1168,8 @@ irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 The last must still report **~400 ms**. Seconds means a poll interval was lost —
 exactly how that bug happened the first time.
 
-**Once, at the end — a fresh install.** Nothing above exercises it, phases 8,
-9 and 10 all touch it, and it is the only path whose failure costs 45 minutes to
+**Once, at the end — a fresh install.** Nothing above exercises it, phases 9
+and 11 both touch it, and it is the only path whose failure costs 45 minutes to
 observe. Everything before it runs against clones of the golden image, so this
 is the single full install in the entire run:
 
@@ -1227,8 +1185,8 @@ Never against `irgo-win11`.
 ## Git strategy
 
 A branch per phase, merged only once verified. **CI cannot prove these phases
-correct** — the VM-dependent paths have no unit coverage until phase 6, and
-green means "compiles". Phase 0's harness is what closes that gap, which is why
+correct** — the VM-dependent paths have no unit coverage until phase 3, and
+green means "compiles". Phase 1's harness is what closes that gap, which is why
 it precedes every phase that changes behaviour.
 
 ```sh
@@ -1260,11 +1218,11 @@ So the split is by **kind of work**, not by convenience:
 
 | | use an agent | why |
 |---|---|---|
-| **read-only analysis** | **yes, heavily** | how phases 4, 8 and 13 were found at all — two agents reading 26 files line by line surfaced defects that four measurement passes missed |
+| **read-only analysis** | **yes, heavily** | how phases 2, 9 and 12 were found at all — two agents reading 26 files line by line surfaced defects that four measurement passes missed |
 | **review of a finished diff** | **yes, always** | an independent reader asking *who else performs this responsibility?* is the check that was missing every time |
 | mechanical phases (1, 2, 3, 16) | one at a time | narrow and CI-verifiable, but they overlap on `paths.go` and `run.go`, so concurrent worktrees would spend the saving on merge conflicts |
 | **architectural phases (6, 7, 13)** | **no** | one coherent design across every file; a brief narrow enough to delegate is narrower than the problem |
-| **VM-verified phases (8, 9, 11, 15)** | **no** | the verification is watching a real Windows install; an agent cannot see the screen |
+| **VM-verified capabilities (6–11)** | **the agent writes, the harness verifies** | before phase 1 these needed a person watching an install; after it they are assertions with negative controls, which is the entire purpose of building the harness first |
 
 **Do not run phases concurrently.** They are ordered by dependency, not by
 taste: 6 before everything risky, the API before the CLI, 13 before 15. The
@@ -1274,7 +1232,7 @@ repo of 6,700 lines does not repay breaking it.
 The pattern that does work, per phase:
 
 1. **Read** — an agent reads the files the phase touches and reports what is
-   there, including anything the plan got wrong. Phase 5 was decided twice
+   there, including anything the plan got wrong. Probe distribution was decided twice
    because the first answer reasoned from the tangle instead of finding it.
 2. **Write** — one agent, or the main session, with `AGENTS.md` and this phase's
    section in context. One concern, one branch.
@@ -1282,13 +1240,13 @@ The pattern that does work, per phase:
    stated goal, and is told to look for a second implementation of something
    that already exists. This is the adversarial step, and it is the one that
    catches the failure mode this whole document is about.
-4. **Verify** — phase 0's harness. Output into the merge commit.
+4. **Verify** — phase 1's harness. Output into the merge commit.
 
 Step 3 is the one to keep if any are dropped.
 
 ### The unattended loop
 
-With phase 0 in place the whole plan runs without a person. Per phase, in order,
+With phase 1 in place the whole plan runs without a person. Per phase, in order,
 never concurrently:
 
 ```
@@ -1315,12 +1273,12 @@ Four rules make walking away safe:
   from ~400 ms to seconds fails the phase. That regression happened once
   already, from a lost poll interval, and only a number caught it.
 
-- **The harness proves itself before it gates anything.** Phase 0 merges only
+- **The harness proves itself before it gates anything.** Phase 1 merges only
   when every assertion has failed against its own negative control at least
   once. A green harness that has never been red is an untested harness.
 
-**All seventeen phases run unattended.** Nothing in the refactor needs a person
-once phase 0 exists — that is the whole point of building it first.
+**All fifteen phases run unattended.** Nothing in the refactor needs a person
+once phase 1 exists — that is the whole point of building it first.
 
 The one act that stays outside the loop is **pushing the prepared glaze and
 native fixes to crgimenes**, because it is outward-facing and irreversible: it
@@ -1329,7 +1287,7 @@ technical limitation and it is not part of these phases — it is a single
 standing authorisation, given once, after which the ledger in `UPSTREAM.md` can
 be worked automatically like everything else.
 
-**One risk worth stating plainly.** Phases 6, 7 and 13 are design, not
+**One risk worth stating plainly.** Phases 3, 4 and 12 are design, not
 mechanism, and an unattended agent that designs them wrongly gets the rest of
 the plan built on the mistake. The mitigations are real but partial — blocking
 review, one revertable merge per phase, stop-on-red, and a harness with negative

@@ -75,6 +75,13 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	last := time.Now()
 	step := 0
 	const steps = 7
+
+	// bootWait is how long an already-installed VM gets to answer before
+	// vm-create gives up and says so. Two minutes, not ten: booting Windows
+	// takes under one, and anything longer is Update, which no amount of
+	// waiting inside this command improves — re-running is cheap and the
+	// screenshot says what it is doing.
+	const bootWait = 2 * time.Minute
 	begin := func(name string) {
 		step++
 		say("STEP %d/%d  %s", step, steps, name)
@@ -226,7 +233,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		if bundle, bErr := BundlePath(e.Name); bErr == nil {
 			if p := Inspect(e.UUID, bundle); p.BootEntryWritten {
 				begin("booting the Windows already on it")
-				if rErr := EnsureReady(e.UUID, bundle, 10*time.Minute, say); rErr != nil {
+				if rErr := EnsureReady(e.UUID, bundle, bootWait, say); rErr != nil {
 					return res, stage("boot Windows", false, "", rErr)
 				}
 				res.Ready = true
@@ -792,21 +799,25 @@ func Inspect(vmRef, bundlePath string) Progress {
 	if used, ok := diskUsage(diskPath); ok {
 		p.DiskMiB = used >> 20
 	}
-	if st, err := os.Stat(bundlePath + "/Data/efi_vars.fd"); err == nil {
-		// Written well after creation means the guest, not UTM, wrote it.
-		if bi, err2 := os.Stat(bundlePath + "/config.plist"); err2 == nil {
-			p.BootEntryWritten = st.ModTime().After(bi.ModTime().Add(time.Minute))
-			// Corroborated by the disk, because the mtime alone is a guess: UTM
-			// writes efi_vars.fd on the FIRST power-on, so a bundle merely
-			// booted once with no Windows on it satisfied the comparison and
-			// reported an install that had never happened. Windows cannot have
-			// registered a boot entry without having written the disk, so a
-			// disk below the copy threshold refutes it.
-			if p.BootEntryWritten && p.DiskMiB < copyingMiB {
-				p.BootEntryWritten = false
-			}
-		}
+	// Installed is answered by the DISK, not by file timestamps.
+	//
+	// This compared efi_vars.fd's mtime against config.plist's, needing a full
+	// minute between them. Both are wrong in both directions: UTM writes
+	// efi_vars.fd on every power-on, so a VM merely booted once looked
+	// installed; and anything that rewrites config.plist — a settings change in
+	// UTM's UI, or this tool ejecting the install medium — made a genuinely
+	// installed VM look empty. That second case is not hypothetical: ejecting
+	// the disc is now part of the install, and it broke the check that decides
+	// whether to reinstall, under a comment saying reinstalling would destroy
+	// the VM.
+	//
+	// Windows cannot register a boot entry without writing the disk, and
+	// nothing else writes gigabytes to it. The firmware variables file existing
+	// at all confirms the machine has been powered on.
+	if _, err := os.Stat(bundlePath + "/Data/efi_vars.fd"); err == nil {
+		p.BootEntryWritten = p.DiskMiB >= copyingMiB
 	}
+
 	p.AgentUp = Named(vmRef).AgentReady()
 
 	switch {

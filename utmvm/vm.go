@@ -481,10 +481,38 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 			return nil
 		}
 		shot("no-agent")
+
+		// Stop here rather than driving the boot.
+		//
+		// A guest that started and then went quiet is usually Windows Update,
+		// which reboots itself and takes the agent with it. Typing at that is
+		// the accident this project has a chapter about, and it wastes ten
+		// minutes before failing. The screenshot above says which it is, and
+		// re-running is cheap.
+		return fmt.Errorf("%s started but has not answered in %s.\n"+
+			"  It is probably Windows Update; look at the screenshot above.\n"+
+			"  Re-run vm-create when it settles, or use vm-screen to watch", vmRef, timeout)
 	}
-	// Running but unreachable means it is sitting in the UEFI shell after a
-	// reboot. Drive it out the same way an install would.
-	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout, Log: os.Stdout})
+	// Already running and not answering: DO NOT TYPE.
+	//
+	// This used to hand off to RunInstall, which drives the UEFI shell. But a
+	// running VM that will not answer is ambiguous — it may be at a shell after
+	// a reboot, or it may be a perfectly good Windows desktop whose agent is
+	// busy, and nothing here can tell the two apart.
+	//
+	// It guessed wrong, on this machine, and the evidence is a screenshot of
+	// Edge with three tabs open searching Bing for
+	// "fs2:\efi\microsoft\boot\bootmgfw.efi" — the boot path, typed into the
+	// address bar of a logged-in desktop while Windows Update ran. The same
+	// keystrokes into Setup once destroyed an install.
+	//
+	// Typing is only safe when this code started the VM and knows it is booting
+	// from the install medium, which is RunInstall's job, not this one.
+	shot("running-no-agent")
+	return fmt.Errorf("%s is running but not answering after %s.\n"+
+		"  Not typing at it: a running VM may be a working desktop whose agent\n"+
+		"  is busy, and keystrokes meant for a boot prompt land in whatever has\n"+
+		"  focus. Look at the screenshot above, or run vm-screen", vmRef, timeout)
 }
 
 // utmContainerDir is UTM's sandbox container, where it keeps everything it

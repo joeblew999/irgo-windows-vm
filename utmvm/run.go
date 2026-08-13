@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// ---- from run.go ----
 // guestTemp is where pushed binaries and captured output live in the guest.
 // C:\Windows\Temp rather than the user profile: it exists on every install and
 // does not depend on which account the agent runs as.
@@ -384,7 +383,6 @@ func RunClean(vmRef string, binaries ...string) error {
 	return nil
 }
 
-// ---- from payload.go ----
 // The answer file and boot script are embedded so the binary is self-contained:
 // a developer clones, builds, runs. Shipping them as loose files next to the
 // executable is how tools break when moved.

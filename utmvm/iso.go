@@ -25,7 +25,6 @@ import (
 	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 )
 
-// ---- from catalog.go ----
 // Microsoft's Media Creation Tool catalog: where Windows install media actually
 // comes from, without a browser and without being told no.
 //
@@ -378,7 +377,6 @@ func FilterCatalog(all []CatalogEntry, arch, lang, edition string) []CatalogEntr
 	return out
 }
 
-// ---- from fetch.go ----
 // Downloading install media, with the two properties the GUI route does not
 // give you: it says what the bytes should hash to, and it cannot destroy the
 // media you already have.
@@ -564,7 +562,6 @@ func refuseUnsafeDest(dest string) error {
 	return fmt.Errorf("%s\n  Move it aside, or choose another -o path. This will not overwrite it.", msg)
 }
 
-// ---- from iso.go ----
 // ISOInfo is what we can learn about Windows install media without mounting it.
 type ISOInfo struct {
 	// IsARM64 reports whether the ARM64 UEFI bootloader is present. An x86-64
@@ -685,7 +682,6 @@ func encode16be(s string) []byte {
 	return out
 }
 
-// ---- from isobuild.go ----
 // Building bootable Windows ARM64 media, as a command rather than a recipe.
 //
 // The steps are not hard. Getting them wrong is silent, which is why they are
@@ -1007,7 +1003,6 @@ func BuildISO(opts RemasterOptions, paths Paths) error {
 	return nil
 }
 
-// ---- from isoimage.go ----
 // BuildISOImage writes an ISO9660 image containing srcDir.
 //
 // The answer file must be on an ISO9660 CD, not a FAT disk. This is not a
@@ -1138,7 +1133,6 @@ func copyIntoISO(fs filesystem.FileSystem, hostPath, target string) error {
 	return nil
 }
 
-// ---- from isoguard.go ----
 // Protecting the working ISO from the tooling that will replace it.
 //
 // The Windows ISO is hardlinked, deliberately: ~/Downloads has the download,

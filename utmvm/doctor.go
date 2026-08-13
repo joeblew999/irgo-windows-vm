@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// ---- from ensure.go ----
 // AppPath is where UTM is installed.
 const AppPath = "/Applications/UTM.app"
 
@@ -213,7 +212,6 @@ func GuestToolsISO() (string, error) {
 	return p, nil
 }
 
-// ---- from installutm.go ----
 // Installing UTM from nothing.
 //
 // The promise this project makes is that a developer runs one binary on a
@@ -375,7 +373,6 @@ func (t *Tool) Ensure() error {
 	return fmt.Errorf("%s is needed to %s.\n  Install it: %s", t.Name, t.Why, t.Install())
 }
 
-// ---- from host.go ----
 // Target is a desktop build a developer might need to run.
 type Target string
 
@@ -452,7 +449,6 @@ func CanCreateVMs() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
 }
 
-// ---- from external.go ----
 // Everything this project depends on that does not live in the repository.
 //
 // There is a lot of it, it is large, and none of it is in git — so a clone is
@@ -730,7 +726,6 @@ func Home(p string) string {
 	return p
 }
 
-// ---- from diskspace.go ----
 // A Windows 11 install consumes roughly this much once it settles. The sparse
 // disk starts near zero, so the free-space figure at creation time is
 // misleading — the cost arrives later, during install, when failing is most

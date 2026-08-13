@@ -716,7 +716,9 @@ the fix, and it is the checklist a phase closes against:
 | `control.go:61`'s backwards fallback; doc comments on wrong declarations; `NewConfig` | owning capability |
 
 
-**1 — The harness.** The whole plan is to run unattended, and exactly one thing
+### Phase 1 in detail — the harness
+
+The whole plan is to run unattended, and exactly one thing
 prevents that: four phases are verified by a person watching Windows install.
 That is not a property of the work. It is the absence of assertions — and it is
 why these bugs survived, because `BootAssistWatched` ignoring the disk it exists
@@ -852,7 +854,7 @@ already exist.**
 And the phases do not each need their own Windows. They need *an* installed
 Windows that answers. So:
 
-> **One test VM, created once, reused across all seventeen phases.**
+> **One test VM, created once, reused across all fifteen phases.**
 
 That is the whole strategy. It requires no new code, and phase 11 is what makes
 the idempotency it leans on trustworthy.
@@ -1211,8 +1213,8 @@ exactly how that bug happened the first time.
 
 **Once, at the end — a fresh install.** Nothing above exercises it, phases 9
 and 11 both touch it, and it is the only path whose failure costs 45 minutes to
-observe. Everything before it runs against clones of the golden image, so this
-is the single full install in the entire run:
+observe. Everything before it runs against the one reused test VM, so this is
+the single *fresh* install outside phase 9's experiments:
 
 ```sh
 irgo-winvm setup -vm refactor-test -install     # ~45 min, unattended

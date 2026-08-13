@@ -516,6 +516,29 @@ run with zero arguments.
   the wait loop just ends after 30 s, then `RemoveAll` runs on a live QEMU —
   exactly the scenario the doc comment says the ordering exists to prevent.
 
+**A phantom entry cannot be cleared with `utmctl`, and its failure is silent.**
+Measured on this machine, not reasoned. `snap-test` was registered in UTM with
+no bundle on disk — the exact state `cleanup.go:78` warns of, *"UTM is left with
+a phantom entry"*. Deleting it:
+
+```
+$ utmctl delete 7D3B3DFF-…
+Error from event: The operation couldn't be completed. (OSStatus error -2700.)
+"snap-test.utm" couldn't be removed.
+$ echo $?
+0
+```
+
+Two defects in four lines. **`utmctl delete` reports failure and exits 0**, so
+`Delete` cannot detect it — the same class as `utmctl exec` always exiting 0,
+already recorded for `run.go`. And UTM refuses to drop the registry entry
+because it cannot remove a bundle that is not there, so the tool has no path out
+of a state its own behaviour produces.
+
+The recovery, which belongs in a comment beside `Delete`: recreate an empty stub
+at the expected bundle path, then delete again. UTM removes the stub and drops
+the entry. That worked here and left the running VM untouched.
+
 **And protecting the ISO makes the VM undeletable.** `setup` sets `uchg` on the
 ISO inode *before* `Create` hardlinks that same inode into the bundle. The flag
 is per-inode, so `os.RemoveAll` fails with `EPERM` on any bundle whose ISO was
@@ -702,6 +725,7 @@ the fix, and it is the checklist a phase closes against:
 | download length/fsync/rename-clobber; `mkisofs` `-b`; `ExpandESD` appending; `iso` scanning `.` | 6 |
 | `ProtectISO` defeating its own hardlink; unprotect-before-delete | 6 + 7 |
 | `Delete` by display name not UUID; proceeding after a failed stop; `randomMAC` | 7 |
+| **`utmctl delete` exits 0 on failure**; a phantom entry is unrecoverable through `utmctl` | 7 |
 | **all six `Prune` defects**, including the `"irgo-"` catch-all and mis-counted `freed` | 7 |
 | `BundlePath(name)`; bundle layout concatenated in the CLI four times | 7 |
 | `RestartUTM` quitting with VMs running; `WaitForAgentEvery` never probing | 8 |

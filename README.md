@@ -23,9 +23,12 @@ than leaving the machine somewhere between two states.
 
 | stage | what it gets you | undo |
 |---|---|---|
-| **iso** | the Windows media, downloaded from Microsoft or built from an `.esd` | `iso-delete` |
-| **vm** | a Windows VM that answers | `vm-delete` |
-| **run** | your binary, executed in the guest, output back | `run-delete` |
+| **`iso-create`** | the Windows media, downloaded from Microsoft or built from an `.esd` | `iso-delete` |
+| **`vm-create`** | a Windows VM that answers, installed from that media | `vm-delete` |
+| **`run`** | your binary, executed in the guest, output back | `run-delete` |
+
+They run in that order. `vm-create` does not fetch media — it says to run
+`iso-create` first, because a stage that runs another stage is not a stage.
 
 `doctor` reports what is present and changes nothing.
 

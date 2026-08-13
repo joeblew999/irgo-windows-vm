@@ -23,6 +23,14 @@ run = [
   "GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
 ]
 
+[tasks."vm:create"]
+description = "irgo-winvm vm-create"
+run = "go run ./cmd/irgo-winvm vm-create"
+
+[tasks."vm:delete"]
+description = "irgo-winvm vm-delete"
+run = "go run ./cmd/irgo-winvm vm-delete"
+
 [tasks."iso:create"]
 description = "irgo-winvm iso-create"
 run = "go run ./cmd/irgo-winvm iso-create"

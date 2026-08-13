@@ -27,12 +27,14 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `irgo-winvm — a Windows VM on Apple Silicon, and your binaries on it.
 
-  vm           nothing -> a Windows VM that answers
-  vm-delete    -> back to nothing
-  run          put a binary on it and run it
-  run-delete   -> remove what run put there
-  iso-create   get the Windows media (download or build)
-  iso-delete   -> remove it
+  iso-create   the Windows media, downloaded from Microsoft or built
+  vm-create    a Windows VM that answers, installed from that media
+  run          put a binary on the VM and run it
+
+  iso-delete   -> remove the media
+  vm-delete    -> remove the VM
+  run-delete   -> remove what run put on the guest
+
   doctor       what is here; changes nothing
 
 Every command takes -h.
@@ -45,8 +47,8 @@ func run(args []string) error {
 		return fmt.Errorf("no subcommand given")
 	}
 	switch args[0] {
-	case "vm":
-		return runVM(args[1:])
+	case "vm-create":
+		return runVMCreate(args[1:])
 	case "vm-delete":
 		return runVMDelete(args[1:])
 	case "run":
@@ -75,8 +77,8 @@ func run(args []string) error {
 // alone. Every stage is idempotent, so running it twice is safe and the second
 // run takes seconds — which matters because the two expensive stages are a
 // 4.2 GB download and a 45-minute install.
-func runVM(args []string) error {
-	fs := flag.NewFlagSet("vm", flag.ContinueOnError)
+func runVMCreate(args []string) error {
+	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	var (
 		name    = fs.String("vm", "irgo-win11", "VM name")
 		stage   = fs.String("stage", "", "directory of binaries to put on the install medium")

@@ -5,8 +5,9 @@ any list of where things live goes stale the day someone moves them.
 
 ## Three stages, isolated
 
-`iso` gets the Windows media. `vm` makes a VM. `run` puts a binary on it. Each
-has an undo, and each owns its own paths and constants in its own files:
+`iso-create` gets the Windows media. `vm-create` makes a VM from it. `run` puts
+a binary on that. Each has an undo, and each owns its own paths and constants in
+its own files:
 
 - **iso** knows nothing about UTM. It is a download from Microsoft and an ISO
   built with `xorriso`, and it works on a machine that has never had a

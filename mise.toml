@@ -35,11 +35,20 @@ run = "go run ./cmd/irgo-winvm iso-delete"
 description = "The ISO tests, plus the mutations that prove they verify anything"
 run = '''
 set -e
+REPO=$PWD
 go test ./utmvm/ -run 'TestVerdict|TestInspectISO|TestProtect|TestISOLinks|TestISO' -v
 
+# Mutations edit source files, so they run on a throwaway copy of HEAD and
+# never in your checkout. The first version edited the real files and restored
+# them on exit, which is one interrupt away from leaving broken code in place —
+# and it happened: a commit landed carrying a disabled mtime check, exactly the
+# defect these mutations exist to catch.
+#
+# The trap removes the worktree on any exit, including Ctrl-C, and prunes the
+# registry so an interrupted run leaves nothing behind.
 W=$(mktemp -d)/mut
 git worktree add -q --detach "$W" HEAD
-trap 'git worktree remove --force "$W" >/dev/null 2>&1 || true' EXIT
+trap 'cd / ; git -C "$REPO" worktree remove --force "$W" >/dev/null 2>&1; git -C "$REPO" worktree prune' EXIT
 cd "$W"
 
 echo

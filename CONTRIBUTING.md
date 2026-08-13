@@ -107,7 +107,21 @@ The checksums are reproducible: `mise run go:build` on the same tag produces
 byte-identical binaries, which is why `-buildvcs=false` is there. If you change
 the build, check that is still true rather than assuming it.
 
-## Not settled yet
+## Licence
 
-- There is **no LICENSE file**. Until there is, nobody has been told what they
-  may do with this, so add one before the repository goes public.
+MIT — see [LICENSE](LICENSE). A contribution is offered under it.
+
+The dependencies that link into the published binary were checked against that
+before it was chosen, because the licence is a claim about the whole artefact
+and not just the code in this repository. All permissive, nothing copyleft
+anywhere in the module graph:
+
+| licence | modules |
+|---|---|
+| MIT | `anchore/go-lzo`, `diskfs/go-diskfs`, `djherbis/times`, `sirupsen/logrus` |
+| BSD | `elliotwutingfeng/asciiset`, `google/uuid`, `pierrec/lz4`, `pkg/xattr`, `ulikunitz/xz`, `golang.org/x/sys` |
+| Apache-2.0 | `klauspost/compress` |
+
+The Apache-2.0 one is the only one with a condition beyond attribution, and it
+ships no `NOTICE` file, so there is nothing to carry. Re-check this if you add a
+dependency — `go list -deps ./cmd/irgo-winvm` is what actually reaches a user.

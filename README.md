@@ -81,3 +81,5 @@ starts from nothing.
   organised, and every trap that cost hours.
 - **[RESULTS.md](RESULTS.md)** — what has been measured, dated.
 - **[UPSTREAM.md](UPSTREAM.md)** — what was found and where it was fixed.
+
+MIT licensed — see [LICENSE](LICENSE).

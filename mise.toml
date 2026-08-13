@@ -314,6 +314,14 @@ run = "go run ./cmd/irgo-winvm vm-create"
 description = "irgo-winvm vm-delete"
 run = "go run ./cmd/irgo-winvm vm-delete"
 
+[tasks."vm:shots"]
+description = "Publish the newest shot of each stage into docs/screens/vm"
+# The tool photographs every stage into ~/Library/.../shots as it runs, but
+# those names carry a timestamp, so nothing in a README can point at one. This
+# copies the newest of each stage in under its stage name, which is what the
+# docs reference. No file is ever copied by hand.
+run = "go run ./cmd/irgo-winvm vm-screen -promote {{config_root}}/docs/screens/vm"
+
 [tasks."vm:screen"]
 description = "irgo-winvm vm-screen"
 run = "go run ./cmd/irgo-winvm vm-screen"

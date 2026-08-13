@@ -83,19 +83,22 @@ Not mock-ups. A Mac built the installer, installed Windows on it unattended,
 and photographed the result — including the failure that put three Bing tabs on
 the desktop.
 
-Each stage of `vm-create`, photographed as it ran:
+Every one of these was taken by the tool itself, named for the stage that
+produced it. Nothing was staged, cropped, or copied across by hand —
+`mise run vm:shots` publishes the newest shot of each stage:
 
-| | |
+| stage | |
 |---|---|
-| ![Windows 11 installing unattended](docs/screens/vm/installing-windows.png) | ![The VM booting](docs/screens/vm/booting.png) |
-| **`vm-create -install`** — Windows installing, unattended | **booting** — nobody typed anything |
-| ![The desktop, ready](docs/screens/vm/desktop-ready.png) | ![glaze-all running on Windows ARM64](docs/screens/glaze/glaze-all-every-capability.png) |
-| **ready** — the guest agent is answering | **`app-create -gui`** — a Go app on Windows ARM64 |
+| `booting-1` — UEFI firmware, before Windows | ![booting-1](docs/screens/vm/booting-1.png) |
+| `booting-2` — Windows starting | ![booting-2](docs/screens/vm/booting-2.png) |
+| `ready` — the guest agent answers | ![ready](docs/screens/vm/ready.png) |
+| `copying` — an unattended install, mid-flight | ![copying](docs/screens/vm/copying.png) |
+| `finalising` — copy done, first logon | ![finalising](docs/screens/vm/finalising.png) |
+| `stalled-1` — an install that stopped moving | ![stalled-1](docs/screens/vm/stalled-1.png) |
+| `running-no-agent` — the failure it now refuses to cause | ![running-no-agent](docs/screens/vm/running-no-agent.png) |
 
-That last one is the point of the whole repository: a program built on the Mac,
-running on real Windows, exercising the clipboard, a tray icon, a native menu
-bar, file dialogs and `openurl` — every one of which can only be checked by
-running it there.
+`booting-N` repeats every few seconds until the agent answers, so a boot that
+hangs leaves a picture of exactly where it stopped.
 
 Every stage photographs itself as it runs, because from the host a stuck boot
 and a working one look identical. Those go to `shots/` outside the repository;

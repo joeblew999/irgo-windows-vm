@@ -583,10 +583,29 @@ func runVMScreen(args []string) error {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
 	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
 	out := fs.String("o", "", "where to write the PNG (default: the shots directory)")
+	promote := fs.String("promote", "", "copy the newest shot of each stage into this directory, named for the stage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	say := utmvm.Printer("vm-screen")
+
+	// Promoting takes no new picture. It publishes the ones the run already
+	// took, under stable names, because runtime shots are timestamped and
+	// nothing in a README can reference a filename that changes every boot.
+	if *promote != "" {
+		stages, err := utmvm.Promote(*promote)
+		if err != nil {
+			return err
+		}
+		say("from:   %s", utmvm.Home(utmvm.ShotDir()))
+		say("into:   %s", utmvm.Home(*promote))
+		for _, s := range stages {
+			say("  · %s.png", s)
+		}
+		say("%d stage(s) published", len(stages))
+		return nil
+	}
+
 	say("vm:     %s", *name)
 
 	// Into shots/, outside the repository, and timestamped.

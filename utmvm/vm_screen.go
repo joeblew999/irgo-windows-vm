@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +129,79 @@ const (
 
 // ShotDir is where runtime screenshots are written.
 func ShotDir() string { return filepath.Join(appRoot(), shotDirName) }
+
+// shotName matches what Shot writes: <vm>-<YYYYMMDD>-<HHMMSS>-<stage>.png.
+//
+// The stage is everything after the timestamp, so one containing a dash —
+// running-no-agent, booting-1 — survives intact.
+var shotName = regexp.MustCompile(`-\d{8}-\d{6}-(.+)\.png$`)
+
+// Promote copies the most recent shot of each stage into dstDir, named for the
+// stage alone.
+//
+// Runtime shots are timestamped, which is right for a record of every run and
+// useless for documentation: nothing can reference
+// irgo-win11-20260813-201225-booting-1.png, because the next boot writes a
+// different name. So the pictures in the README were being copied across by
+// hand, which is a manual step nobody will remember and which quietly goes
+// stale the moment the tool's behaviour changes.
+//
+// Newest per stage, so a run that ends in `ready` replaces the previous run's
+// `ready` and a stage that stopped happening keeps its last known picture
+// rather than vanishing.
+func Promote(dstDir string) ([]string, error) {
+	entries, err := os.ReadDir(ShotDir())
+	if err != nil {
+		return nil, err
+	}
+	// Filename is <vm>-<date>-<time>-<stage>.png, and the stage is what matters.
+	// Read back to front: a VM name may contain dashes, a stage does not.
+	newest := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".png") {
+			continue
+		}
+		// Anchored on the timestamp, which is the only fixed-width part of the
+		// name. Counting dashes from the end does not work: it took the last
+		// segment as the stage, so `running-no-agent` was published as
+		// `agent.png` and `vm-screen` as `screen.png` — two files named after
+		// the tail of a word.
+		m := shotName.FindStringSubmatch(name)
+		if m == nil {
+			continue
+		}
+		stage := m[1]
+		// Names sort chronologically because the timestamp is fixed-width, so
+		// the greatest string is the most recent without stat'ing anything.
+		if name > newest[stage] {
+			newest[stage] = name
+		}
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return nil, err
+	}
+	var done []string
+	for stage, src := range newest {
+		dst := filepath.Join(dstDir, stage+".png")
+		if cErr := copyShot(filepath.Join(ShotDir(), src), dst); cErr != nil {
+			return nil, cErr
+		}
+		done = append(done, stage)
+	}
+	sort.Strings(done)
+	return done, nil
+}
+
+func copyShot(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	// Checked: a short write leaves a truncated PNG, which renders as a broken
+	// image in the README rather than as an error anybody sees.
+	return os.WriteFile(dst, b, 0o644)
+}
 
 // Shot photographs a VM at a named point in a run and returns the path.
 //

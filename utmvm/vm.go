@@ -257,26 +257,44 @@ func (v VM) AgentReady() bool {
 	return err == nil
 }
 
-// waitForAgent blocks until the guest agent answers or the timeout elapses.
+// waitForAgentEvery blocks until the guest agent answers or the timeout
+// elapses, polling at the given interval.
 //
 // This is the honest "is the VM actually usable" check. Status reports
 // "started" the instant QEMU launches, long before Windows has booted — so
 // polling status tells you nothing about whether you can do anything with it.
-func (v VM) waitForAgent(timeout time.Duration) error {
-	return v.waitForAgentEvery(timeout, 10*time.Second)
-}
-
-// waitForAgentEvery is waitForAgent with the poll interval exposed.
+//
+// There was a no-interval waitForAgent wrapping this with ten seconds. Its only
+// caller now photographs each poll and passes its own interval, which left the
+// wrapper unused — three layers to express two things.
 //
 // The interval matters more than it looks, because the two things worth waiting
 // for differ by two orders of magnitude: a cold boot takes about a minute, so
 // polling every ten seconds costs nothing, while a resume is back in ~400 ms
 // and a ten-second poll would report it as four hundred times slower than it is.
 func (v VM) waitForAgentEvery(timeout, interval time.Duration) error {
+	return v.waitForAgentTicking(timeout, interval, nil)
+}
+
+// bootPollEvery is how often a boot is photographed while it is waited on.
+//
+// Five seconds across a minute-long boot is a dozen frames, which is enough to
+// see where it stopped and few enough that the directory still reads as a
+// sequence rather than a flip-book.
+const bootPollEvery = 5 * time.Second
+
+// waitForAgentTicking is waitForAgentEvery with something to do on each poll.
+//
+// tick runs before every wait, including the first, so the caller gets a frame
+// of the very start rather than only of what came after the first interval.
+func (v VM) waitForAgentTicking(timeout, interval time.Duration, tick func()) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if v.AgentReady() {
 			return nil
+		}
+		if tick != nil {
+			tick()
 		}
 		time.Sleep(interval)
 	}
@@ -490,8 +508,24 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 			return err
 		}
 		say("waiting up to %s for Windows to answer", timeout)
-		shot("booting")
-		if err := vm.waitForAgent(timeout); err == nil {
+
+		// Photographed as it goes, not once at each end.
+		//
+		// A boot took two shots: "booting" the instant the window opened, and
+		// "ready" when the agent answered. Everything between them — the
+		// firmware menu, the Windows logo, the spinner, the lock screen — went
+		// unrecorded, so the one part anybody wants to see when a boot hangs was
+		// the part with no pictures of it.
+		//
+		// Numbered rather than named, because nothing here can tell a lock
+		// screen from a logo: the host sees pixels and the guest is not
+		// answering yet, which is the whole reason for looking.
+		n := 0
+		err := vm.waitForAgentTicking(timeout, bootPollEvery, func() {
+			n++
+			shot(fmt.Sprintf("booting-%d", n))
+		})
+		if err == nil {
 			shot("ready")
 			return nil
 		}

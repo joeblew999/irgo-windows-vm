@@ -225,7 +225,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		if bundle, bErr := BundlePath(e.Name); bErr == nil {
 			if p := Inspect(e.UUID, bundle); p.BootEntryWritten {
 				begin("booting the Windows already on it")
-				if rErr := EnsureReady(e.UUID, bundle, 10*time.Minute); rErr != nil {
+				if rErr := EnsureReady(e.UUID, bundle, 10*time.Minute, say); rErr != nil {
 					return res, stage("boot Windows", false, "", rErr)
 				}
 				res.Ready = true
@@ -266,7 +266,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	// answer when it did not.
 	if Inspect(e.UUID, bundle).BootEntryWritten {
 		say("          it looks installed — booting to find out")
-		if rErr := EnsureReady(e.UUID, bundle, opts.Timeout); rErr != nil {
+		if rErr := EnsureReady(e.UUID, bundle, opts.Timeout, say); rErr != nil {
 			return res, stage("boot Windows", false, "", rErr)
 		}
 		res.Ready = true

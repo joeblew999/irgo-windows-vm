@@ -270,7 +270,8 @@ func runVMDelete(args []string) error {
 
 // runRun is the inner loop: build on the Mac, run on Windows, read output back.
 func runAppCreate(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	say := utmvm.Printer("app-create")
+	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
 	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
 	name := fs.String("vm", "", "VM name or UUID (required)")
 	gui := fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
@@ -291,8 +292,8 @@ func runAppCreate(args []string) error {
 	// — Windows Update does it — and lands back in the UEFI shell, so a run
 	// cannot assume the VM is still reachable just because it was earlier.
 	if !vm.AgentReady() {
-		fmt.Fprintln(os.Stderr, "VM not answering; recovering...")
-		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute); err != nil {
+		say("VM not answering; recovering")
+		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute, say); err != nil {
 			return err
 		}
 	}

@@ -453,7 +453,22 @@ const AppPath = utmAppPath
 // reliably auto-boot afterwards. So "is the VM ready" cannot be assumed just
 // because it was ready a minute ago, and every entry point that talks to the
 // guest has to be able to recover rather than fail.
-func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
+func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(string, ...any)) error {
+	say := func(f string, a ...any) {
+		if log != nil {
+			log(f, a...)
+		}
+	}
+	// Photographed at each turn, like the install is. Booting is where a VM
+	// hangs, and this path had no pictures at all: it waits up to ten minutes
+	// for an agent that may never answer, and the only evidence of what the
+	// screen said was gone by the time anyone asked.
+	shot := func(stage string) {
+		if p, err := Shot(vmRef, stage); err == nil {
+			say("   %s", Home(p))
+		}
+	}
+
 	vm := Named(vmRef)
 	if vm.AgentReady() {
 		return nil
@@ -464,13 +479,17 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
 		if err := vm.StartWithDisplay(); err != nil {
 			return err
 		}
+		say("waiting up to %s for Windows to answer", timeout)
+		shot("booting")
 		if err := vm.waitForAgent(timeout); err == nil {
+			shot("ready")
 			return nil
 		}
+		shot("no-agent")
 	}
 	// Running but unreachable means it is sitting in the UEFI shell after a
 	// reboot. Drive it out the same way an install would.
-	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout})
+	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout, Log: os.Stdout})
 }
 
 // utmContainerDir is UTM's sandbox container, where it keeps everything it

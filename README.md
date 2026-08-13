@@ -79,7 +79,7 @@ published hash:
 brew install wimlib xorriso        # the only two external tools, ever
 irgo-winvm fetch-iso -o win11.esd  # from Microsoft's catalog, SHA-1 checked
 irgo-winvm build-iso -esd win11.esd
-irgo-winvm iso -protect            # do this once; see below
+irgo-winvm iso-create              # download or build the Windows media
 ```
 
 This is **verified**: an ISO built this way boots UTM straight into Windows

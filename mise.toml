@@ -3,9 +3,9 @@
 # The iso:* tasks are the CLI commands and nothing else. If a task here does
 # more than call the binary, that logic belongs in the binary.
 
-[tasks."iso:get"]
-description = "irgo-winvm iso"
-run = "go run ./cmd/irgo-winvm iso"
+[tasks."iso:create"]
+description = "irgo-winvm iso-create"
+run = "go run ./cmd/irgo-winvm iso-create"
 
 [tasks."iso:delete"]
 description = "irgo-winvm iso-delete"

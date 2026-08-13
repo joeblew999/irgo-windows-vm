@@ -32,7 +32,7 @@ func usage() {
   vm-delete    -> back to nothing
   run          put a binary on it and run it
   run-delete   -> remove what run put there
-  iso          get the Windows media (download or build)
+  iso-create   get the Windows media (download or build)
   iso-delete   -> remove it
   doctor       what is here; changes nothing
 
@@ -54,8 +54,8 @@ func run(args []string) error {
 		return runRun(args[1:])
 	case "run-delete":
 		return runRunDelete(args[1:])
-	case "iso":
-		return runISO(args[1:])
+	case "iso-create":
+		return runISOCreate(args[1:])
 	case "iso-delete":
 		return runISODelete(args[1:])
 	case "doctor":
@@ -398,8 +398,8 @@ func runRunDelete(args []string) error {
 
 // runISO gets the Windows media, which is the slowest and most rate-limited
 // step in `vm`. Separate so it can be done once and kept.
-func runISO(args []string) error {
-	fs := flag.NewFlagSet("iso", flag.ExitOnError)
+func runISOCreate(args []string) error {
+	fs := flag.NewFlagSet("iso-create", flag.ExitOnError)
 	fetch := fs.Bool("fetch", false, "download from Microsoft (~4.2 GB) if nothing local works")
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -192,10 +192,16 @@ If you touch boot, run, media or setup:
 ```sh
 mise run check                                     # never sufficient on its own
 irgo-winvm setup                                   # must skip every stage
-irgo-winvm run -timeout 3m -vm irgo-win11 .bin/nativeprobe-arm64.exe
-irgo-winvm run -gui -timeout 4m -vm irgo-win11 .bin/glaze-verifyevents-arm64.exe
+irgo-winvm run -timeout 3m -vm $TESTVM .bin/nativeprobe-arm64.exe
+irgo-winvm run -gui -timeout 4m -vm $TESTVM .bin/glaze-verifyevents-arm64.exe
 irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11   # ~400 ms
 ```
+
+**`run` goes to a disposable VM, never `irgo-win11`.** It pushes a binary into
+the guest and executes it, which is a mutation, and losing a 45-minute install
+to a test is not a trade worth making. `suspend`/`resume` is the exception and
+stays: it changes no persistent state, and `RESULTS.md`'s ~400 ms is measured
+against that VM.
 
 `RESULTS.md` is the contract. If a number there changes, either you broke
 something or you have a new measurement to record — decide which before
@@ -216,5 +222,7 @@ hides it.
   running a real install. UTM rejects a bad config with one generic *"cannot
   import this VM"* that names no field; `config_test.go` exists because that
   failure is undebuggable.
-- Add an exported symbol the CLI does not use. The package has one consumer.
+- Add an exported symbol nothing uses. `utmvm`'s consumers are the CLI, the
+  probe suite, and the verification harness — check all three before assuming a
+  symbol is needed, and all three before assuming it is not.
 - Land a refactor in one commit. One concern per commit, each verified.

@@ -40,14 +40,9 @@ const (
 	// finished installing.
 	utmctlTimeout = 20 * time.Second
 
-	// agentProbeCmd is the cheapest thing that proves the guest can execute.
-	// Its output is checked, because utmctl exec exits 0 either way.
-	agentProbeToken = "irgo-agent-ok"
-	agentProbeCmd   = "cmd.exe /c echo " + agentProbeToken
-
-	// agentProbeTimeout is short: this is asked in a loop, and a guest that
-	// cannot answer in a few seconds is not answering.
-	agentProbeTimeout = 10 * time.Second
+	// guestExecTimeout bounds a real guest command. Longer than the probe
+	// because callers run actual work through it.
+	guestExecTimeout = 10 * time.Minute
 
 	// What goes inside a bundle we generate.
 	bundleExt   = ".utm"
@@ -207,13 +202,22 @@ func (v VM) IPAddress() ([]string, error) {
 
 // Exec runs a command in the guest and returns its output. Requires the guest
 // agent.
-func (v VM) Exec(cmdline ...string) (string, error) {
+func (v VM) Exec(cmdline ...string) (string, error) { return v.execFor(guestExecTimeout, cmdline...) }
+
+// execFor is Exec with a deadline. Guest commands hang rather than fail when
+// the agent is absent, so every one of them needs a bound.
+func (v VM) execFor(d time.Duration, cmdline ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
 	args := append([]string{"exec", v.Ref, "--cmd"}, cmdline...)
-	cmd := exec.Command(utmctlPath(), args...)
+	cmd := exec.CommandContext(ctx, utmctlPath(), args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	combined := strings.TrimSpace(out.String() + errb.String())
+	if ctx.Err() != nil {
+		return combined, fmt.Errorf("exec in guest: gave up after %s", d)
+	}
 	if err != nil {
 		return combined, fmt.Errorf("exec in guest: %w: %s", err, combined)
 	}
@@ -222,24 +226,24 @@ func (v VM) Exec(cmdline ...string) (string, error) {
 
 // AgentReady reports whether the guest agent is answering.
 func (v VM) AgentReady() bool {
-	// Tests what callers actually need: the ability to RUN something.
+	// Asked by IP address, which is the only utmctl call that returns something
+	// checkable.
 	//
-	// This used to ask for an IP address, and the two come up at different
-	// times. Measured minutes apart on one VM: ip-address answered while exec
-	// failed, and earlier exec worked while ip-address failed. So vm-create
-	// said "ready" for a guest app-create could not use, and waited on one it
-	// could — the same wrong answer in both directions.
+	// This was briefly changed to probe by running a command, on the reasoning
+	// that callers need to execute rather than to ping — which is true, and the
+	// probe still could not work: `utmctl exec` never returns the guest's
+	// output and always exits 0. That fact is documented in this package, above
+	// batchFile, which exists solely to work around it. The probe therefore
+	// looked for an echoed token that can never arrive, AgentReady was
+	// permanently false, and vm-create refused a VM that was running fine.
 	//
-	// A network address is not the point. Nothing here needs the guest's IP;
-	// everything here needs to push a file and run it.
-	out, err := v.runFor(agentProbeTimeout, "exec", "--cmd", agentProbeCmd)
-	if err != nil {
-		return false
-	}
-	// utmctl exec exits 0 whatever happens in the guest, so the output is the
-	// only evidence. A working agent echoes the token back; a broken one
-	// returns its own complaint.
-	return strings.Contains(out, agentProbeToken)
+	// The limitation this leaves is real and worth knowing: an IP means the
+	// guest is networked, not that it will run something. They can differ while
+	// Windows Update has the agent busy. Callers must treat a failed exec as
+	// its own answer rather than as proof the VM is unusable — and above all
+	// must not read either as permission to type at it.
+	_, err := v.IPAddress()
+	return err == nil
 }
 
 // waitForAgent blocks until the guest agent answers or the timeout elapses.

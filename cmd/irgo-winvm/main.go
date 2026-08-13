@@ -984,7 +984,6 @@ func runRun(args []string) error {
 	name := fs.String("vm", "", "VM name or UUID (required)")
 	gui := fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
 	user := fs.String("user", "dev", "guest account for -gui")
-	pass := fs.String("pass", "dev", "guest password for -gui")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1012,15 +1011,12 @@ func runRun(args []string) error {
 	}
 
 	local := fs.Arg(0)
-	var res utmvm.Result
-	if *gui {
-		// The guest agent runs as SYSTEM in session 0, which has no window
-		// station, so a GUI app fails when it tries to create one. -gui routes
-		// through a scheduled task in the logged-in user's session instead.
-		res, err = utmvm.RunLocalBinaryInteractive(e.UUID, local, fs.Args()[1:], *user, *pass, *timeout)
-	} else {
-		res, err = utmvm.RunLocalBinary(e.UUID, local, fs.Args()[1:], *timeout)
-	}
+	res, err := utmvm.Run(e.UUID, local, utmvm.RunOptions{
+		Args:    fs.Args()[1:],
+		GUI:     *gui,
+		User:    *user,
+		Timeout: *timeout,
+	})
 	if res.Stdout != "" {
 		fmt.Println(res.Stdout)
 	}

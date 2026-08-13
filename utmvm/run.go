@@ -195,16 +195,41 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
 	return RunInstall(InstallOptions{VMRef: vmRef, BundlePath: bundlePath, Timeout: timeout})
 }
 
-// RunLocalBinary pushes a binary into the guest and runs it there.
+// RunOptions configures Run. The zero value is a headless run with the default
+// timeout, which is what almost every caller wants.
+type RunOptions struct {
+	Args    []string
+	GUI     bool // run in the logged-in user's desktop session
+	User    string
+	Timeout time.Duration
+}
+
+// Run pushes a binary into the guest and runs it there.
 //
 // This is the inner loop the whole tool exists for: build on the Mac, run on
-// Windows, read the output back — with no GUI, no keystrokes, and no screen.
-func RunLocalBinary(vmRef, localPath string, args []string, timeout time.Duration) (Result, error) {
-	guestPath := guestTemp + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
+// Windows, read the output back. ONE entry point, because there used to be
+// four — RunLocalBinary, RunLocalBinaryInteractive, RunInGuest, RunInteractive
+// — differing only in where the binary landed and which session ran it, and a
+// caller had to know which of the four to pick.
+//
+// GUI is the whole distinction. The guest agent runs as NT AUTHORITY\SYSTEM in
+// session 0, which has no window station, so anything that opens a window fails
+// there. GUI routes through a scheduled task in the logged-in user's session
+// instead, which has a desktop.
+func Run(vmRef, localPath string, o RunOptions) (Result, error) {
+	dir := guestTemp
+	if o.GUI {
+		// Public, not Windows\Temp: the interactive user must be able to execute it.
+		dir = guestPublic
+	}
+	guestPath := dir + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
 	if err := Push(vmRef, localPath, guestPath); err != nil {
 		return Result{}, err
 	}
-	return RunInGuest(vmRef, append([]string{guestPath}, args...), timeout)
+	if o.GUI {
+		return runInteractive(vmRef, guestPath, o.Args, o.User, o.Timeout)
+	}
+	return RunInGuest(vmRef, append([]string{guestPath}, o.Args...), o.Timeout)
 }
 
 // quoteForCmd renders argv for cmd.exe, quoting only what needs it.
@@ -235,7 +260,7 @@ func quoteForCmd(argv []string) string {
 // A scheduled task with /it runs as the logged-in user in their session, which
 // has a desktop. The auto-login the answer file configures is what guarantees
 // such a session exists.
-func RunInteractive(vmRef, guestExe string, args []string, user, pass string, timeout time.Duration) (Result, error) {
+func runInteractive(vmRef, guestExe string, args []string, user string, timeout time.Duration) (Result, error) {
 	var res Result
 	if timeout == 0 {
 		timeout = 5 * time.Minute
@@ -255,11 +280,10 @@ func RunInteractive(vmRef, guestExe string, args []string, user, pass string, ti
 
 	vm := Named(vmRef)
 	// /it is the whole point: interactive, in the user's session.
-	// /it and /rp are contradictory: /it means interactive-only, which stores no
-	// password, and supplying one makes schtasks register the task but fail to
-	// run it with "ERROR: Element not found" — which reads like a missing
-	// session even when the user is logged in.
-	_ = pass
+	// No password parameter: /it means interactive-only, which stores none, and
+	// supplying one makes schtasks register the task but fail to run it with
+	// "ERROR: Element not found" — which reads like a missing session even when
+	// the user is logged in. The old signature took a pass and discarded it.
 	// The schtasks line goes through a pushed batch file for the same reason the
 	// command itself does: it contains quotes, and cmd.exe applies its own
 	// quote-stripping to a quoted string passed through exec, so the line
@@ -299,16 +323,6 @@ func RunInteractive(vmRef, guestExe string, args []string, user, pass string, ti
 	_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
 	_, _ = vm.Exec("cmd.exe", "/c", "del /q "+inner+" "+outFile+" "+rcFile+" "+launcherGuest)
 	return res, nil
-}
-
-// RunLocalBinaryInteractive pushes a binary and runs it on the guest's desktop.
-func RunLocalBinaryInteractive(vmRef, localPath string, args []string, user, pass string, timeout time.Duration) (Result, error) {
-	// Public, not Windows\Temp: the interactive user must be able to execute it.
-	guestPath := guestPublic + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
-	if err := Push(vmRef, localPath, guestPath); err != nil {
-		return Result{}, err
-	}
-	return RunInteractive(vmRef, guestPath, args, user, pass, timeout)
 }
 
 // RunClean removes everything `run` put on the guest: the binaries it pushed

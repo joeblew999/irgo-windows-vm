@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //
@@ -105,4 +106,46 @@ func windowID(vmName string) (int, error) {
 	return 0, fmt.Errorf("no UTM window titled %q (found: %s).\n"+
 		"A VM started with `utmctl start` has no display window — use `irgo-winvm vm`, "+
 		"which starts it through UTM so a window exists", vmName, strings.Join(titles, ", "))
+}
+
+// Runtime screenshots: one per stage, so a run leaves a visual record.
+//
+// These are NOT the committed ones in docs/screens. Those are evidence chosen
+// for documentation; these are every stage of every run, throwaway, and there
+// will be hundreds. Mixing them means the repository fills with noise and the
+// evidence gets lost in it.
+
+const (
+	// shotDirName is where runtime screenshots go, under the tool's own root
+	// rather than in the repository.
+	shotDirName = "shots"
+
+	// shotSettle is how long to wait before the shot. A stage that has just
+	// pressed a key has not finished drawing the result of it.
+	shotSettle = 2 * time.Second
+)
+
+// ShotDir is where runtime screenshots are written.
+func ShotDir() string { return filepath.Join(appRoot(), shotDirName) }
+
+// Shot photographs a VM at a named point in a run and returns the path.
+//
+// Errors are returned, never fatal to the caller: failing to photograph a boot
+// is not a reason to abandon it. The path comes back so the CLI can print it
+// while the stage is still on screen, which is the whole point — a stuck boot
+// is invisible from the host, and "here is what it looks like right now" is the
+// only answer.
+func Shot(vmName, stage string) (string, error) {
+	if err := os.MkdirAll(ShotDir(), 0o755); err != nil {
+		return "", err
+	}
+	// Ordered by run, then by stage: a directory listing reads as the sequence
+	// that happened, which is what somebody looking at a failure wants.
+	name := fmt.Sprintf("%s-%s-%s.png", vmName, time.Now().Format("20060102-150405"), stage)
+	out := filepath.Join(ShotDir(), name)
+	time.Sleep(shotSettle)
+	if err := Screenshot(vmName, out); err != nil {
+		return "", err
+	}
+	return out, nil
 }

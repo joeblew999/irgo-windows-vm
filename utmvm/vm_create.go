@@ -893,16 +893,26 @@ func RunInstall(opts InstallOptions) error {
 	var stalls int
 	var lastPhase Phase
 	var assists int
+	var ejected bool
 
 	for time.Now().Before(deadline) {
 		p := Inspect(opts.VMRef, opts.BundlePath)
 
 		if p.Phase != lastPhase {
 			logf("%s", p)
+			// One shot per phase change. An install is 45 minutes of a number
+			// going up, and the number cannot tell you that Setup is sitting on
+			// a dialog — the picture can.
+			if shot, sErr := Shot(opts.VMRef, string(p.Phase)); sErr == nil {
+				logf("   %s", Home(shot))
+			}
 			lastPhase = p.Phase
 		}
 		if p.AgentUp {
 			logf("guest agent is answering — install complete")
+			if shot, sErr := Shot(opts.VMRef, "ready"); sErr == nil {
+				logf("   %s", Home(shot))
+			}
 			return nil
 		}
 
@@ -918,7 +928,25 @@ func RunInstall(opts InstallOptions) error {
 			target, what := BootInstaller, "installer"
 			if p.DiskMiB >= partitionMiB {
 				// Windows has written to the disk, so the ESP exists and the
-				// stall is the post-copy reboot sitting in the shell.
+				// stall is the post-copy reboot.
+				//
+				// Take the disc out first. Self-booting media wins the boot
+				// order every time and lands at "Start boot option" with no
+				// shell to redirect from, so no amount of typing helps until
+				// it is gone.
+				if !ejected {
+					if done, eErr := ejectInstallMedia(opts.BundlePath); eErr == nil && done {
+						ejected = true
+						logf("Windows is on the disk — removing the install medium so the firmware boots it")
+						_ = vm.Stop()
+						time.Sleep(5 * time.Second)
+						if rErr := RestartUTM(); rErr == nil {
+							_ = Named(opts.VMRef).StartWithDisplay()
+						}
+						stalls = 0
+						continue
+					}
+				}
 				target, what = BootInstalled, "installed Windows off the ESP"
 			}
 			// selfBooting describes the INSTALL MEDIUM, and only the first
@@ -934,10 +962,16 @@ func RunInstall(opts InstallOptions) error {
 			}
 			assists++
 			if assists > 6 {
-				return fmt.Errorf("stalled at %s after %d boot attempts; "+
-					"open the VM in UTM to see where the guest is", p, assists)
+				shot, _ := Shot(opts.VMRef, "gave-up")
+				return fmt.Errorf("stalled at %s after %d boot attempts.\n"+
+					"  What it looks like right now: %s", p, assists, Home(shot))
 			}
 			logf("stalled at %s — booting %s (attempt %d)", p, what, assists)
+			// Photograph BEFORE typing. If the keystrokes go somewhere wrong,
+			// this is the only record of where they went.
+			if shot, sErr := Shot(opts.VMRef, fmt.Sprintf("stalled-%d", assists)); sErr == nil {
+				logf("   %s", Home(shot))
+			}
 			if err := BootAssistOn(opts.VMRef, target, ""); err != nil {
 				return err
 			}
@@ -1125,4 +1159,49 @@ func fileSize(p string) (int64, error) {
 		return 0, err
 	}
 	return fi.Size(), nil
+}
+
+// ejectInstallMedia removes the install CD from a bundle's config.
+//
+// A human takes the disc out when Setup finishes copying. Nothing here did, and
+// the consequence is exact: media mastered with efisys_noprompt.bin boots
+// itself, so after the reboot the firmware picks the CD again, sits at "Start
+// boot option", and never reaches the shell where a boot could be redirected.
+// The VM looks hung and the install looks failed, with Windows sitting
+// complete on the disk.
+//
+// Editing the plist means UTM must rescan, which is why this is paired with a
+// restart at the call site.
+func ejectInstallMedia(bundlePath string) (bool, error) {
+	plist := filepath.Join(bundlePath, "config.plist")
+	b, err := os.ReadFile(plist)
+	if err != nil {
+		return false, err
+	}
+	text := string(b)
+
+	// The drive is one <dict> in the Drives array. Find the entry naming
+	// install.iso and remove that dict, rather than rewriting the document —
+	// UTM rejects a malformed plist with one generic error that names no field.
+	marker := "<key>ImageName</key><string>" + installISO + "</string>"
+	i := strings.Index(text, marker)
+	if i < 0 {
+		return false, nil // already ejected
+	}
+	start := strings.LastIndex(text[:i], "<dict>")
+	end := strings.Index(text[i:], "</dict>")
+	if start < 0 || end < 0 {
+		return false, fmt.Errorf("utmvm: could not find the drive entry for %s in %s", installISO, plist)
+	}
+	end += i + len("</dict>")
+	for end < len(text) && (text[end] == '\n' || text[end] == '\t' || text[end] == ' ') {
+		end++
+	}
+	out := text[:start] + text[end:]
+	if err := os.WriteFile(plist, []byte(out), 0o644); err != nil {
+		return false, err
+	}
+	// The file itself stays: it is a hardlink to the media, and removing it
+	// would be iso-delete's business, not this.
+	return true, nil
 }

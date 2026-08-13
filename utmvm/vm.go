@@ -24,7 +24,7 @@ const (
 	// vmStageDirName is where binaries staged onto a VM's payload medium are
 	// looked for by default.
 	vmStageDirName   = "bin"
-	vmScreensDirName = "screens"
+	vmScreensDirName = "docs/screens"
 
 	// Where UTM itself lives, and what it keeps inside its container. UTM
 	// decides all of this; we only have to spell it correctly, and spelling it
@@ -479,5 +479,25 @@ func utmContainerDir(home string) string {
 	return filepath.Join(home, "Library", "Containers", utmContainer, "Data")
 }
 
-// VMScreensDir is where screenshots go.
-func VMScreensDir() string { return filepath.Join(appRoot(), vmScreensDirName) }
+// VMScreensDir is where screenshots go: a folder in the repository, not under
+// the user's data directory.
+//
+// Deliberately visible and throwaway. A screenshot of a stuck boot is the one
+// piece of evidence that cannot be reconstructed later, and evidence hidden in
+// ~/Library is evidence nobody looks at. Some of these become documentation;
+// the rest are deleted.
+func VMScreensDir() string {
+	if wd, err := os.Getwd(); err == nil {
+		for d := wd; ; {
+			if _, sErr := os.Stat(filepath.Join(d, "go.mod")); sErr == nil {
+				return filepath.Join(d, vmScreensDirName)
+			}
+			parent := filepath.Dir(d)
+			if parent == d {
+				break
+			}
+			d = parent
+		}
+	}
+	return filepath.Join(appRoot(), vmScreensDirName)
+}

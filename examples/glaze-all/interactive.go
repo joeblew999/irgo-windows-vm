@@ -40,7 +40,7 @@ import (
 
 // instanceID is the single-instance lock's name. Interactive mode holds it for
 // as long as the window is open, which is what makes the second-copy demo work.
-const instanceID = "irgo-nativeall-interactive"
+const instanceID = "irgo-glaze-all-interactive"
 
 type ui struct {
 	w  glaze.WebView
@@ -424,7 +424,7 @@ func (u *ui) bind() {
 	must("instanceHint", func() (string, error) {
 		exe, err := os.Executable()
 		if err != nil {
-			exe = "nativeall"
+			exe = "glaze-all"
 		}
 		return say("run this in another terminal and watch the log here:\n%s -i hello from a second copy", exe)
 	})
@@ -435,9 +435,8 @@ func (u *ui) bind() {
 		results = nil
 		mu.Unlock()
 
-		probeClipboard()
-		probePower()
-		probeMmap()
+		// The windowed set only. The clipboard, power and mmap buttons above
+		// still exercise those by hand; the automated four live in probe/.
 		probeOpenURL()
 		probeAppIcon(u.w)
 		probeNoCapture(u.w)

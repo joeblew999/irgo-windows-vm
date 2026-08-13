@@ -4,8 +4,14 @@
 //
 // Headless on purpose: this is what can run under the QEMU guest agent, which
 // executes as SYSTEM in session 0 where there is no window station at all. The
-// windowed half — tray, menus, file dialogs, app icon — is examples/nativeall,
+// windowed half — tray, menus, file dialogs, app icon — is examples/glaze-all,
 // which needs `irgo-winvm app-create -gui`.
+//
+// The split is by what a capability NEEDS, and each capability is claimed by
+// exactly one of the two. glaze-all used to probe these four as well, with the
+// same canary and the same assertions; two programs answering the same question
+// is two places to fix when native changes, and two reports to reconcile when
+// they disagree. These four are this file's, and only this file's.
 //
 // Side-effect policy: the clipboard is saved and restored; nothing opens a
 // browser, and no tray icon is left behind.
@@ -127,7 +133,7 @@ func main() {
 	probeMmap()
 
 	// The windowed capabilities — openurl, tray, menu, file dialogs, app icon,
-	// no-capture — are covered by examples/nativeall, which has a run loop and
+	// no-capture — are covered by examples/glaze-all, which has a run loop and
 	// a window and therefore can actually call them.
 	//
 	// They used to be listed here as SKIPPED rows, which was worse than saying

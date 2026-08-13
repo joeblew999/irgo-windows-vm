@@ -1,4 +1,4 @@
-# nativeall — a glaze example exercising every native capability
+# glaze-all — a glaze example exercising every windowed capability
 
 One program that calls **all** of it, with probes to verify each one.
 

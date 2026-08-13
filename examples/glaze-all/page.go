@@ -193,7 +193,7 @@ const interactiveHTML = `<!doctype html>
 
   <section>
     <h2>The unattended report</h2>
-    <p class="why">Exactly what <code>nativeall</code> prints with no flags — the thing the VM runs. It will raise one file dialog.</p>
+    <p class="why">Exactly what <code>glaze-all</code> prints with no flags — the thing the VM runs. It will raise one file dialog.</p>
     <div class="row"><button onclick="go(this,'runReport')">Run it</button></div>
     <div class="out"></div>
   </section>

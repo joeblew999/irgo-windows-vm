@@ -31,7 +31,6 @@ description = "Build the native capability probe and run it on the VM"
 run = '''
 set -e
 VM=${VM:-irgo-win11}
-BIN=$(go env GOPATH)/../irgo-probe.exe
 BIN=${TMPDIR:-/tmp}/nativeprobe-arm64.exe
 
 # The probe is not special: it is a Windows binary, and app-create runs any
@@ -114,7 +113,7 @@ run = [
   # The other three are separate modules and would be skipped by ./... above.
   # -o a directory because they are all main packages: a bare `go build` drops
   # binaries in the source tree, and in examples/ it fails outright because
-  # `nativeall` is already a directory there.
+  # `glaze-all` is already a directory there.
   "go -C probe build -o {{config_root}}/.bin/host/ ./...",
   "go -C probe vet ./...",
   "go -C glaze-probes build -o {{config_root}}/.bin/host/ ./...",
@@ -138,7 +137,7 @@ run = [
   # has quietly stopped being true.
   "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C probe build -o /dev/null .",
   "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C glaze-probes build -o /dev/null ./verify",
-  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./nativeall",
+  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./glaze-all",
 ]
 
 [tasks."go:lint"]

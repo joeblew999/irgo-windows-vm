@@ -70,7 +70,7 @@ Host: Apple M2 Pro, macOS 26.5, `glaze v0.0.47`, `CGO_ENABLED=0`.
 | `power.preventSleep` | OK — acquired and released |
 | `singleinstance.acquire` | OK — lock held, re-acquire correctly refused |
 | `mmap.map` | OK — mapped and wrote through |
-| `openurl` / `tray` / `filedialog` / `menu` / `nocapture` / app icon | covered by `examples/nativeall` — see the windows/arm64 table below, which lists both platforms |
+| `openurl` / `tray` / `filedialog` / `menu` / `nocapture` / app icon | covered by `examples/glaze-all` — see the windows/arm64 table below, which lists both platforms |
 | `notifications`, `keychain`, `fswatch` | **missing from the ecosystem** (`native/notify` is planned, not built) |
 
 ### glaze `app://` scheme
@@ -139,10 +139,10 @@ silently.
 Identical to the macOS column. Every capability that works on macOS works on
 Windows ARM64.
 
-### The windowed half — `examples/nativeall`, windows/arm64, `-gui`
+### The windowed half — `examples/glaze-all`, windows/arm64, `-gui`
 
 The rows that used to say *skipped* here. Run in the VM with
-`irgo-winvm app-create -vm irgo-win11 .bin/nativeall-arm64.exe`, exit code 0:
+`irgo-winvm app-create -vm irgo-win11 .bin/glaze-all-arm64.exe`, exit code 0:
 
 | capability | windows/arm64 | darwin/arm64 |
 |---|---|---|
@@ -213,7 +213,7 @@ still not been run on Windows. Both open a WebView2 window, and that is where
 this originally stopped: the VM rebooted itself mid-session (Windows Update,
 disk grew 14 → 27 GB), dropping the agent with `Port is not connected`.
 
-The blocker itself is gone. `nativeall` above opens a WebView2 window in the
+The blocker itself is gone. `glaze-all` above opens a WebView2 window in the
 VM and drives a native file dialog through it, so WebView2 works on ARM64 and
 `-gui` reaches the interactive session. What remains is to run the two probes
 and record what they print — `irgo-winvm app-create -gui` does the last.

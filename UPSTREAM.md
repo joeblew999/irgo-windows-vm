@@ -180,7 +180,7 @@ package added later cannot reintroduce it. `go test ./...` passes in both
 repos; native's README, which documented the old pattern as the house style, is
 updated.
 
-The run that proves it — `examples/nativeall` built against the patched clones,
+The run that proves it — `examples/glaze-all` built against the patched clones,
 executed in the VM. The trailing `: unsupported operation` is the wrapped
 sentinel, and it is the only visible difference:
 
@@ -205,7 +205,7 @@ goroutine locked to the main OS thread. A `glaze.WebView` wants exactly the
 same thing. Both are documented; nothing says they are mutually exclusive, and
 a desktop app that wants a tray icon and a window is not unusual.
 
-What works today, and what `examples/nativeall` does: post `tray.Run` onto the
+What works today, and what `examples/glaze-all` does: post `tray.Run` onto the
 UI thread **after** the window exists and never wait on it, letting the nested
 loop run until `tray.Stop`. Verified on macOS 15 and Windows 11 ARM64. It is
 undocumented, so it is luck rather than contract.

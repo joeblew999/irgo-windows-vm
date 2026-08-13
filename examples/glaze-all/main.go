@@ -1,21 +1,27 @@
-// Command nativeall is a runnable example that exercises EVERY native
-// capability in one program.
+// Command glaze-all is a runnable example that exercises every capability a
+// desktop app needs a WINDOW for, in one program.
 //
 // It exists because no such program existed anywhere: not in this repo, not in
 // glaze's examples, and not in crgimenes/native, all of which test one
-// capability per binary. So nobody had ever seen the whole native surface run
+// capability per binary. So nobody had ever seen the windowed surface run
 // together on Windows — which is exactly the thing a desktop app depends on.
 //
-// It covers both halves:
+// It covers:
 //
-//   - crgimenes/native — clipboard, power, single-instance, mmap, open-url,
-//     tray, no-capture
+//   - crgimenes/native — open-url, tray, no-capture
 //   - glaze's own      — native file dialogs, the menu bar, and the app icon
 //
-// The interactive ones need a desktop session and a run loop, which is why this
-// is a glaze app rather than a console tool, and why it must be launched with
-// `irgo-winvm app-create -gui`. Under the QEMU guest agent alone it runs as SYSTEM in
-// session 0, where there is no window station and every windowed call fails.
+// Everything here needs a desktop session and a run loop, which is why this is
+// a glaze app rather than a console tool, and why it must be launched with
+// `irgo-winvm app-create -gui`. Under the QEMU guest agent alone it runs as
+// SYSTEM in session 0, where there is no window station and every windowed call
+// fails.
+//
+// The headless half — clipboard, power, single-instance, mmap — is probe/, and
+// is not repeated here. It was, once, and the copy is the reason this file is
+// named for the window rather than for native: a program called `nativeall`
+// that duplicated four of native's capabilities and added glaze on top told you
+// nothing about which of the two it was really testing.
 //
 // It exits on its own with a status line per capability and a non-zero code if
 // any FAILED, so it can be run unattended.
@@ -35,12 +41,8 @@ import (
 
 	"github.com/crgimenes/glaze"
 	"github.com/crgimenes/glaze/menu"
-	"github.com/crgimenes/native/clipboard"
-	"github.com/crgimenes/native/mmap"
 	"github.com/crgimenes/native/nocapture"
 	"github.com/crgimenes/native/openurl"
-	"github.com/crgimenes/native/power"
-	"github.com/crgimenes/native/singleinstance"
 	"github.com/crgimenes/native/tray"
 )
 
@@ -69,12 +71,12 @@ var (
 // send a non-zero exit code back to whoever ran it unattended.
 //
 // errors.ErrUnsupported stays first: it is what this list becomes.
+//
+// Only the packages this program reports on: clipboard, power, singleinstance
+// and mmap are probe/'s to answer for, and their sentinels belong in probe/'s
+// copy of this list, not here.
 var unsupportedErrs = []error{
 	errors.ErrUnsupported,
-	clipboard.ErrUnsupported,
-	power.ErrUnsupported,
-	singleinstance.ErrUnsupported,
-	mmap.ErrUnsupported,
 	openurl.ErrUnsupported,
 	nocapture.ErrUnsupported,
 	tray.ErrUnsupported,
@@ -134,79 +136,23 @@ var tinyPNG = []byte{
 }
 
 // --- headless capabilities: no window needed -------------------------------
-
-func probeClipboard() {
-	// Save and restore: a probe must not destroy the developer's clipboard.
-	orig, readErr := clipboard.ReadText()
-	if readErr == nil {
-		defer func() { _ = clipboard.WriteText(orig) }()
-	}
-	const canary = "irgo-nativeall-canary"
-	if err := clipboard.WriteText(canary); err != nil {
-		record("clipboard.write", err, "")
-		return
-	}
-	record("clipboard.write", nil, "")
-	got, err := clipboard.ReadText()
-	if err != nil {
-		record("clipboard.read", err, "")
-		return
-	}
-	if got != canary {
-		record("clipboard.read", fmt.Errorf("round trip mismatch: %q", got), "")
-		return
-	}
-	record("clipboard.read", nil, "round trip verified")
-}
-
-func probePower() {
-	tok, err := power.PreventSleep("irgo nativeall probe")
-	if err != nil {
-		record("power.preventSleep", err, "")
-		return
-	}
-	tok.Release()
-	record("power.preventSleep", nil, "acquired + released")
-}
-
-func probeSingleInstance() {
-	inst, err := singleinstance.Acquire("irgo-nativeall", singleinstance.Options{})
-	if err != nil {
-		record("singleinstance.acquire", err, "")
-		return
-	}
-	defer inst.Release()
-	second, err2 := singleinstance.Acquire("irgo-nativeall", singleinstance.Options{})
-	if err2 == nil {
-		second.Release()
-		record("singleinstance.acquire", errors.New("second acquire unexpectedly succeeded"), "")
-		return
-	}
-	record("singleinstance.acquire", nil, "lock held; re-acquire refused")
-}
-
-func probeMmap() {
-	f, err := os.CreateTemp("", "irgo-nativeall-*")
-	if err != nil {
-		record("mmap.map", err, "")
-		return
-	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	if _, err := f.WriteString("0123456789"); err != nil {
-		record("mmap.map", err, "")
-		return
-	}
-	m, err := mmap.Map(f)
-	if err != nil {
-		record("mmap.map", err, "")
-		return
-	}
-	m[0] = 'X'
-	detail := fmt.Sprintf("mapped %d bytes, wrote through", len(m))
-	_ = m.Unmap()
-	record("mmap.map", nil, detail)
-}
+//
+// Only openurl is here, and only because it is the one headless call that still
+// wants a desktop session — it hands a URL to the shell, which in session 0 has
+// nothing to hand it to.
+//
+// clipboard, power, single-instance and mmap used to be probed here too, with
+// the same canary, the same "second acquire must fail", the same temp-file
+// write-through as probe/. Two programs asserting the same four things is two
+// places to update when native changes and two reports to reconcile when they
+// disagree. probe/ owns them now: it is headless all the way down, so it runs
+// under the guest agent with no window at all, which is the strictest place
+// they can be checked.
+//
+// They still appear in -i, where a human drives them through the window. That
+// is not the same test: interactive mode exercises the second-instance handoff
+// (singleinstance.Send) and clipboard interop with the host, neither of which a
+// console probe can reach.
 
 // fileURL turns an absolute path into a file:// URL that Open accepts on both
 // platforms.
@@ -405,12 +351,8 @@ func main() {
 }
 
 func runReport() {
-	// The headless ones do not need the window, so run them first: if the
-	// windowed half dies, there is still a partial report.
-	probeClipboard()
-	probePower()
-	probeSingleInstance()
-	probeMmap()
+	// openurl does not need the window, so run it first: if the windowed half
+	// dies, there is still a partial report.
 	probeOpenURL()
 
 	w, err := glaze.New(false)

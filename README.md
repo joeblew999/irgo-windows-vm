@@ -49,12 +49,12 @@ VMs go where UTM keeps them, because UTM reads nowhere else.
 
 ## What it needs
 
-macOS on Apple Silicon. UTM, which `vm` installs from its signed `.dmg` if it is
-missing. `wimlib` and `xorriso`, which `iso` installs and `iso-delete` removes,
+macOS on Apple Silicon. UTM, which `vm-create` installs from its signed `.dmg` if it is
+missing. `wimlib` and `xorriso`, which `iso-create` installs and `iso-delete` removes,
 and only when building media from scratch.
 
 One thing nothing can install for you: macOS asks, once, in a dialog, whether
-this may control UTM. `vm` checks that before doing anything expensive, because
+this may control UTM. `vm-create` checks that before doing anything expensive, because
 without it a boot cannot be driven and the failure arrives forty minutes into an
 install as a timeout that mentions nothing about permissions.
 

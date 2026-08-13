@@ -280,7 +280,7 @@ func ensureMedia(opts SetupOptions, paths Paths, say func(string, ...any)) (iso,
 	// Already in the cache, under either name.
 	for _, candidate := range []string{
 		paths.ISO(),
-		filepath.Join(paths.Cache, "win11-arm64-built.iso"),
+		filepath.Join(paths.Cache, builtISOName),
 	} {
 		if _, sErr := os.Stat(candidate); sErr != nil {
 			continue
@@ -294,9 +294,9 @@ func ensureMedia(opts SetupOptions, paths Paths, say func(string, ...any)) (iso,
 	}
 
 	// An ESD already downloaded — build from it rather than downloading again.
-	esd := filepath.Join(paths.Cache, "win11-arm64.esd")
+	esd := filepath.Join(paths.Cache, esdName)
 	if _, sErr := os.Stat(esd); sErr == nil {
-		built := filepath.Join(paths.Cache, "win11-arm64-built.iso")
+		built := filepath.Join(paths.Cache, builtISOName)
 		say("  … building an ISO from the .esd already in the cache")
 		if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
 			return "", "", false, bErr
@@ -334,7 +334,7 @@ func ensureMedia(opts SetupOptions, paths Paths, say func(string, ...any)) (iso,
 		return "", "", false, dErr
 	}
 
-	built := filepath.Join(paths.Cache, "win11-arm64-built.iso")
+	built := filepath.Join(paths.Cache, builtISOName)
 	if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
 		return "", "", false, bErr
 	}

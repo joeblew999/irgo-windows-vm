@@ -19,14 +19,6 @@ import (
 	"time"
 )
 
-// Getting Windows media: Microsoft's catalog, the download, and building an
-// ISO from the ESD it serves.
-
-const CatalogURL = "https://go.microsoft.com/fwlink/?linkid=2156292"
-
-// CatalogURLWindows10 is kept only to name the trap above.
-const CatalogURLWindows10 = "https://go.microsoft.com/fwlink/?LinkId=841361"
-
 // CatalogEntry is one downloadable image.
 type CatalogEntry struct {
 	FileName     string `xml:"FileName"`

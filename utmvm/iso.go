@@ -19,6 +19,42 @@ import (
 
 // What a Windows ISO is, and the external tools that read one.
 
+// Every fact about Windows media lives here, so nothing else has to know the
+// shape of it. These were spread across four files, which is how the built-ISO
+// name came to be spelled three times.
+const (
+	// CatalogURL is Microsoft's Media Creation Tool catalog for Windows 11.
+	//
+	// linkid=2156292 is Windows 11; LinkId=841361 is Windows 10 and looks close
+	// enough to grab by mistake — which is why the wrong one is named below
+	// rather than left as a number somebody might reintroduce.
+	CatalogURL = "https://go.microsoft.com/fwlink/?linkid=2156292"
+
+	// CatalogURLWindows10 exists to be recognised, never fetched.
+	CatalogURLWindows10 = "https://go.microsoft.com/fwlink/?LinkId=841361"
+
+	// isoName is what a downloaded or built Windows ISO is called on disk.
+	isoName = "win11-arm64.iso"
+
+	// builtISOName distinguishes media this tool mastered from media Microsoft
+	// served, because the two fail differently and telling them apart matters
+	// when a boot goes wrong.
+	builtISOName = "win11-arm64-built.iso"
+
+	// esdName is the compressed image the catalog serves, before expansion.
+	esdName = "win11-arm64.esd"
+
+	// scanSuffix names the sidecar holding a cached scan verdict. Answering
+	// "is this ARM64" means reading the whole 5.27 GB, which cost 77 seconds on
+	// every command until the answer was kept.
+	scanSuffix = ".scan"
+
+	// minWindowsISOBytes separates Windows media from the small ISOs that share
+	// a directory with it: the generated answer file is 32 MB and UTM's guest
+	// tools are 121 MB, and neither will ever install an operating system.
+	minWindowsISOBytes = 1 << 30
+)
+
 type ISOInfo struct {
 	// IsARM64 reports whether the ARM64 UEFI bootloader is present. An x86-64
 	// ISO on Apple Silicon boots to a black screen with no diagnostic at all,
@@ -58,7 +94,7 @@ func cachedVerdict(path string) (ISOInfo, bool) {
 	if err != nil {
 		return ISOInfo{}, false
 	}
-	b, rErr := os.ReadFile(path + ".scan")
+	b, rErr := os.ReadFile(path + scanSuffix)
 	if rErr != nil {
 		return ISOInfo{}, false
 	}
@@ -82,7 +118,7 @@ func storeVerdict(path string, info ISOInfo) {
 	if info.IsARM64 {
 		arm = 1
 	}
-	_ = os.WriteFile(path+".scan", []byte(fmt.Sprintf("%d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm)), 0o644)
+	_ = os.WriteFile(path+scanSuffix, []byte(fmt.Sprintf("%d %d %d", fi.Size(), fi.ModTime().UnixNano(), arm)), 0o644)
 }
 
 func InspectISO(path string) (ISOInfo, error) {

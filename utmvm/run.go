@@ -360,6 +360,13 @@ func runInteractive(vmRef, guestExe string, args []string, user string, timeout 
 //
 // Guest-side deletion only. The VM itself is `vm-delete`.
 func RunClean(vmRef string, binaries ...string) error {
+	return RunCleanReport(vmRef, nil, binaries...)
+}
+
+// runCleanReport is RunClean with a callback naming each thing removed. A
+// delete that prints nothing is indistinguishable from one that did nothing.
+// RunCleanReport is RunClean, naming each thing it removes.
+func RunCleanReport(vmRef string, say func(string, ...any), binaries ...string) error {
 	vm := Named(vmRef)
 	targets := []string{
 		guestTemp + `\irgo-*`,
@@ -373,6 +380,15 @@ func RunClean(vmRef string, binaries ...string) error {
 	// when they are combined, leaving the rest in place.
 	var failed []string
 	for _, t := range targets {
+		// dir first, so what is about to go can be named. utmctl exec always
+		// exits 0, so the listing is the only evidence anything was there.
+		if out, lErr := vm.Exec("cmd.exe", "/c", "dir /b "+t); lErr == nil && say != nil {
+			for _, line := range strings.Split(strings.TrimSpace(out), "\r\n") {
+				if line != "" && !strings.Contains(line, "File Not Found") {
+					say("· %s", line)
+				}
+			}
+		}
 		if _, err := vm.Exec("cmd.exe", "/c", "del /q /f "+t); err != nil {
 			failed = append(failed, t)
 		}

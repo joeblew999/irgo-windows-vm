@@ -297,6 +297,10 @@ func runDelete(args []string) error {
 			r.Path, utmvm.HumanBytes(r.TotalBytes), r.Running)
 		return nil
 	}
+	if _, fErr := utmvm.Find(ref); fErr != nil {
+		fmt.Printf("no VM %q; nothing to delete\n", ref)
+		return nil
+	}
 	r, err := utmvm.Delete(ref, *force, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) })
 	if err != nil {
 		return err
@@ -376,9 +380,12 @@ func runRunDelete(args []string) error {
 	}
 	e, err := utmvm.Find(*name)
 	if err != nil {
-		return err
+		// No VM means nothing was ever put on it. An undo that fails when
+		// there is nothing to undo cannot be run twice.
+		fmt.Printf("no VM %q; nothing to delete\n", *name)
+		return nil
 	}
-	if err := utmvm.RunClean(e.UUID, fs.Args()...); err != nil {
+	if err := utmvm.RunCleanReport(e.UUID, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }, fs.Args()...); err != nil {
 		return err
 	}
 	fmt.Printf("cleaned %s\n", e.Name)
@@ -417,7 +424,11 @@ func runISODelete(args []string) error {
 	iso := utmvm.DefaultPaths().ISO()
 	st, err := utmvm.ISOLinks(iso, utmvm.ISOSearchDirs())
 	if err != nil {
-		return fmt.Errorf("no media at %s", iso)
+		// Nothing to delete is the goal already met, not a failure. An undo
+		// that errors when there is nothing to undo cannot be run twice, which
+		// defeats the point of having it.
+		fmt.Println("no media; nothing to delete")
+		return nil
 	}
 	if !*force {
 		return fmt.Errorf("this deletes %s of media that costs 4.2 GB to re-fetch\n"+

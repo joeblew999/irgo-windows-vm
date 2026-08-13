@@ -80,7 +80,7 @@ func DefaultPaths() Paths {
 }
 
 // ISO is the conventional path for the Windows installation media.
-func (p Paths) ISO() string { return filepath.Join(p.Cache, "win11-arm64.iso") }
+func (p Paths) ISO() string { return filepath.Join(p.Cache, isoName) }
 
 // Screenshot resolves a name to a path under Screens, creating the directory.
 //

@@ -297,8 +297,11 @@ func runDelete(args []string) error {
 			r.Path, utmvm.HumanBytes(r.TotalBytes), r.Running)
 		return nil
 	}
+	if b, bErr := utmvm.BundlePath(ref); bErr == nil {
+		fmt.Printf("bundle: %s\n", utmvm.Home(b))
+	}
 	if _, fErr := utmvm.Find(ref); fErr != nil {
-		fmt.Printf("no VM %q; nothing to delete\n", ref)
+		fmt.Printf("\nUTM knows no VM %q; nothing to delete\n", ref)
 		return nil
 	}
 	r, err := utmvm.Delete(ref, *force, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) })
@@ -378,11 +381,12 @@ func runRunDelete(args []string) error {
 	if *name == "" {
 		return fmt.Errorf("run-delete needs -vm")
 	}
+	fmt.Printf("guest: %s and %s\n", `C:\Windows\Temp`, `C:\Users\Public`)
 	e, err := utmvm.Find(*name)
 	if err != nil {
 		// No VM means nothing was ever put on it. An undo that fails when
 		// there is nothing to undo cannot be run twice.
-		fmt.Printf("no VM %q; nothing to delete\n", *name)
+		fmt.Printf("\nUTM knows no VM %q; nothing to delete\n", *name)
 		return nil
 	}
 	if err := utmvm.RunCleanReport(e.UUID, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }, fs.Args()...); err != nil {
@@ -422,12 +426,20 @@ func runISODelete(args []string) error {
 		return err
 	}
 	iso := utmvm.DefaultPaths().ISO()
-	st, err := utmvm.ISOLinks(iso, utmvm.ISOSearchDirs())
+	dirs := utmvm.ISOSearchDirs()
+	fmt.Printf("media: %s\n", utmvm.Home(iso))
+	for _, d := range dirs {
+		fmt.Printf("  also looking in %s\n", utmvm.Home(d))
+	}
+
+	st, err := utmvm.ISOLinks(iso, dirs)
 	if err != nil {
 		// Nothing to delete is the goal already met, not a failure. An undo
 		// that errors when there is nothing to undo cannot be run twice, which
-		// defeats the point of having it.
-		fmt.Println("no media; nothing to delete")
+		// defeats the point of having it. Saying WHERE it looked matters as
+		// much: "nothing to delete" is indistinguishable from "looked in the
+		// wrong place" otherwise.
+		fmt.Println("\nnothing there; nothing to delete")
 		return nil
 	}
 	if !*force {

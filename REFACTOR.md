@@ -356,6 +356,47 @@ The README already said this, and the earlier plan contradicted it:
 > `up` is `create` + `RestartUTM` + `boot`. **The steps stay separate underneath
 > because each fails differently and is worth retrying alone.**
 
+### …and `setup` must be thin, calling down through those primitives
+
+The layering is worthless unless the orchestration runs *the same code* the
+primitives run. Otherwise reproducing a `setup` failure by hand does not
+reproduce it — you execute a different path and get a different result, which is
+worse than having no recovery toolkit at all, because it misleads.
+
+`setup` today is not thin. It is a **parallel implementation**, measured:
+
+| job | `setup` calls | the primitive calls |
+|---|---|---|
+| boot | `EnsureReady` | **`BootAndWait`** — `setup` never calls it |
+| media | its own 80-line private `ensureMedia` | `fetch-iso` → `build-iso` |
+| install | `RunInstall` *and* `EnsureReady` | `RunInstall` |
+| state checks | `os.Stat`, `ISOLinks`, `Find`, `AgentReady`, `IsPaused`, `Inspect` | — |
+
+Nineteen entry points, several of which no primitive uses. This is how `setup`
+came to call `EnsureReady` where it needed `RunInstall`: the two layers had
+drifted far enough apart that the wrong one looked right.
+
+**Target:** `setup` becomes a list of calls, each one *exactly* what the
+corresponding primitive command invokes, with the outcome reported. Its own
+`ensureMedia` is deleted in favour of the same `Ensure` functions `fetch-iso`
+and `build-iso` use. Once phase 6 makes each operation idempotent and
+`Outcome`-returning, `setup` should be **roughly 40 lines**, not 338:
+
+```go
+for _, step := range []step{
+    {"UTM",           EnsureUTM},
+    {"guest tools",   EnsureGuestTools},
+    {"Windows media", EnsureMedia},      // what fetch-iso + build-iso run
+    {"protected",     EnsureProtected},
+    {"VM bundle",     EnsureBundle},     // what create runs
+    {"Windows",       EnsureInstalled},  // what boot / install run
+} { ... }
+```
+
+**Enforceable:** a test asserts each `setup` stage resolves to the same `utmvm`
+entry point as its primitive. Drift between the layers then fails the build
+rather than surfacing as a VM stuck at a prompt.
+
 **So the rule is:** a primitive is removed only if another primitive does the
 same thing. Never because it is low-level, never because it can be misused. Only
 `up` goes, and only because it is orchestration that duplicates `setup` — not
@@ -391,10 +432,12 @@ world. **This is the phase that makes the package testable without a VM**, which
 why it comes before idempotency, `context` and the renames rather than after:
 every phase from here on can be verified by a test instead of by hand.
 
-**6 — Idempotency contract.** `Ensure` semantics on `Create`, `BuildISO`,
-`Download`; the `Outcome` type lifted out of `setup.go`; `ExpandESD` skipping
-images already exported. `Setup` shrinks as its subsystems answer for
-themselves.
+**6 — Idempotency contract, and `setup` becomes thin.** `Ensure` semantics on
+`Create`, `BuildISO`, `Download`; the `Outcome` type lifted out of `setup.go`;
+`ExpandESD` skipping images already exported. Then `setup` is rewritten to call
+*only* the same entry points its primitives call — deleting its private
+`ensureMedia`, and using `BootAndWait` where the `boot` command does. 338 lines
+to roughly 40. Add the test that asserts each stage matches its primitive.
 
 **7 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
 `EnsureReady`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install

@@ -91,6 +91,12 @@ the bundle, the firmware or the boot driver is at fault.
 
 A primitive is removed only when another primitive does the same thing.
 
+**And `setup` must call down through them.** If the orchestration runs different
+code than the primitives, reproducing a `setup` failure by hand does not
+reproduce it — which is worse than no recovery toolkit, because it misleads.
+`setup` calling `EnsureReady` where `boot` calls `BootAndWait` is exactly how
+the wrong function came to look right.
+
 ## One fact, one declaration
 
 Names, paths, prefixes and timeouts get declared once. The failure mode is not

@@ -549,17 +549,3 @@ func stamped() func(string, ...any) {
 		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
 	}
 }
-
-// vmRef pulls the target VM from a flag set, so every VM-facing subcommand
-// takes the same -vm.
-func vmRef(fs *flag.FlagSet, args []string) (string, error) {
-	name := fs.String("vm", "", "VM name or UUID (required)")
-	if err := fs.Parse(args); err != nil {
-		return "", err
-	}
-	if *name == "" {
-		fs.Usage()
-		return "", fmt.Errorf("-vm is required")
-	}
-	return *name, nil
-}

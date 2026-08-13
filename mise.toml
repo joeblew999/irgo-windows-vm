@@ -44,7 +44,7 @@ check utmvm/iso.go 'if size != fi.Size() ||' 'if false ||' 'cache ignores size c
 check utmvm/iso.go '|| mod != fi.ModTime().UnixNano() {' '|| false {' 'cache ignores mtime changes'
 check utmvm/iso.go 'if size != fi.Size() || mod != fi.ModTime().UnixNano() {' 'if false {' 'cache never invalidates'
 check utmvm/iso.go 'if v, ok := isoCachedVerdict(path); ok {' 'if v, ok := isoCachedVerdict(path); !ok {' 'cache is never used'
-check utmvm/iso_delete.go 'func ISOProtect(path string) error { return isoChflags(path, true) }' 'func ISOProtect(path string) error { return nil }' 'ISOProtect does nothing'
+check utmvm/iso_delete.go 'func isoProtect(path string) error { return isoChflags(path, true) }' 'func isoProtect(path string) error { return nil }' 'isoProtect does nothing'
 check utmvm/iso_delete.go 'func ISOUnprotect(path string) error { return isoChflags(path, false) }' 'func ISOUnprotect(path string) error { return nil }' 'ISOUnprotect does nothing'
 check utmvm/iso_delete.go 'st.Links = int(nlink)' 'st.Links = 1
 	_ = nlink' 'Links always reports 1'

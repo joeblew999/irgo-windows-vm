@@ -808,11 +808,27 @@ func ISOTools() []ISOTool {
 // iso-delete only knew win11-arm64.iso — so deleting the media removed nothing
 // and reported success.
 func ISOFiles() []string {
+	return append(ISODerived(), ISOSource()...)
+}
+
+// ISODerived is what `iso-create` can rebuild without the network: the mastered
+// ISO and its scan sidecar. About three minutes from the .esd.
+func ISODerived() []string {
 	var out []string
-	for _, f := range []string{isoPath(), isoBuiltPath(), isoESDPath()} {
+	for _, f := range []string{isoPath(), isoBuiltPath()} {
 		out = append(out, f, f+scanSuffix)
 	}
 	return out
+}
+
+// ISOSource is what cannot be rebuilt: the .esd Microsoft served.
+//
+// Kept apart from the derived files because losing it means 4.2 GB from a
+// source that rate-limits, while losing the ISO means three minutes of local
+// work. Deleting both on one flag priced them the same.
+func ISOSource() []string {
+	f := isoESDPath()
+	return []string{f, f + scanSuffix}
 }
 
 // ISODir is where ISO artefacts live. One place, and this file decides it.

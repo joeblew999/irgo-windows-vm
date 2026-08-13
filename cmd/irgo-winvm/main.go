@@ -446,6 +446,7 @@ func runISOCreate(args []string) error {
 func runISODelete(args []string) error {
 	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
 	force := fs.Bool("force", false, "actually delete it")
+	all := fs.Bool("all", false, "also delete the .esd — costs 4.2 GB to re-fetch")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -458,7 +459,11 @@ func runISODelete(args []string) error {
 	say("STEP 1/3  looking for media files")
 	var files []string
 	var bytes int64
-	for _, f := range utmvm.ISOFiles() {
+	wanted := utmvm.ISODerived()
+	if *all {
+		wanted = utmvm.ISOFiles()
+	}
+	for _, f := range wanted {
 		fi, err := os.Stat(f)
 		if err != nil {
 			say("          not there: %s", utmvm.Home(f))
@@ -508,7 +513,12 @@ func runISODelete(args []string) error {
 		}
 		msg := strings.Join(what, " and ")
 		if len(files) > 0 {
-			msg += "\n  The media costs 4.2 GB to re-fetch from a source that rate-limits."
+			if *all {
+				msg += "\n  Includes the .esd: 4.2 GB to re-fetch from a source that rate-limits."
+			} else {
+				msg += "\n  The .esd is kept, so iso-create rebuilds this in about three\n" +
+					"  minutes with no network. Add -all to delete that too."
+			}
 		}
 		return fmt.Errorf("%s\n  Pass -force to do it", msg)
 	}

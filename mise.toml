@@ -1,0 +1,43 @@
+# Maintainer tasks. A user of the binary never needs this file.
+
+[tasks.iso]
+description = "Everything that proves the ISO code works, including the mutations"
+run = '''
+set -e
+go test ./utmvm/ -run 'TestVerdict|TestInspectISOUses|TestProtect|TestISOLinks|TestInspectISO|TestISO' -v
+
+echo
+echo "=== mutations: each must be CAUGHT, or the test above proves nothing ==="
+cp utmvm/iso.go /tmp/iso.keep; cp utmvm/iso_delete.go /tmp/isod.keep
+restore() { cp /tmp/iso.keep utmvm/iso.go; cp /tmp/isod.keep utmvm/iso_delete.go; }
+trap restore EXIT
+
+check() { # file, from, to, label
+  python3 -c "
+import sys
+p,a,b=sys.argv[1],sys.argv[2],sys.argv[3]
+s=open(p).read()
+assert a in s, 'pattern gone: '+a[:40]
+open(p,'w').write(s.replace(a,b,1))" "$1" "$2" "$3"
+  printf '  %-42s ' "$4"
+  if ! go build ./... >/dev/null 2>&1; then echo 'BROKEN MUTATION (does not compile)'; restore; return 1; fi
+  if go test ./utmvm/ -run 'TestVerdict|TestInspectISOUses|TestProtect|TestISOLinks' >/dev/null 2>&1; then
+    echo 'SURVIVED — nothing tests this'; restore; return 1
+  fi
+  echo caught; restore
+}
+
+check utmvm/iso.go 'if size != fi.Size() ||' 'if false ||' 'cache ignores size changes'
+check utmvm/iso.go '|| mod != fi.ModTime().UnixNano() {' '|| false {' 'cache ignores mtime changes'
+check utmvm/iso.go 'if size != fi.Size() || mod != fi.ModTime().UnixNano() {' 'if false {' 'cache never invalidates'
+check utmvm/iso.go 'if v, ok := cachedVerdict(path); ok {' 'if v, ok := cachedVerdict(path); !ok {' 'cache is never used'
+check utmvm/iso_delete.go 'func ProtectISO(path string) error { return chflags(path, true) }' 'func ProtectISO(path string) error { return nil }' 'ProtectISO does nothing'
+check utmvm/iso_delete.go 'func UnprotectISO(path string) error { return chflags(path, false) }' 'func UnprotectISO(path string) error { return nil }' 'UnprotectISO does nothing'
+check utmvm/iso_delete.go 'st.Links = int(nlink)' 'st.Links = 1
+	_ = nlink' 'Links always reports 1'
+check utmvm/iso_delete.go 'st.Protected = flags&uchgFlag != 0' 'st.Protected = false
+		_ = flags' 'Protected always false'
+
+echo
+echo "all mutations caught — the ISO tests verify rather than decorate"
+'''

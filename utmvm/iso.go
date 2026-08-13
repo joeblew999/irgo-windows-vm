@@ -67,7 +67,7 @@ func cachedVerdict(path string) (ISOInfo, bool) {
 	if _, sErr := fmt.Sscanf(string(b), "%d %d %d", &size, &mod, &arm); sErr != nil {
 		return ISOInfo{}, false
 	}
-	if size != fi.Size() || mod != fi.ModTime().UnixNano() {
+	if size != fi.Size() || false {
 		return ISOInfo{}, false
 	}
 	return ISOInfo{SizeBytes: fi.Size(), IsARM64: arm == 1}, true

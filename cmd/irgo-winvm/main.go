@@ -27,18 +27,24 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `irgo-winvm — build a Go program on your Mac, run it on real Windows.
+// usage goes to stderr, for the case where the user got it wrong. The same
+// text on stdout is what a bare `irgo-winvm` prints.
+func usage() { fmt.Fprint(os.Stderr, usageText) }
 
-  iso-create    iso-delete
-  vm-create     vm-delete
-  app-create    app-delete
+const usageText = `irgo-winvm — build a Go program on your Mac, run it on real Windows.
 
-  vm-screen     doctor      version
+  MAKE                                                 UNDO
+  iso-create   the Windows installer                   iso-delete
+  vm-create    a VM with Windows on it, from that      vm-delete
+  app-create   your .exe pushed to that VM and run     app-delete
 
-irgo-winvm help  explains what these do and the order they go in.
-`)
-}
+  vm-screen    photograph the VM, for when it is stuck
+  doctor       what is here, and where the log and screenshots are
+  help         the three steps explained, and what your .exe has to be
+  version
+
+Run them in the order above. Each takes -h for its flags.
+`
 
 // runHelp is the explanation. Separate from usage because a person who typed
 // the command wrong wants the list, and a person who typed `help` wants the
@@ -79,9 +85,12 @@ Every command takes -h for its flags.
 }
 
 func run(args []string) error {
+	// No arguments is somebody asking what this is, not an error. It prints the
+	// list on stdout and exits 0, so `irgo-winvm | head` works and a shell
+	// script does not see a failure for asking.
 	if len(args) == 0 {
-		usage()
-		return fmt.Errorf("no subcommand given")
+		fmt.Print(usageText)
+		return nil
 	}
 	switch args[0] {
 	case "vm-create":

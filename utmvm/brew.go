@@ -70,27 +70,3 @@ func (t *Tool) Ensure() error {
 	}
 	return nil
 }
-
-// EnsureISOTools makes both external tools available, so a developer finds out
-// what is missing once rather than an hour apart.
-//
-// Ordering matters for the message, not the mechanism: wimlib is needed first
-// (it reads the .esd) and xorriso second (it writes the ISO), and discovering
-// the second is absent only after the first has spent ten minutes expanding a
-// 4 GB archive is a waste of somebody's evening.
-func EnsureISOTools() (wim Tool, master Tool, err error) {
-	wim = WimTool()
-	if eErr := wim.Ensure(); eErr != nil {
-		return wim, master, eErr
-	}
-
-	master, candidates := FindMasterer()
-	if master.Found() {
-		return wim, master, nil
-	}
-	master = candidates[0] // xorriso: the smaller, actively maintained one
-	if eErr := master.Ensure(); eErr != nil {
-		return wim, master, eErr
-	}
-	return wim, master, nil
-}

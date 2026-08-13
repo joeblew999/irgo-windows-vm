@@ -368,13 +368,3 @@ func FilterCatalog(all []CatalogEntry, arch, lang, edition string) []CatalogEntr
 	}
 	return out
 }
-
-// HumanSize is HumanBytes for a catalog entry's declared size, which is a
-// string in the XML in some catalog revisions.
-func HumanSize(s string) string {
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return s
-	}
-	return HumanBytes(n)
-}

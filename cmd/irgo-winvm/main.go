@@ -84,8 +84,6 @@ func run(args []string) error {
 		return runResume(args[1:])
 	case "boot":
 		return runBoot(args[1:])
-	case "up":
-		return runUp(args[1:])
 	case "install":
 		return runInstall(args[1:])
 	case "run":
@@ -96,8 +94,6 @@ func run(args []string) error {
 		return runScreenshot(args[1:])
 	case "exec":
 		return runExec(args[1:])
-	case "probe":
-		return runProbe(args[1:])
 	case "doctor":
 		return runDoctor()
 	case "list":
@@ -344,35 +340,6 @@ func runExec(args []string) error {
 		return fmt.Errorf("guest command exited %d", res.ExitCode)
 	}
 	return nil
-}
-
-// runProbe runs the probe suite that was baked onto the unattend medium.
-func runProbe(args []string) error {
-	fs := flag.NewFlagSet("probe", flag.ContinueOnError)
-	drive := fs.String("drive", "", "drive letter of the payload medium; probed automatically when empty")
-	ref, err := vmRef(fs, args)
-	if err != nil {
-		return err
-	}
-	vm := utmvm.Named(ref)
-	if !vm.AgentReady() {
-		return fmt.Errorf("guest agent is not answering; run `irgo-winvm status -vm %s`", ref)
-	}
-	letters := []string{"D", "E", "F", "G", "H"}
-	if *drive != "" {
-		letters = []string{strings.TrimSuffix(*drive, ":")}
-	}
-	for _, l := range letters {
-		// Binaries sit at the medium's root, not in a subdirectory: go-diskfs
-		// mangles Joliet names inside nested directories into UCS-2 garbage,
-		// while root entries survive intact.
-		out, err := vm.Exec("cmd", "/c", l+`:\run-all.cmd`)
-		if err == nil {
-			fmt.Println(out)
-			return nil
-		}
-	}
-	return fmt.Errorf("could not find run-all.cmd on any of %v", letters)
 }
 
 // runFetchISO gets Windows install media from Microsoft's Media Creation Tool
@@ -933,83 +900,6 @@ func runBoot(args []string) error {
 		return err
 	}
 	fmt.Println("boot took — Setup is running or the guest agent answered")
-	return nil
-}
-
-// runUp is the single command that takes an ISO to a running Windows VM.
-//
-// The separate steps exist because each one can fail in its own way and is
-// worth retrying alone, but nobody wants to type four commands to get started.
-func runUp(args []string) error {
-	fs := flag.NewFlagSet("up", flag.ContinueOnError)
-	var (
-		iso     = fs.String("iso", "", "path to the Windows 11 ARM64 ISO (required)")
-		name    = fs.String("name", "irgo-win11", "VM name")
-		probes  = fs.String("probes", "", "directory of Windows test binaries to embed")
-		wait    = fs.Duration("wait", 45*time.Minute, "how long to allow for the install")
-		replace = fs.Bool("replace", false, "delete an existing VM of the same name first")
-	)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *iso == "" {
-		fs.Usage()
-		return fmt.Errorf("-iso is required")
-	}
-	if !utmvm.CanCreateVMs() {
-		return fmt.Errorf("this needs macOS on Apple Silicon; see `irgo-winvm targets`")
-	}
-
-	if *replace {
-		if _, err := utmvm.Delete(*name, true); err == nil {
-			fmt.Printf("removed the existing %s\n", *name)
-		}
-	}
-
-	info, err := utmvm.InspectISO(*iso)
-	if err != nil {
-		return err
-	}
-	if !info.IsARM64 {
-		return fmt.Errorf("%s is not an ARM64 ISO; it cannot boot on Apple Silicon", filepath.Base(*iso))
-	}
-
-	bundle, err := utmvm.Create(utmvm.Options{Name: *name, InstallISO: *iso, ProbeDir: *probes})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("created %s\n", bundle)
-
-	// UTM only rescans its bundle directory at launch, so a VM generated while
-	// UTM is running is invisible to it until restarted.
-	fmt.Println("restarting UTM so it picks up the new VM...")
-	if err := utmvm.RestartUTM(); err != nil {
-		return err
-	}
-
-	// Resolve to the UUID before booting. BootAndWait ultimately renders
-	// assets/boot.applescript, whose specifier is `virtual machine id %q` —
-	// AppleScript's id form does not accept a name, so passing *name here made
-	// every `up` run fail at the boot step while `boot` (which resolves first)
-	// worked.
-	e, err := utmvm.Find(*name)
-	if err != nil {
-		return err
-	}
-
-	// Drive the whole install, not just the first boot. Setup reboots partway
-	// and lands back in the UEFI shell needing a different boot; handling only
-	// the first is what made every previous run need a human.
-	fmt.Println("installing (both boot phases, unsupervised)...")
-	if err := utmvm.RunInstall(utmvm.InstallOptions{
-		VMRef:      e.UUID,
-		BundlePath: bundle,
-		Timeout:    *wait,
-		Log:        os.Stdout,
-	}); err != nil {
-		return err
-	}
-	fmt.Printf("\n%s is ready. Try:  irgo-winvm probe -vm %s\n", *name, *name)
 	return nil
 }
 

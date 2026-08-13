@@ -297,7 +297,7 @@ func RunInteractive(vmRef, guestExe string, args []string, user, pass string, ti
 		res.ExitCode = n
 	}
 	_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
-	_, _ = vm.Exec("cmd.exe", "/c", "del /q "+inner+" "+outFile+" "+rcFile)
+	_, _ = vm.Exec("cmd.exe", "/c", "del /q "+inner+" "+outFile+" "+rcFile+" "+launcherGuest)
 	return res, nil
 }
 
@@ -309,4 +309,37 @@ func RunLocalBinaryInteractive(vmRef, localPath string, args []string, user, pas
 		return Result{}, err
 	}
 	return RunInteractive(vmRef, guestPath, args, user, pass, timeout)
+}
+
+// RunClean removes everything `run` put on the guest: the binaries it pushed
+// and any scratch files left by a run that did not finish.
+//
+// This is `run`'s undo, and it exists because `run` had none. A pushed binary
+// was never deleted at all, and RunInteractive left its scheduled-task launcher
+// behind on every single call — so a VM used for testing accumulated one
+// irgo-l-*.bat per invocation, forever.
+//
+// Guest-side deletion only. The VM itself is `vm-delete`.
+func RunClean(vmRef string, binaries ...string) error {
+	vm := Named(vmRef)
+	targets := []string{
+		guestTemp + `\irgo-*`,
+		guestPublic + `\irgo-*`,
+	}
+	for _, b := range binaries {
+		name := path.Base(strings.ReplaceAll(b, `\`, "/"))
+		targets = append(targets, guestTemp+`\`+name, guestPublic+`\`+name)
+	}
+	// One del per target: cmd stops at the first pattern that matches nothing
+	// when they are combined, leaving the rest in place.
+	var failed []string
+	for _, t := range targets {
+		if _, err := vm.Exec("cmd.exe", "/c", "del /q /f "+t); err != nil {
+			failed = append(failed, t)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("utmvm: could not clean %s from %s", strings.Join(failed, ", "), vmRef)
+	}
+	return nil
 }

@@ -47,22 +47,6 @@ const (
 	BootInstalled
 )
 
-// BootAssist drives the UEFI shell to boot the VM.
-//
-// Filesystem numbering shifts with how many drives are attached and whether
-// Windows has created its partitions yet, so each candidate is tried in turn
-// rather than assuming a fixed mapping.
-//
-// Crucially it STOPS at the first attempt that takes. Trying every combination
-// unconditionally is a bug, not thoroughness: once a boot succeeds the guest
-// owns the keyboard, and further keystrokes land in Windows Setup and activate
-// whatever control has focus. That silently destroyed an install that had
-// already partitioned the disk — so progress is checked between attempts and
-// the loop exits the moment there is any.
-func BootAssist(vmRef string, target BootTarget) error {
-	return BootAssistWatched(vmRef, target, "")
-}
-
 // BootAssistWatched is BootAssist with a disk to watch for progress. When
 // diskPath is empty no progress check is possible and every candidate is tried,
 // which is only safe before an OS exists.
@@ -174,23 +158,6 @@ func typeBootCommand(vmRef, fsn, path string) error {
 // already correct — doubling first produced \\efi\\microsoft\\... in the
 // guest and every Go-driven boot silently failed at the shell prompt, while
 // hand-written osascript worked. %q, once, is the whole answer.
-
-// OpenDisplay ensures the VM's display window exists.
-//
-// This is required before any keystrokes are sent. utmctl start powers the VM
-// on without opening a window, and UTM routes input through the display — so
-// keystrokes sent to a windowless VM go nowhere, silently. Opening the bundle
-// makes UTM show it.
-func OpenDisplay(bundlePath string) error {
-	if bundlePath == "" {
-		return nil
-	}
-	if out, err := exec.Command("open", bundlePath).CombinedOutput(); err != nil {
-		return fmt.Errorf("opening VM display: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	time.Sleep(5 * time.Second)
-	return nil
-}
 
 // BootAndWait starts a VM, drives it past the UEFI shell, and waits for signs
 // of life — disk writes during an install, or the guest agent once installed.

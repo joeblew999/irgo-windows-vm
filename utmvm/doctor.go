@@ -461,7 +461,6 @@ func Externals(repoRoot string) []External {
 	// to repo-relative directories when run inside a checkout, and consult
 	// IRGO_* variables that no longer exist — so doctor described a third set
 	// of locations that neither the ISO code nor anything else used.
-	paths := DefaultPaths()
 
 	list := []External{
 		{
@@ -499,7 +498,7 @@ func Externals(repoRoot string) []External {
 		},
 		{
 			Name: "the VM itself",
-			Path: paths.VMs,
+			Path: mustVMDir(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
 			Fix:  "irgo-winvm vm",
@@ -508,9 +507,9 @@ func Externals(repoRoot string) []External {
 		},
 		{
 			Name: "probe binaries",
-			Path: paths.Bin,
+			Path: VMStageDir(),
 			Why:  "cross-compiled Windows binaries. Gitignored, rebuilt in seconds, but a restart used to lose them.",
-			Fix:  "mise run probes",
+			Fix:  "go build -o " + VMStageDir() + " ./probe/...",
 			Kind: KindBuilt,
 			Dir:  true,
 			Skip: repoRoot == "",
@@ -742,4 +741,48 @@ func fileSize(p string) (int64, error) {
 		return 0, err
 	}
 	return fi.Size(), nil
+}
+
+// mustVMDir is UTM's bundle directory, or empty when it cannot be resolved.
+// Only for the inventory, which reports rather than acts.
+func mustVMDir() string {
+	d, err := DefaultVMDir()
+	if err != nil {
+		return ""
+	}
+	return d
+}
+
+// FreeBytes is the space available to this user on the filesystem holding path.
+func FreeBytes(path string) (int64, error) {
+	// Walk up until something exists: the directory being asked about is often
+	// the one about to be created.
+	probe := path
+	for {
+		if _, err := os.Stat(probe); err == nil {
+			break
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return 0, fmt.Errorf("utmvm: no existing parent of %s", path)
+		}
+		probe = parent
+	}
+	return statfsAvailable(probe)
+}
+
+// vmRoot's guard: a relative path that climbs out of its base.
+func hasDotDot(rel string) bool {
+	return rel == ".." || len(rel) >= 3 && rel[:3] == "../"
+}
+
+// appRoot is the one directory this tool owns. vm, iso and run each hang their
+// own locations off it, so there is a single answer to "where does anything
+// go" without any of the three owning the others' paths.
+func appRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, "Library", "Application Support", "irgo-winvm")
 }

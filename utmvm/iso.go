@@ -847,13 +847,7 @@ func ISOSource() []string {
 }
 
 // ISODir is where ISO artefacts live. One place, and this file decides it.
-func ISODir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, "Library", "Application Support", "irgo-winvm", isoDirName)
-}
+func ISODir() string { return filepath.Join(appRoot(), isoDirName) }
 
 // isoPath is the Windows media this tool downloads or builds.
 func isoPath() string { return filepath.Join(ISODir(), isoName) }

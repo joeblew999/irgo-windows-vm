@@ -63,7 +63,7 @@ type SetupResult struct {
 // It returns the stages it went through, including the ones it skipped, because
 // "nothing to do" is the most valuable thing an idempotent command can tell you
 // and is indistinguishable from "did nothing" unless it says so.
-func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error) {
+func Setup(opts SetupOptions, log func(string)) (SetupResult, error) {
 	var res SetupResult
 	began := time.Now()
 	say := func(f string, a ...any) {

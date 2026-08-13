@@ -16,6 +16,27 @@ import (
 	"unicode/utf8"
 )
 
+// The bundle layout, declared once.
+//
+// These four names were spelled out at ten call sites across the package and
+// the CLI — filepath.Join(dir, e.Name+".utm") and bundle+"/Data/disk.img" — so
+// UTM's on-disk layout was knowledge every caller had to carry, and one of them
+// used string concatenation rather than filepath.Join.
+const (
+	// vmStageDirName is where binaries staged onto a VM's payload medium are
+	// looked for by default.
+	vmStageDirName = "bin"
+
+	// vmScreensDirName is where screenshots land.
+	vmScreensDirName = "screens"
+
+	bundleExt   = ".utm"
+	bundleData  = "Data"
+	diskImage   = "disk.img"
+	installISO  = "install.iso"
+	unattendISO = "unattend.iso"
+)
+
 // DefaultVMDir is where UTM looks for bundles. Note UTM only rescans this
 // directory at launch, so a bundle written while UTM is running will not appear
 // until it is quit and reopened.
@@ -1113,3 +1134,9 @@ func BootAndWait(vmRef string, target BootTarget, diskPath string, timeout time.
 	}
 	return fmt.Errorf("no disk activity or guest agent within %s after boot assist", timeout)
 }
+
+// VMStageDir is where `vm` looks for binaries to stage onto the payload medium.
+func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
+
+// VMScreensDir is where screenshots go.
+func VMScreensDir() string { return filepath.Join(appRoot(), vmScreensDirName) }

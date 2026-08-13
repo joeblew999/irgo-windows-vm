@@ -128,7 +128,6 @@ func loadCatalog(explicit string) ([]utmvm.ISOCatalogEntry, string, error) {
 // 4.2 GB download and a 45-minute install.
 func runSetup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
-	paths := utmvm.DefaultPaths()
 	var (
 		name    = fs.String("vm", "irgo-win11", "VM name")
 		iso     = fs.String("iso", "", "media to use (default: find one, or build with -fetch)")
@@ -141,8 +140,8 @@ func runSetup(args []string) error {
 		return err
 	}
 	if *probes == "" {
-		if _, err := os.Stat(paths.Bin); err == nil {
-			*probes = paths.Bin
+		if _, err := os.Stat(utmvm.VMStageDir()); err == nil {
+			*probes = utmvm.VMStageDir()
 		}
 	}
 
@@ -154,7 +153,7 @@ func runSetup(args []string) error {
 		Fetch:    *fetch,
 		Install:  *install,
 		Timeout:  *timeout,
-	}, paths, func(line string) { fmt.Println(line) })
+	}, func(line string) { fmt.Println(line) })
 	if err != nil {
 		return err
 	}

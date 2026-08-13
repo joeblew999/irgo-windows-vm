@@ -335,20 +335,6 @@ func windowID(vmName string) (int, error) {
 		"which starts it through UTM so a window exists", vmName, strings.Join(titles, ", "))
 }
 
-// The bundle layout, declared once.
-//
-// These four names were spelled out at ten call sites across the package and
-// the CLI — filepath.Join(dir, e.Name+".utm") and bundle+"/Data/disk.img" — so
-// UTM's on-disk layout was knowledge every caller had to carry, and one of them
-// used string concatenation rather than filepath.Join.
-const (
-	bundleExt   = ".utm"
-	bundleData  = "Data"
-	diskImage   = "disk.img"
-	installISO  = "install.iso"
-	unattendISO = "unattend.iso"
-)
-
 // BundlePath is where UTM keeps the bundle for a VM of this display name.
 func BundlePath(name string) (string, error) {
 	dir, err := DefaultVMDir()

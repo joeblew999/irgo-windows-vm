@@ -667,6 +667,62 @@ governed by a sentence in a document:
   unmerged and the run halted — never ploughs on, never retries blind.
 - Resumable: a run that stopped at phase 9 resumes at phase 9.
 
+#### What this repo puts on the OS, and what that means unattended
+
+The interlocks above cover VMs and media. They are not most of the blast radius.
+This tool installs software, holds four macOS permissions, clones other people's
+repositories, rewrites the build graph, and leaves files inside the guest:
+
+| what | where | unattended consequence |
+|---|---|---|
+| **UTM.app** | `/Applications` | installed by brew cask, or an **unverified `.dmg`** via `hdiutil -noverify` + `ditto`, which *merges* into an existing bundle rather than refusing |
+| **brew formulae** | system-wide | `wimlib`, `cdrtools` — a system mutation mid-run, needing network |
+| **guest tools ISO** | UTM's container | ~120 MB, returned from cache with **no integrity check of any kind** |
+| **TCC permissions** | system | **Automation, Accessibility, Screen Recording, Xcode CLT** |
+| **upstream clones** | `~/…/github.com/crgimenes` | git clones of someone else's repositories |
+| **`go.work`** | repo root, **gitignored** | while it exists every build resolves glaze/native from local clones |
+| **guest litter** | `C:\Users\Public` | `irgo-*.bat` + `schtasks` entries, every run, never cleaned |
+| **UTM process** | running | `RestartUTM` **quits it unconditionally** |
+
+Four of these break an unattended run outright:
+
+**1. The TCC permissions cannot be granted by a script.** Sending keystrokes,
+driving UTM over Apple Events and taking a screenshot are all consent dialogs.
+On a fresh machine the run stops at a dialog nobody is there to see. Phase 0
+must **probe each permission and refuse to start** — not assume, since the
+failure mode is a hang, and a first-run grant is the one thing a person must do.
+
+**Related and equally fatal: a cold boot needs an unlocked screen.**
+`setup.go:172` records it — keystrokes route through UTM's display window, so
+resume works with the Mac locked and a cold boot does not. An overnight run
+needs the display awake and unlocked, and must say so rather than time out.
+
+**2. `RestartUTM` quits UTM with other VMs running.** It discards the quit
+error, waits 15 s, and relaunches regardless of the *"a VM is still running"*
+modal that is exactly the case it should stop for. `setup` calls it
+unconditionally after creating a bundle. **On this machine that would kill a
+running `irgo-win11`.** Phase 0: refuse to restart UTM while any VM outside the
+test pattern is started.
+
+**3. Protecting the ISO silently defeats the hardlink, then blocks cleanup.**
+Measured, not reasoned:
+
+```
+ln  → immutable inode   ⇒ EPERM   so linkOrCopy silently COPIES 5.27 GB
+rm  → bundle holding an immutable hardlink ⇒ EPERM, directory left behind
+```
+
+So every VM created after protection costs ~35 GB rather than ~30, and any
+bundle created *before* it cannot be deleted at all — `cleanup.go` never calls
+`UnprotectISO`. With **49 GiB free** that is one test VM, while phase 8 wants
+twelve sequential trials. Phase 0 must unprotect-delete-reprotect around
+teardown, and assert free space against the *copy* cost before each trial.
+
+**4. A run that dies between `upstream:link` and `unlink` poisons every later
+build**, invisibly, because `go.work` is gitignored and absent from
+`git status`. Phase 0 restores it on exit, including the failure path, and
+asserts it is absent before merging anything.
+
 **This is black-box only, deliberately** — end-to-end assertions over the real
 CLI. The white-box checks (*was any keystroke sent while the agent was up?*)
 need the phase 6 seam, which does not exist yet. Building phase 0 on it would be

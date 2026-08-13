@@ -400,7 +400,32 @@ func runRunDelete(args []string) error {
 // step in `vm`. Separate so it can be done once and kept.
 func runISOCreate(args []string) error {
 	fs := flag.NewFlagSet("iso-create", flag.ExitOnError)
-	fetch := fs.Bool("fetch", false, "download from Microsoft (~4.2 GB) if nothing local works")
+	fetch := fs.Bool("fetch", false, "download 4.2 GB from Microsoft if nothing local works")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `iso-create — get the Windows media a VM installs from.
+
+Nothing to do with UTM: this is a download from Microsoft and an ISO built
+from it. It works on a machine that has never had a hypervisor installed.
+
+It tries four things, in this order, and stops at the first that works:
+
+  1. media already in %s
+  2. a .esd already downloaded there — builds from it, no network (~40s)
+  3. with -fetch: asks Microsoft's catalog, downloads 4.2 GB
+  4. expands that and masters a bootable ISO with xorriso
+
+Without -fetch it stops at step 2 rather than starting a 4.2 GB download
+you did not ask for.
+
+It installs wimlib and xorriso if they are missing. iso-delete removes them.
+
+  irgo-winvm iso-create           use what is here, or build from a .esd
+  irgo-winvm iso-create -fetch    download too, if there is nothing to use
+
+Flags:
+`, utmvm.Home(utmvm.ISODir()))
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -445,8 +470,36 @@ func runISOCreate(args []string) error {
 // rather than failing with EPERM.
 func runISODelete(args []string) error {
 	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
-	force := fs.Bool("force", false, "actually delete it")
-	all := fs.Bool("all", false, "also delete the .esd — costs 4.2 GB to re-fetch")
+	force := fs.Bool("force", false, "actually delete; without this it only lists")
+	all := fs.Bool("all", false, "also delete the .esd, the one thing that cannot be rebuilt")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `iso-delete — undo iso-create.
+
+Removes the media from %s and uninstalls
+wimlib and xorriso.
+
+Two artefacts live there and they are not worth the same:
+
+  the ISO    mastered locally. Deleting it costs ~40s to rebuild, no network.
+  the .esd   what Microsoft served. Deleting it costs 4.2 GB from a source
+             that rate-limits, and cannot be recreated any other way.
+
+So -force deletes only the ISO and keeps the .esd. -all deletes both.
+
+Without -force it lists what would go and deletes nothing, which is the
+safe thing to run first.
+
+Only tools installed by Homebrew are removed. Anything you put somewhere
+yourself is named and left alone.
+
+  irgo-winvm iso-delete              list what would go
+  irgo-winvm iso-delete -force       delete the ISO, keep the .esd
+  irgo-winvm iso-delete -force -all  delete everything, including the 4.2 GB
+
+Flags:
+`, utmvm.Home(utmvm.ISODir()))
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

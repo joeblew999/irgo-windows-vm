@@ -292,8 +292,8 @@ func runStatus(args []string) error {
 	// Phase comes from host-side signals only — block usage and whether the
 	// guest has written EFI NVRAM — so it works during an install, when there
 	// is no agent to ask and a screenshot is the only alternative.
-	if dir, dErr := utmvm.DefaultVMDir(); dErr == nil {
-		p := utmvm.Inspect(e.UUID, filepath.Join(dir, e.Name+".utm"))
+	if b := bundleOf(e); b != "" {
+		p := utmvm.Inspect(e.UUID, b)
 		fmt.Printf("%-10s %s\n", "phase:", p.Phase)
 		fmt.Printf("%-10s %d MB\n", "disk:", p.DiskMiB)
 		if p.BootEntryWritten {
@@ -885,11 +885,7 @@ func runBoot(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := utmvm.DefaultVMDir()
-	if err != nil {
-		return err
-	}
-	diskPath := filepath.Join(dir, e.Name+".utm", "Data", "disk.img")
+	diskPath := utmvm.DiskPath(bundleOf(e))
 
 	target := utmvm.BootInstaller
 	if *installed {
@@ -965,13 +961,9 @@ func runInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := utmvm.DefaultVMDir()
-	if err != nil {
-		return err
-	}
 	return utmvm.RunInstall(utmvm.InstallOptions{
 		VMRef:      e.UUID,
-		BundlePath: filepath.Join(dir, e.Name+".utm"),
+		BundlePath: bundleOf(e),
 		Timeout:    *wait,
 		Log:        os.Stdout,
 	})
@@ -1001,11 +993,7 @@ func runRun(args []string) error {
 	// cannot assume the VM is still reachable just because it was earlier.
 	if !vm.AgentReady() {
 		fmt.Fprintln(os.Stderr, "VM not answering; recovering...")
-		dir, dErr := utmvm.DefaultVMDir()
-		if dErr != nil {
-			return dErr
-		}
-		if err := utmvm.EnsureReady(e.UUID, filepath.Join(dir, e.Name+".utm"), 10*time.Minute); err != nil {
+		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute); err != nil {
 			return err
 		}
 	}
@@ -1027,4 +1015,14 @@ func runRun(args []string) error {
 		return fmt.Errorf("%s exited %d in the guest", filepath.Base(local), res.ExitCode)
 	}
 	return nil
+}
+
+// bundleOf is the CLI's one route to a VM's bundle. The layout belongs to
+// utmvm; every command used to rebuild the path itself.
+func bundleOf(e utmvm.Entry) string {
+	p, err := utmvm.BundlePath(e.Name)
+	if err != nil {
+		return ""
+	}
+	return p
 }

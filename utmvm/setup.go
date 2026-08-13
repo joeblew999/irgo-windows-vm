@@ -205,11 +205,10 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 	if fErr != nil {
 		return res, stage("install Windows", false, "", fErr)
 	}
-	dir, dErr := DefaultVMDir()
+	bundle, dErr := BundlePath(e.Name)
 	if dErr != nil {
 		return res, stage("install Windows", false, "", dErr)
 	}
-	bundle := filepath.Join(dir, e.Name+".utm")
 
 	// An installed VM that is merely off needs recovering, not reinstalling —
 	// and reinstalling would destroy it. The boot entry Setup registers is what

@@ -92,11 +92,11 @@ func Create(opts Options) (string, error) {
 			"Windows Setup would fail partway and leave an unusable VM", sp)
 	}
 
-	bundle := filepath.Join(opts.OutDir, opts.Name+".utm")
+	bundle := filepath.Join(opts.OutDir, opts.Name+bundleExt)
 	if _, err := os.Stat(bundle); err == nil {
 		return "", fmt.Errorf("%s already exists; remove it or choose another name", bundle)
 	}
-	data := filepath.Join(bundle, "Data")
+	data := filepath.Join(bundle, bundleData)
 	if err := os.MkdirAll(data, 0o755); err != nil {
 		return "", err
 	}
@@ -109,10 +109,10 @@ func Create(opts Options) (string, error) {
 		}
 	}()
 
-	if err := createSparse(filepath.Join(data, "disk.img"), int64(opts.DiskGiB)<<30); err != nil {
+	if err := createSparse(filepath.Join(data, diskImage), int64(opts.DiskGiB)<<30); err != nil {
 		return "", fmt.Errorf("system disk: %w", err)
 	}
-	if err := linkOrCopy(opts.InstallISO, filepath.Join(data, "install.iso")); err != nil {
+	if err := linkOrCopy(opts.InstallISO, filepath.Join(data, installISO)); err != nil {
 		return "", fmt.Errorf("install ISO: %w", err)
 	}
 
@@ -144,13 +144,13 @@ func Create(opts Options) (string, error) {
 		return "", err
 	}
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: id1, ImageName: "disk.img", Type: DriveDisk, Interface: IfaceNVMe},
-		Drive{ID: id2, ImageName: "install.iso", Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
+		Drive{ID: id1, ImageName: diskImage, Type: DriveDisk, Interface: IfaceNVMe},
+		Drive{ID: id2, ImageName: installISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
 	)
 
 	// The unattend medium is generated unless the caller supplied one. This is
 	// what carries autounattend.xml, startup.nsh and the probe binaries.
-	unattendImg := filepath.Join(data, "unattend.iso")
+	unattendImg := filepath.Join(data, unattendISO)
 	if opts.UnattendISO != "" {
 		if err := linkOrCopy(opts.UnattendISO, unattendImg); err != nil {
 			return "", fmt.Errorf("unattend medium: %w", err)
@@ -165,7 +165,7 @@ func Create(opts Options) (string, error) {
 	// autounattend.xml and ran interactively with no diagnostic; as a CD it is
 	// read and applied. Do not "improve" this back to a disk.
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: id3, ImageName: "unattend.iso", Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
+		Drive{ID: id3, ImageName: unattendISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
 
 	// Guest tools give the QEMU guest agent, and with it utmctl exec and
 	// ip-address. A VM without them boots but cannot be driven from the host,
@@ -766,7 +766,7 @@ func (p Progress) String() string {
 // Inspect reports install progress from the host side alone.
 func Inspect(vmRef, bundlePath string) Progress {
 	var p Progress
-	diskPath := bundlePath + "/Data/disk.img"
+	diskPath := DiskPath(bundlePath)
 	if used, ok := diskUsage(diskPath); ok {
 		p.DiskMiB = used >> 20
 	}
@@ -1120,7 +1120,7 @@ func InspectRemoval(ref string) (Removal, error) {
 	if err != nil {
 		return r, err
 	}
-	r.Path = filepath.Join(dir, e.Name+".utm")
+	r.Path = filepath.Join(dir, e.Name+bundleExt)
 	if _, err := os.Stat(r.Path); err != nil {
 		return r, fmt.Errorf("bundle not found at %s", r.Path)
 	}
@@ -1400,3 +1400,30 @@ func windowID(vmName string) (int, error) {
 		"A VM started with `utmctl start` has no display window — use `irgo-winvm boot`, "+
 		"which starts it through UTM so a window exists", vmName, strings.Join(titles, ", "))
 }
+
+// The bundle layout, declared once.
+//
+// These four names were spelled out at ten call sites across the package and
+// the CLI — filepath.Join(dir, e.Name+".utm") and bundle+"/Data/disk.img" — so
+// UTM's on-disk layout was knowledge every caller had to carry, and one of them
+// used string concatenation rather than filepath.Join.
+const (
+	bundleExt   = ".utm"
+	bundleData  = "Data"
+	diskImage   = "disk.img"
+	installISO  = "install.iso"
+	unattendISO = "unattend.iso"
+)
+
+// BundlePath is where UTM keeps the bundle for a VM of this display name.
+func BundlePath(name string) (string, error) {
+	dir, err := DefaultVMDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+bundleExt), nil
+}
+
+// DiskPath is the system disk inside a bundle. Its growth is how an install is
+// watched from the host, so it is asked for often.
+func DiskPath(bundle string) string { return filepath.Join(bundle, bundleData, diskImage) }

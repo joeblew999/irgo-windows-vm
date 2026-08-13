@@ -17,3 +17,6 @@
 go.work
 go.work.sum
 .bin/
+
+# Release artefacts, built by mise run go:build.
+/dist/

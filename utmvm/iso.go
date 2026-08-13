@@ -70,6 +70,10 @@ const (
 	// explaining what re-fetching costs, and six copies of "4.2 GB" drift.
 	isoDownloadBytes = 4_527_171_158
 
+	// isoBuildNeedsBytes is the scratch an ISO build wants: the expanded tree
+	// plus the image written beside it, with room to spare.
+	isoBuildNeedsBytes = 12 << 30
+
 	// minWindowsISOBytes separates Windows media from the small ISOs that share
 	// a directory with it: the generated answer file is 32 MB and UTM's guest
 	// tools are 121 MB, and neither will ever install an operating system.
@@ -713,20 +717,17 @@ func isoCopyInto(fs filesystem.FileSystem, hostPath, target string) error {
 	return nil
 }
 
-// Protecting the working ISO from the tooling that will replace it.
+// Protecting the media from the tooling that writes it.
 //
-// The Windows ISO is hardlinked, deliberately: ~/Downloads has the download,
-// .cache/win11-arm64.iso is what this repo refers to, and the VM bundle's
-// Data/install.iso is what UTM boots. One set of blocks, three names, 5 GB
-// once instead of 15.
+// The Windows ISO is hardlinked into every VM bundle that installs from it:
+// one set of blocks, several names, 5 GB once instead of 5 GB each.
 //
 // That is also the trap. A hardlink is not a copy — every name is the same
 // inode — so anything that opens ANY of those paths for writing destroys the
-// other two. `fetch-iso` is the obvious candidate: the natural implementation
-// downloads to .cache/win11-arm64.iso, and the natural way to do that is
-// O_CREATE|O_TRUNC, which empties the file UTM is booting from. The failure is
-// silent until the next install, and the ISO is 5 GB of gated download to get
-// back.
+// rest. iso-create is the obvious candidate: the natural implementation writes
+// to the media path with O_CREATE|O_TRUNC, which empties the file UTM is
+// booting from. The failure is silent until the next install, and the ISO is
+// 4.2 GB of rate-limited download to get back.
 //
 // So the file is made immutable instead of trusted to nobody's carelessness.
 // macOS's uchg flag is per-inode, which is exactly the granularity wanted: set

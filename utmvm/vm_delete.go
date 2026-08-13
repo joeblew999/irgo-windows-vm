@@ -126,7 +126,7 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// That is why the surviving names are recorded now and re-protected at the
 	// end, including when removal fails.
 	// Search the cache and work dirs too, not just Downloads and the VM dir:
-	// this project's own ISO normally lives under IRGO_CACHE_DIR, and a survivor
+	// this project's own ISO lives in the media directory, and a survivor
 	// that is not found is a survivor that is not re-protected.
 	_, immutable := walkBundle(r.Path)
 	if len(immutable) > 0 {

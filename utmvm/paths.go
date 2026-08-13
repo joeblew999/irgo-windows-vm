@@ -29,17 +29,8 @@ import (
 // "where does this go" is a second answer, and the media directory once had
 // three (an env override, a repo-relative guess in doctor, and the default).
 type Paths struct {
-	Root     string
-	Cache    string
-	Bin      string
-	Work     string
-	VMs      string
-	Upstream string
-
-	// Screens is where screenshots go. Unlike the rest it is meant to be
-	// COMMITTED: a screenshot of Windows Setup running from a self-built ISO
-	// is evidence, and evidence that lives only on the machine that produced
-	// it convinces nobody. Small PNGs, unlike everything else here.
+	Bin     string
+	VMs     string
 	Screens string
 }
 
@@ -63,12 +54,7 @@ func DefaultPaths() Paths {
 	base := filepath.Join(home, "Library", "Application Support", "irgo-winvm")
 
 	p := Paths{
-		Root: base,
-		// The ISO code owns this location and this reads it back, rather than
-		// spelling out "media" a second time and letting the two drift.
-		Cache:   ISODir(),
 		Bin:     filepath.Join(base, "bin"),
-		Work:    ISOWorkDir(),
 		Screens: filepath.Join(base, "screens"),
 	}
 
@@ -79,9 +65,6 @@ func DefaultPaths() Paths {
 	}
 	return p
 }
-
-// ISO is the conventional path for the Windows installation media.
-func (p Paths) ISO() string { return filepath.Join(p.Cache, isoName) }
 
 // Screenshot resolves a name to a path under Screens, creating the directory.
 //
@@ -106,27 +89,6 @@ func (p Paths) Screenshot(name string) (string, error) {
 }
 
 // EnsureWork creates the scratch directory and reports how much room is left on
-// its filesystem.
-//
-// need is what the caller is about to use. Building an ISO copies ~5 GB out of
-// one and writes ~5 GB back, so it is checked up front: running out halfway
-// leaves a part-written image that looks plausible, and the failure arrives as
-// a boot that hangs rather than as "no space left".
-func (p Paths) EnsureWork(need int64) (string, error) {
-	if err := os.MkdirAll(p.Work, 0o755); err != nil {
-		return "", err
-	}
-	free, err := FreeBytes(p.Work)
-	if err != nil {
-		return p.Work, nil // not fatal; the write will say so if it matters
-	}
-	if need > 0 && free < need {
-		return "", fmt.Errorf("utmvm: %s has %s free, and this needs about %s\n"+
-			"  point somewhere with more room: IRGO_WORK_DIR=/Volumes/<disk>/irgo-work",
-			p.Work, HumanBytes(free), HumanBytes(need))
-	}
-	return p.Work, nil
-}
 
 // FreeBytes is the space available to this user on the filesystem holding path.
 func FreeBytes(path string) (int64, error) {

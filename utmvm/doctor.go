@@ -490,7 +490,7 @@ func Externals(repoRoot string) []External {
 		},
 		{
 			Name: "Windows 11 ARM64 ISO",
-			Path: paths.ISO(),
+			Path: isoPath(),
 			Why: "the installation media. Microsoft's, not redistributable, and 5 GB. " +
 				"Downloaded or built by irgo-winvm iso-create.",
 			Fix:  "irgo-winvm iso-create -fetch",
@@ -514,23 +514,6 @@ func Externals(repoRoot string) []External {
 			Kind: KindBuilt,
 			Dir:  true,
 			Skip: repoRoot == "",
-		},
-		{
-			Name: "glaze clone",
-			Path: filepath.Join(paths.Upstream, "glaze"),
-			Why: "only needed to FIX glaze rather than work around it, which is this repo's rule. " +
-				"Uncommitted work in here is invisible from this repository and easy to lose.",
-			Fix:  "mise run upstream:clone   (then upstream:diff to see what is in it)",
-			Kind: KindUpstream,
-			Dir:  true,
-		},
-		{
-			Name: "native clone",
-			Path: filepath.Join(paths.Upstream, "native"),
-			Why:  "as above, for crgimenes/native.",
-			Fix:  "mise run upstream:clone",
-			Kind: KindUpstream,
-			Dir:  true,
 		},
 	}
 

@@ -663,5 +663,14 @@ func isoWorkDir() (string, error) {
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		return "", err
 	}
+
+	// Space checked up front, because running out halfway leaves a
+	// part-written image that looks plausible and fails later as a boot that
+	// hangs rather than as "no space left". Expanding an .esd writes about
+	// 5 GB and mastering the ISO writes another 5 GB beside it.
+	if free, fErr := FreeBytes(d); fErr == nil && free < isoBuildNeedsBytes {
+		return "", fmt.Errorf("utmvm: %s has %s free, and building an ISO needs about %s",
+			Home(d), HumanBytes(free), HumanBytes(isoBuildNeedsBytes))
+	}
 	return d, nil
 }

@@ -134,115 +134,65 @@ func runVMCreate(args []string) error {
 	return nil
 }
 
-// reportISOTools says whether this machine can build its own Windows media.
-//
-// Reported by doctor rather than discovered by iso-create, because the answer
-// changes what a new developer does first: with both tools they never touch
-// CrystalFetch, and without them they should not start a download they cannot
-// finish.
-//
-// Only two, and they are the two CrystalFetch bundles inside its own app —
-// which is why it appears to need nothing.
-func reportISOTools() {
-	wim := utmvm.ISOWimTool()
-	master, candidates := utmvm.ISOFindMasterer()
-
-	fmt.Printf("\nbuilding your own Windows ISO needs two tools:\n\n")
-
-	state := "MISSING — " + wim.Install()
-	if wim.Found() {
-		state = utmvm.Home(wim.Path)
-	}
-	fmt.Printf("  %-16s %s\n", wim.Name, state)
-
-	if master.Found() {
-		fmt.Printf("  %-16s %s\n", master.Name, utmvm.Home(master.Path))
-	} else {
-		fmt.Printf("  %-16s MISSING — %s\n", "an ISO masterer", candidates[0].Install())
-	}
-
-	if wim.Found() && master.Found() {
-		fmt.Printf("\n  both present: irgo-winvm iso-create can build media.\n")
-	} else {
-		fmt.Printf("\n  until then, get the ISO with CrystalFetch —\n")
-		fmt.Printf("  `irgo-winvm vm -list` says which build and its SHA-1.\n")
-	}
-}
-
 func runDoctor() error {
 	out := utmvm.Reporter("doctor")
-	in, err := utmvm.EnsureUTM()
-	if err != nil {
-		return err
-	}
-	out("UTM        %s at %s", in.Version, in.Path)
-	if !in.Compatible {
-		out("           WARNING: schema verified against %s; a major difference", utmvm.VerifiedVersion)
-		out("           is the usual cause of \"cannot import this VM\"")
-	}
-	if gt, err := utmvm.EnsureGuestTools(); err == nil {
-		out("guest tools present (%s)", gt)
-	} else {
-		out("guest tools MISSING — utmctl exec will not work\n  %v", err)
-	}
-	home, _ := os.UserHomeDir()
-	if sp, err := utmvm.CheckSpace(home, ""); err == nil {
-		state := "ok"
-		if !sp.OK {
-			state = "LOW"
-		}
-		out("disk       %s (%s)", sp, state)
-	}
 
-	reportExternals()
-	return nil
-}
+	// One table. It was five formats -- prose, a table, another prose block, a
+	// "N missing" list repeating what the table already said, and a records
+	// section -- so the same fact appeared twice in different words and the
+	// thing you were looking for was never where you looked.
+	type row struct{ what, state, where string }
+	var rows []row
+	add := func(what, state, where string) { rows = append(rows, row{what, state, where}) }
 
-// reportExternals inventories everything the project needs that is not in git.
-//
-// It is here rather than in a document because a document cannot tell you
-// whether the file is actually on this machine, and that is the only question
-// worth asking. A clone of this repository is roughly 1 MB; running any of it
-// needs ~33 GB that git has never seen, and every one of them fails a long way
-// from its cause when absent — a missing guest-tools ISO presents as a VM with
-// no network rather than as a missing ISO.
-func reportExternals() {
-	root, err := os.Getwd()
-	if err != nil {
-		root = ""
-	}
-	ext := utmvm.Externals(root)
-
-	// "not in git" rather than "outside the repository": .cache and .bin sit
-	// inside the working tree and are still absent from a fresh clone, which
-	// is the property that matters.
-	fmt.Printf("\nwhat this needs that git does not have:\n\n")
-	fmt.Printf("  %-22s %-9s %-9s %s\n", "WHAT", "SIZE", "SHARED", "WHERE")
-	for _, e := range ext {
-		size, shared := "MISSING", ""
-		if e.Present {
-			size = utmvm.HumanBytes(e.Bytes)
-			if e.Shared > 0 {
-				shared = utmvm.HumanBytes(e.Shared)
+	for _, e := range utmvm.Externals() {
+		state := "MISSING"
+		if e.Path != "" {
+			if _, sErr := os.Stat(e.Path); sErr == nil {
+				state = "ok"
+				if e.Bytes > 0 {
+					state = utmvm.HumanBytes(e.Bytes)
+				}
 			}
 		}
-		fmt.Printf("  %-22s %-9s %-9s %s\n", e.Name, size, shared, utmvm.Home(e.Path))
+		add(e.Name, state, utmvm.Home(e.Path))
 	}
-	fmt.Printf("\n  %-22s %s\n", "total on disk", utmvm.HumanBytes(utmvm.TotalBytes(ext)))
-	fmt.Printf("  SHARED is hardlinked blocks an earlier row already counted, not extra space.\n")
 
-	reportISOTools()
+	for _, t := range utmvm.ISOTools() {
+		state := "MISSING"
+		if t.Found() {
+			state = "ok"
+		}
+		add(t.Name, state, utmvm.Home(t.Where()))
+	}
 
-	missing := utmvm.Missing(ext)
-	if len(missing) == 0 {
-		fmt.Printf("\nnothing missing.\n")
-		return
+	for _, r := range utmvm.Records() {
+		state := "not yet"
+		if fi, sErr := os.Stat(r.Path); sErr == nil {
+			state = "written"
+			if !r.Dir {
+				state = utmvm.HumanBytes(fi.Size())
+			}
+		}
+		add(r.Name, state, utmvm.Home(r.Path))
 	}
-	fmt.Printf("\n%d missing:\n", len(missing))
-	for _, e := range missing {
-		fmt.Printf("\n  %s — %s\n", e.Name, e.Why)
-		fmt.Printf("    get it: %s\n", e.Fix)
+
+	out("%-22s %-10s %s", "WHAT", "STATE", "WHERE")
+	var missing int
+	for _, r := range rows {
+		out("%-22s %-10s %s", r.what, r.state, r.where)
+		if r.state == "MISSING" {
+			missing++
+		}
 	}
+	out("")
+	if missing == 0 {
+		out("nothing missing.")
+		return nil
+	}
+	// What to run, once, rather than a paragraph per missing thing.
+	out("%d missing. In order: irgo-winvm iso-create -fetch, then vm-create -install.", missing)
+	return nil
 }
 
 func runVMDelete(args []string) error {

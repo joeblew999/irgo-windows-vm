@@ -58,7 +58,45 @@ var ErrUTMNotInstalled = errors.New("UTM is not installed")
 //
 // repoRoot may be empty; the entries that live inside the working tree but
 // outside git are then skipped rather than guessed at.
-func Externals(repoRoot string) []External {
+// Records are what a run leaves behind: the log, and the screenshots.
+//
+// Reported by doctor because a file nobody can find is a file nobody uses, and
+// both of these exist precisely for the moment something went wrong — which is
+// exactly when hunting for them is hardest.
+// mediaPath is the media doctor should report: whatever iso-create would use.
+//
+// It reported "MISSING" while iso-create resolved media in milliseconds,
+// because it looked only for the downloaded name and this project usually has
+// the built one. A diagnostic that disagrees with the thing it diagnoses is
+// worse than no diagnostic.
+func mediaPath() string {
+	for _, p := range []string{isoBuiltPath(), isoPath()} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return isoPath()
+}
+
+func Records() []External {
+	return []External{
+		{
+			Name: "log",
+			Path: LogPath(),
+			Why:  "every line every command printed, with timestamps. Appended to across runs.",
+			Fix:  "written on the first command that runs",
+		},
+		{
+			Name: "screenshots",
+			Path: ShotDir(),
+			Why:  "one per install stage, and one whenever a boot is driven. What a stuck VM actually looks like.",
+			Fix:  "written during vm-create, or on demand with irgo-winvm vm-screen",
+			Dir:  true,
+		},
+	}
+}
+
+func Externals() []External {
 
 	// One layout, reported as it is. This used to rewrite Cache, Bin and Work
 	// to repo-relative directories when run inside a checkout, and consult
@@ -71,50 +109,35 @@ func Externals(repoRoot string) []External {
 			Path: lookPath("go"),
 			Why: "deliberately not pinned by mise: each go.mod's `go` directive is a floor and " +
 				"the toolchain mechanism fetches what a module needs. Two managers on that job disagree.",
-			Fix:  "install Go however you like; go.mod will say if it is too old",
-			Kind: KindTool,
+			Fix: "install Go however you like; go.mod will say if it is too old",
 		},
 		{
 			Name: "UTM.app",
 			Path: AppPath,
 			Why:  "the hypervisor. Everything here drives it through utmctl, which lives inside the bundle.",
 			Fix:  "irgo-winvm vm, which downloads and installs it",
-			Kind: KindTool,
 		},
 		{
 			Name: "UTM guest tools ISO",
 			Path: mustGuestToolsPath(),
 			Why: "the QEMU guest agent and the virtio-net driver. Without it a VM boots and " +
 				"is then unreachable: no network, no `utmctl exec`, no IP.",
-			Fix:  "open UTM once and let it download them; there is no supported way to fetch them ourselves",
-			Kind: KindTool,
+			Fix: "open UTM once and let it download them; there is no supported way to fetch them ourselves",
 		},
 		{
 			Name: "Windows 11 ARM64 ISO",
-			Path: isoPath(),
+			Path: mediaPath(),
 			Why: "the installation media. Microsoft's, not redistributable, and 5 GB. " +
 				"Downloaded or built by irgo-winvm iso-create.",
-			Fix:  "irgo-winvm iso-create -fetch",
-			Kind: KindMedia,
-			Skip: repoRoot == "",
+			Fix: "irgo-winvm iso-create -fetch",
 		},
 		{
 			Name: "the VM itself",
 			Path: mustVMDir(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
-			Fix:  "irgo-winvm vm",
-			Kind: KindState,
-			Dir:  true,
-		},
-		{
-			Name: "probe binaries",
-			Path: VMStageDir(),
-			Why:  "cross-compiled Windows binaries. Gitignored, rebuilt in seconds, but a restart used to lose them.",
-			Fix:  "go build -o " + VMStageDir() + " ./probe/...",
-			Kind: KindBuilt,
-			Dir:  true,
-			Skip: repoRoot == "",
+			Fix: "irgo-winvm vm",
+			Dir: true,
 		},
 	}
 
@@ -133,30 +156,11 @@ func Externals(repoRoot string) []External {
 	seen := map[uint64]bool{}
 	out := make([]External, 0, len(list))
 	for _, e := range list {
-		if e.Skip {
-			continue
-		}
 		e.stat(seen)
 		out = append(out, e)
 	}
 	return out
 }
-
-// Kind groups externals by what it means when one is missing.
-type Kind string
-
-const (
-	// KindTool is installed software. Missing means nothing works at all.
-	KindTool Kind = "tool"
-	// KindMedia is downloaded, non-redistributable media.
-	KindMedia Kind = "media"
-	// KindState is a machine's state — expensive to rebuild, not source.
-	KindState Kind = "state"
-	// KindBuilt is generated from this repository in seconds.
-	KindBuilt Kind = "built"
-	// KindUpstream is a clone of a dependency, needed only to fix it.
-	KindUpstream Kind = "upstream"
-)
 
 // External is one thing outside the repository that the project relies on.
 type External struct {
@@ -164,7 +168,6 @@ type External struct {
 	Path string
 	Why  string
 	Fix  string
-	Kind Kind
 	Dir  bool
 	Skip bool
 

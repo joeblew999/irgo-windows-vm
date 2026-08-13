@@ -13,6 +13,68 @@ golangci-lint = "2.11.2"
 # The command tasks are the commands and nothing else. If a task here does more
 # than call the binary, that logic belongs in the binary.
 
+[tasks."app:create"]
+description = "irgo-winvm app-create"
+run = "go run ./cmd/irgo-winvm app-create"
+
+[tasks."app:delete"]
+description = "irgo-winvm app-delete"
+run = "go run ./cmd/irgo-winvm app-delete"
+
+[tasks."app:probe"]
+description = "Build the native capability probe and run it on the VM"
+run = '''
+set -e
+VM=${VM:-irgo-win11}
+BIN=$(go env GOPATH)/../irgo-probe.exe
+BIN=${TMPDIR:-/tmp}/nativeprobe-arm64.exe
+
+# The probe is not special: it is a Windows binary, and app-create runs any
+# Windows binary. This is what the whole repository exists to do -- build a
+# glaze or native program on the Mac, run it on real Windows, read the result.
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
+echo "built $BIN"
+go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
+'''
+
+[tasks."app:test"]
+description = "Put a binary on a VM, run it, and remove it"
+run = '''
+set -e
+VM=${VM:-irgo-win11}
+
+# Needs a VM with Windows actually installed and answering: app-create pushes
+# a binary through utmctl, which needs the guest agent. A bundle with no
+# Windows on it cannot run anything.
+# Bounded: utmctl exec against a guest with no agent does not fail, it waits.
+# A precondition that hangs is worse than one that is wrong.
+if ! utmctl ip-address "$VM" >/dev/null 2>&1; then
+  echo "$VM has no guest agent — run: irgo-winvm vm-create -install" >&2
+  exit 1
+fi
+
+BIN=$(mktemp -d)/hello.exe
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
+
+echo "=== create: push it and run it ==="
+go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
+
+echo
+echo "=== delete: take it off again ==="
+go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
+
+echo
+echo "=== deleting again is success, not an error ==="
+go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
+
+echo
+echo "app create and delete cycle complete"
+'''
+
+[tasks."doctor"]
+description = "irgo-winvm doctor"
+run = "go run ./cmd/irgo-winvm doctor"
+
 [tasks."go:build"]
 description = "Build irgo-winvm for every Mac a user could have"
 run = '''
@@ -36,10 +98,6 @@ done
 ( cd "$OUT" && shasum -a 256 *.tar.gz > SHA256SUMS )
 cat "$OUT/SHA256SUMS"
 '''
-
-[tasks."go:lint"]
-description = "The analysers, with everything they found already fixed"
-run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
 
 [tasks."go:check"]
 description = "Build, vet and test every module, and cross-compile every target"
@@ -78,6 +136,22 @@ run = [
   "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./nativeall",
 ]
 
+[tasks."go:lint"]
+description = "The analysers, with everything they found already fixed"
+run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
+
+[tasks."iso:create"]
+description = "irgo-winvm iso-create"
+run = "go run ./cmd/irgo-winvm iso-create"
+
+[tasks."iso:delete"]
+description = "irgo-winvm iso-delete"
+run = "go run ./cmd/irgo-winvm iso-delete"
+
+[tasks."iso:test"]
+description = "The ISO tests"
+run = "go test ./utmvm/ -run 'TestVerdict|TestInspectISO|TestProtect|TestISOLinks|TestISO|TestDownload' -v"
+
 [tasks."vm:create"]
 description = "irgo-winvm vm-create"
 run = "go run ./cmd/irgo-winvm vm-create"
@@ -85,6 +159,10 @@ run = "go run ./cmd/irgo-winvm vm-create"
 [tasks."vm:delete"]
 description = "irgo-winvm vm-delete"
 run = "go run ./cmd/irgo-winvm vm-delete"
+
+[tasks."vm:screen"]
+description = "irgo-winvm vm-screen"
+run = "go run ./cmd/irgo-winvm vm-screen"
 
 [tasks."vm:test"]
 description = "Create a VM and delete it, against a disposable name"
@@ -130,77 +208,3 @@ go run ./cmd/irgo-winvm vm-delete -vm "$VM"
 echo
 echo "create and delete cycle complete"
 '''
-
-[tasks."app:create"]
-description = "irgo-winvm app-create"
-run = "go run ./cmd/irgo-winvm app-create"
-
-[tasks."app:delete"]
-description = "irgo-winvm app-delete"
-run = "go run ./cmd/irgo-winvm app-delete"
-
-[tasks."app:test"]
-description = "Put a binary on a VM, run it, and remove it"
-run = '''
-set -e
-VM=${VM:-irgo-win11}
-
-# Needs a VM with Windows actually installed and answering: app-create pushes
-# a binary through utmctl, which needs the guest agent. A bundle with no
-# Windows on it cannot run anything.
-# Bounded: utmctl exec against a guest with no agent does not fail, it waits.
-# A precondition that hangs is worse than one that is wrong.
-if ! utmctl ip-address "$VM" >/dev/null 2>&1; then
-  echo "$VM has no guest agent — run: irgo-winvm vm-create -install" >&2
-  exit 1
-fi
-
-BIN=$(mktemp -d)/hello.exe
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
-
-echo "=== create: push it and run it ==="
-go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
-
-echo
-echo "=== delete: take it off again ==="
-go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
-
-echo
-echo "=== deleting again is success, not an error ==="
-go run ./cmd/irgo-winvm app-delete -vm "$VM" "$BIN"
-
-echo
-echo "app create and delete cycle complete"
-'''
-
-[tasks."vm:screen"]
-description = "irgo-winvm vm-screen"
-run = "go run ./cmd/irgo-winvm vm-screen"
-
-[tasks."app:probe"]
-description = "Build the native capability probe and run it on the VM"
-run = '''
-set -e
-VM=${VM:-irgo-win11}
-BIN=$(go env GOPATH)/../irgo-probe.exe
-BIN=${TMPDIR:-/tmp}/nativeprobe-arm64.exe
-
-# The probe is not special: it is a Windows binary, and app-create runs any
-# Windows binary. This is what the whole repository exists to do -- build a
-# glaze or native program on the Mac, run it on real Windows, read the result.
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
-echo "built $BIN"
-go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
-'''
-
-[tasks."iso:create"]
-description = "irgo-winvm iso-create"
-run = "go run ./cmd/irgo-winvm iso-create"
-
-[tasks."iso:delete"]
-description = "irgo-winvm iso-delete"
-run = "go run ./cmd/irgo-winvm iso-delete"
-
-[tasks."iso:test"]
-description = "The ISO tests"
-run = "go test ./utmvm/ -run 'TestVerdict|TestInspectISO|TestProtect|TestISOLinks|TestISO|TestDownload' -v"

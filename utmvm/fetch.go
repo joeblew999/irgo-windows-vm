@@ -106,6 +106,20 @@ func Download(url, dest, wantSHA1 string, progress func(done, total int64)) erro
 			return fmt.Errorf("utmvm: downloading: %w", rErr)
 		}
 	}
+	// Flushed before it counts as written. Without this a crash can leave the
+	// final name at full length with an unflushed tail — the wrong bytes, under
+	// a name that says the download finished.
+	//
+	// Note what is NOT here: a done == ContentLength check. net/http already
+	// fails a body shorter than a declared Content-Length, so such a check is
+	// unreachable — verified by disabling it and watching the test still pass.
+	// The genuine gap is a chunked response (ContentLength -1) truncated
+	// mid-stream, which is indistinguishable from a clean end at this layer and
+	// is caught only by the SHA-1, when the caller supplies one.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
 	if err := f.Close(); err != nil {
 		return err
 	}

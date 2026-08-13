@@ -1,13 +1,18 @@
 # Maintainer tasks. A user of the binary never needs this file.
 #
-# The iso:* tasks are the CLI commands and nothing else. If a task here does
-# more than call the binary, that logic belongs in the binary.
+# Namespaced by what they drive:
+#
+#   go:*    the Go toolchain and the analysers
+#   iso:*   the iso-create and iso-delete commands, and their tests
+#
+# The command tasks are the commands and nothing else. If a task here does more
+# than call the binary, that logic belongs in the binary.
 
-[tasks.lint]
+[tasks."go:lint"]
 description = "The analysers, with everything they found already fixed"
 run = "golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
 
-[tasks.check]
+[tasks."go:check"]
 description = "Build, vet, test, and cross-compile every target"
 run = [
   "go build ./...",

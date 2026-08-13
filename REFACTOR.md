@@ -217,6 +217,82 @@ coverage is thin: it is structural, not laziness.
 - **`CanCreateVMs()` is bypassed** at `bundle.go:15`, which compares
   `runtime.GOOS` directly despite the helper's own comment saying not to.
 
+### Found by reading, not grepping
+
+Everything above came from measurement. These came from reading the code line by
+line, which no earlier pass had done — and they are the kind a scanner cannot
+find.
+
+**The README's headline claim is false.** Line 6 says *"Pure Go. No `hdiutil`,
+no `plutil`, no shell scripts — clone, build, run."* The code shells out to
+`plutil` (`ensure.go:61`), `hdiutil` (`installutm.go:72,79` — added during this
+session's own work), `osascript`, `ditto`, `bsdtar`, `wimlib-imagex` and
+`xorriso`. This plan has repeatedly reasoned *from* that claim, so parts of it
+were built on a false premise.
+
+The defensible version, which is true: **no toolchain is needed to build or
+cross-compile, and nothing must be installed for the common path.** Every
+external program is either a macOS built-in (`plutil`, `hdiutil`, `ditto`,
+`osascript`, `bsdtar`) or optional and only for building your own ISO
+(`wimlib`, `xorriso`). Fix the claim; do not quietly keep it.
+
+**`irgo-winvm iso` scans the current working directory** — `main.go:755` calls
+`ScanISOs([]string{"."})`. Run it from `$HOME` and it walks everything you own
+looking for 1 GB files.
+
+**An unreachable error branch** — `main.go:331`. `runExec` returns early if
+`-cmd` is empty, then checks `*cmdline == ""` again inside the `len(argv) == 0`
+branch. The helpful message *"give a command after the flags"* can never print.
+The comment above it describes an improvement the required-flag check defeats.
+
+**A flag whose documented default does not exist** — `main.go:391` advertises
+`-o` as *"(default: under IRGO_CACHE_DIR)"*; no code applies any default, and an
+empty `-o` just prints help.
+
+**A fifth byte formatter, in the function next to the ones I fixed** —
+`main.go:902`, `fmt.Printf("%.1f MB reclaimed", float64(freed)/(1<<20))`. An
+earlier commit in this session claimed "four byte formatters collapse into
+`HumanBytes`". It missed the one in `runPrune`.
+
+**Bundle layout leaks into the CLI four times** — `e.Name+".utm"` is
+concatenated by hand at `main.go:300,925,1084,1119`, plus `"Data", "disk.img"`.
+`utmvm` owns that layout and exposes no `BundlePath(name)`.
+
+**`-replace` swallows its error** — `main.go:964`,
+`if _, err := utmvm.Delete(*name, true); err == nil`. A failed delete is
+silently ignored, and `Create` then fails with "already exists", which points at
+the wrong cause.
+
+**A stale comment on `runISO`** claims `fetch-iso` "does not exist yet and
+cannot be reviewed" (`main.go:702`). It exists; this session wrote it.
+
+**A garbled user-facing string** — `main.go:935` prints *"boot took — Setup is
+running or the guest agent answered"*.
+
+### Test coverage is thinner than "thin"
+
+| | |
+|---|---|
+| test functions | **24** |
+| exported symbols | **134** |
+| files with **no test at all** | **22 of 26** |
+
+The untested list is every file that touches a VM, media or setup: `control`,
+`run`, `install`, `setup`, `bundle`, `fetch`, `isobuild`, `isoguard`, `ensure`,
+`paths`, `brew`, `cleanup`, `host`, `screenshot`, `diskspace`, `payload`,
+`external`, `installutm`, `iso`, `fatimage`, and both `sysfile_*`.
+
+Only `config`, `isoimage`, `catalog`, `assets`, `bootassist` and the prune
+regression have any. This is the strongest argument for phase 5: **without the
+`runner` seam, 22 files cannot be tested at all**, and every phase after it is
+verified by hand against a 45-minute install.
+
+### Four modules, three Go versions, no policy
+
+`go.mod` declares `1.25.0` at the root and `1.26.5` in `probe`, `glaze-probes`
+and `examples`. CI's `go-version-file: go.mod` therefore installs 1.25 and makes
+Go download a second toolchain to build the other three.
+
 ### The CLI and `mise.toml` have no boundary
 
 30 mise tasks: **20 thin wrappers** over CLI commands, **7 with real shell

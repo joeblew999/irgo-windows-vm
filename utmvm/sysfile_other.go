@@ -3,7 +3,7 @@
 package utmvm
 
 // Off macOS, none of this package's VM machinery can run — UTM is macOS-only —
-// but the package must still COMPILE, because `irgo-winvm targets` exists
+// but the package must still COMPILE, because `irgo-winvm doctor` exists
 // precisely to tell a developer on Windows or Linux what their machine can and
 // cannot do. A tool that cannot build for the person it is trying to inform is
 // no use to them.

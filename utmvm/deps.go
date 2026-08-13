@@ -508,7 +508,7 @@ func Externals(repoRoot string) []External {
 			Name: "UTM.app",
 			Path: AppPath,
 			Why:  "the hypervisor. Everything here drives it through utmctl, which lives inside the bundle.",
-			Fix:  "irgo-winvm setup, which downloads and installs it",
+			Fix:  "irgo-winvm vm, which downloads and installs it",
 			Kind: KindTool,
 		},
 		{
@@ -534,7 +534,7 @@ func Externals(repoRoot string) []External {
 			Path: paths.VMs,
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
-			Fix:  "irgo-winvm up -iso .cache/win11-arm64.iso -name irgo-win11",
+			Fix:  "irgo-winvm vm -iso .cache/win11-arm64.iso -name irgo-win11",
 			Kind: KindState,
 			Dir:  true,
 		},

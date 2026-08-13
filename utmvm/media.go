@@ -1216,7 +1216,7 @@ func ProtectISO(path string) error { return chflags(path, true) }
 // UnprotectISO clears the immutable flag, so the ISO can be replaced or the VM
 // holding a hardlink to it can be deleted. Idempotent.
 //
-// `irgo-winvm delete` needs this: rm refuses an immutable file, and the VM
+// `irgo-winvm vm-delete` needs this: rm refuses an immutable file, and the VM
 // bundle's install.iso is the same inode as the protected one.
 func UnprotectISO(path string) error { return chflags(path, false) }
 

@@ -896,7 +896,7 @@ func RunInstall(opts InstallOptions) error {
 			assists++
 			if assists > 6 {
 				return fmt.Errorf("stalled at %s after %d boot attempts; "+
-					"run `irgo-winvm screenshot -vm %s` to see the guest", p, assists, opts.VMRef)
+					"open the VM in UTM to see where the guest is", p, assists)
 			}
 			logf("stalled at %s — booting %s (attempt %d)", p, what, assists)
 			if err := BootAssistOn(opts.VMRef, target, ""); err != nil {
@@ -1410,7 +1410,7 @@ func windowID(vmName string) (int, error) {
 	// was never opened, which is what `utmctl start` does. Say so, because the
 	// symptom otherwise looks like the VM being absent.
 	return 0, fmt.Errorf("no UTM window titled %q (found: %s).\n"+
-		"A VM started with `utmctl start` has no display window — use `irgo-winvm boot`, "+
+		"A VM started with `utmctl start` has no display window — use `irgo-winvm vm`, "+
 		"which starts it through UTM so a window exists", vmName, strings.Join(titles, ", "))
 }
 
@@ -1440,3 +1440,24 @@ func BundlePath(name string) (string, error) {
 // DiskPath is the system disk inside a bundle. Its growth is how an install is
 // watched from the host, so it is asked for often.
 func DiskPath(bundle string) string { return filepath.Join(bundle, bundleData, diskImage) }
+
+// CheckAutomation reports whether this process may drive UTM through AppleScript.
+//
+// Booting needs it: UTM's aarch64 firmware drops to a UEFI shell and something
+// has to type the boot path, which goes through `osascript` into UTM's display
+// window. macOS gates that behind an Automation consent dialog that no script
+// can grant, and the failure arrives as a timeout with no mention of
+// permissions — after the install has already run for forty minutes.
+//
+// So it is asked FIRST, with a call that changes nothing.
+func CheckAutomation() error {
+	out, err := exec.Command("osascript", "-e", `tell application "UTM" to count virtual machines`).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("this process cannot control UTM: %s\n"+
+		"  macOS asks once, in a dialog. Grant it under System Settings ->\n"+
+		"  Privacy & Security -> Automation, then run this again.\n"+
+		"  Without it the boot cannot be driven and an install stops at a UEFI prompt",
+		strings.TrimSpace(string(out)))
+}

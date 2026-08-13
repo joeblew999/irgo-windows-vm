@@ -164,7 +164,7 @@ func (p Paths) CheckWritable(dest string) error {
 	if p.VMs != "" {
 		if rel, rErr := filepath.Rel(p.VMs, abs); rErr == nil && !hasDotDot(rel) {
 			return fmt.Errorf("utmvm: %s is inside UTM's bundle directory (%s)\n"+
-				"  Nothing here writes there directly; use `irgo-winvm create`.", Home(abs), Home(p.VMs))
+				"  Nothing here writes there directly; use `irgo-winvm vm`.", Home(abs), Home(p.VMs))
 		}
 	}
 
@@ -173,12 +173,12 @@ func (p Paths) CheckWritable(dest string) error {
 	}
 	if flags, ok := fileFlags(abs); ok && flags&uchgFlag != 0 {
 		return fmt.Errorf("utmvm: %s is immutable — it was protected on purpose\n"+
-			"  Clear it first if you really mean to replace it: irgo-winvm iso -unprotect -iso %s",
+			"  It was protected on purpose; clear the flag by hand if you mean it: chflags nouchg %s",
 			Home(abs), Home(abs))
 	}
 	if _, nlink, ok := inodeInfo(abs); ok && nlink > 1 {
 		return fmt.Errorf("utmvm: %s has %d names — it is ONE file shared with %d other place(s),\n"+
-			"  and writing here empties all of them. Run `irgo-winvm iso` to see where.",
+			"  and writing here empties all of them.",
 			Home(abs), nlink, nlink-1)
 	}
 	return nil

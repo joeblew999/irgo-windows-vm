@@ -137,7 +137,18 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		_ = stage("protect the media", false, "now immutable", nil)
 	}
 
-	// 5. The VM bundle.
+	// 5. Permission to drive UTM, asked before anything expensive.
+	//
+	// This is the one prerequisite that cannot be installed: it is a consent
+	// dialog. Asked here rather than at boot time so a missing grant costs a
+	// second instead of forty minutes of install followed by a timeout that
+	// says nothing about permissions.
+	if aErr := CheckAutomation(); aErr != nil {
+		return res, stage("control UTM", false, "", aErr)
+	}
+	_ = stage("control UTM", true, "permitted", nil)
+
+	// 6. The VM bundle.
 	existing, findErr := Find(opts.VMName)
 	if findErr == nil {
 		_ = stage("VM bundle", true, opts.VMName+" ("+existing.Status+")", nil)

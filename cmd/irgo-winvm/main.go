@@ -155,7 +155,7 @@ func runSetup(args []string) error {
 	fmt.Println()
 	if res.Ready {
 		fmt.Printf("%s is ready.\n\n", res.VM)
-		fmt.Printf("  irgo-winvm probe -vm %s          run the native capability probes\n", res.VM)
+		fmt.Printf("  irgo-winvm run -vm %s          run the native capability probes\n", res.VM)
 		fmt.Printf("  irgo-winvm run -gui -vm %s <exe> run a windowed binary\n", res.VM)
 		return nil
 	}
@@ -191,10 +191,10 @@ func reportISOTools() {
 	}
 
 	if wim.Found() && master.Found() {
-		fmt.Printf("\n  both present: irgo-winvm fetch-iso, then build-iso.\n")
+		fmt.Printf("\n  both present: irgo-winvm vm, then build-iso.\n")
 	} else {
 		fmt.Printf("\n  until then, get the ISO with CrystalFetch —\n")
-		fmt.Printf("  `irgo-winvm fetch-iso -list` says which build and its SHA-1.\n")
+		fmt.Printf("  `irgo-winvm vm -list` says which build and its SHA-1.\n")
 	}
 }
 

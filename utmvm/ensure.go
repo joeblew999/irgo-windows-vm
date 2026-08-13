@@ -187,3 +187,32 @@ func majorOf(v string) int {
 	}
 	return n
 }
+
+// guestToolsPath is where UTM caches the guest tools, and therefore where a
+// download of our own has to land for UTM and every generated VM to find it.
+func guestToolsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data",
+		"Library", "Application Support", "GuestSupportTools", "utm-guest-tools-latest.iso"), nil
+}
+
+// GuestToolsISO returns UTM's downloaded guest tools image, if present.
+//
+// Installing these inside the guest is what gives the QEMU guest agent, and
+// therefore `utmctl exec` and `utmctl ip-address`. Without it a VM boots fine
+// but cannot be driven from the host at all — which defeats the point of
+// generating one from a script.
+func GuestToolsISO() (string, error) {
+	p, err := guestToolsPath()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(p); err != nil {
+		return "", fmt.Errorf("UTM guest tools not downloaded yet: %w\n"+
+			"Open UTM once and let it fetch them, or the guest agent will be unavailable", err)
+	}
+	return p, nil
+}

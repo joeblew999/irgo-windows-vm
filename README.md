@@ -61,6 +61,18 @@ That is the whole contract.
 Every command explains itself with `-h`, and `irgo-winvm help` explains the
 sequence. This file does not list flags and so cannot go stale about them.
 
+## What it looks like
+
+Not mock-ups. A Mac built the installer, installed Windows on it unattended,
+and photographed the result — including the failure that put three Bing tabs on
+the desktop.
+
+![Windows 11 ARM64 running in UTM, installed unattended from a Mac](docs/screens/windows-desktop-running.png)
+
+Every stage photographs itself as it runs, because from the host a stuck boot
+and a working one look identical. Those go to `shots/` outside the repository;
+the few kept here as evidence are in `docs/screens/`.
+
 ## A glaze or native bug is fixed at crgimenes, not here
 
 **Non-negotiable.** When a probe fails, the fix goes to

@@ -22,12 +22,17 @@
     {{.Body}}
   </article>
 
+  {{/*
+    A gallery, and no prose. There was a paragraph here describing what the
+    screenshots showed, which was a claim this template made on its own account
+    — the words appeared in no markdown file, so the repository could change
+    what it proves and this would have gone on saying the old thing.
+    Screenshots and their filenames come from docs/screens; the heading is a
+    label, like the navigation.
+  */}}
   {{if .Screens}}
   <section class="evidence">
-    <h2 id="evidence">Evidence</h2>
-    <p>Not mock-ups. A Mac built the installer, installed Windows on it
-    unattended, and photographed the result — including the failure that put
-    three Bing tabs on the desktop.</p>
+    <h2 id="evidence">Screenshots</h2>
     <div class="shots">
       {{range .Screens}}
       <figure>

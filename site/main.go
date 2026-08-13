@@ -1,15 +1,26 @@
 // Command site renders the repository's markdown into a static site.
 //
-// It generates; it does not author. Every word on the site comes from a file
-// that already exists and is already the source of truth for that subject —
-// README for what this is, RESULTS for what was measured, UPSTREAM for what was
-// fixed where, AGENTS for how the code works. Writing the site by hand would
-// make a second copy of all four, and a second copy is a second thing to update
-// and the one that goes stale: an example README in this repository did exactly
-// that, naming four tasks that no longer existed and a command renamed two
-// commits earlier.
+// It generates; it does not author. Every sentence on the site comes from a
+// markdown file that already exists and is already the source of truth for that
+// subject — README for what this is, RESULTS for what was measured, UPSTREAM
+// for what was fixed where, AGENTS for how the code works. Writing the site by
+// hand would make a second copy of all four, and a second copy is a second
+// thing to update and the one that goes stale: an example README in this
+// repository did exactly that, naming four tasks that no longer existed and a
+// command renamed two commits earlier.
 //
 // So if the site is wrong, the markdown is wrong. Fix it there.
+//
+// That claim was not true when it was first made. The template carried a
+// paragraph describing what the screenshots showed, which appeared in no
+// markdown file — so the repository could change what it proves while the site
+// went on asserting the old thing, which is precisely the failure this design
+// exists to prevent. It lives in README.md now.
+//
+// What the template still supplies is labels, not statements: the navigation
+// titles and the pages' meta descriptions, below, and a heading over the
+// screenshot gallery. Those name things rather than claim anything about them,
+// and a nav cannot be generated from prose.
 package main
 
 import (

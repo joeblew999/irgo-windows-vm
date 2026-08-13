@@ -292,14 +292,20 @@ func isoCompressionName(t uint16) string {
 // CrystalFetch — UTM's own authors' ISO downloader — keeps one, which is both
 // the fallback while LZX is unimplemented and the evidence that this catalog is
 // the right source: the ISO this project uses is the entry it lists.
+// crystalFetchCatalog is where CrystalFetch leaves the catalog it downloaded.
+// Read as a last resort, never written.
+var crystalFetchCatalog = []string{
+	"Library", "Containers", "llc.turing.CrystalFetch",
+	"Data", "Library", "Caches", "products.xml",
+}
+
 func ISOCachedCatalogPaths() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
 	return []string{
-		filepath.Join(home, "Library", "Containers", "llc.turing.CrystalFetch",
-			"Data", "Library", "Caches", "products.xml"),
+		filepath.Join(append([]string{home}, crystalFetchCatalog...)...),
 	}
 }
 
@@ -574,7 +580,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	say("STEP 2/4  looking for a downloaded .esd to build from")
 	if _, sErr := os.Stat(esd); sErr == nil {
 		built := isoBuiltPath()
-		say("          found %s — skipping the 4.2 GB download", Home(esd))
+		say("          found %s — skipping the %s download", Home(esd), ISODownloadSize())
 		say("STEP 4/4  expanding it and mastering a bootable ISO")
 		if bErr := isoBuildFromESD(esd, built, say); bErr != nil {
 			return "", "", false, bErr
@@ -587,8 +593,8 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 		return "", "", false, fmt.Errorf(
 			"no Windows media found.\n"+
 				"     Put an ARM64 ISO at %s, or re-run with -fetch to download\n"+
-				"     4.2 GB from Microsoft and build one (needs wimlib and xorriso).",
-			Home(isoPath()))
+				"     %s from Microsoft and build one (needs wimlib and xorriso).",
+			Home(isoPath()), ISODownloadSize())
 	}
 
 	say("STEP 3/4  asking Microsoft which build to download")
@@ -662,7 +668,7 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 // needs about 12 GB: the expanded tree is roughly the size of the ISO it will
 // become, plus the images being written into it.
 func isoWorkDir() (string, error) {
-	d := filepath.Join(ISODir(), "work")
+	d := ISOWorkDir()
 	if err := os.RemoveAll(d); err != nil {
 		return "", err
 	}

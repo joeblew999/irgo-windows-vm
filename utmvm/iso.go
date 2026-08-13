@@ -61,6 +61,15 @@ const (
 	// by six environment variables.
 	isoDirName = "media"
 
+	// isoWorkDirName is scratch for expanding an .esd, under ISODir so the ISO
+	// code owns everywhere it writes.
+	isoWorkDirName = "work"
+
+	// isoDownloadBytes is roughly what Microsoft serves for the ARM64 .esd.
+	// Named because it is the number every refusal and help string quotes when
+	// explaining what re-fetching costs, and six copies of "4.2 GB" drift.
+	isoDownloadBytes = 4_527_171_158
+
 	// minWindowsISOBytes separates Windows media from the small ISOs that share
 	// a directory with it: the generated answer file is 32 MB and UTM's guest
 	// tools are 121 MB, and neither will ever install an operating system.
@@ -850,3 +859,10 @@ func isoBuiltPath() string { return filepath.Join(ISODir(), builtISOName) }
 
 // isoESDPath is the compressed image the catalog serves, before expansion.
 func isoESDPath() string { return filepath.Join(ISODir(), esdName) }
+
+// ISOWorkDir is scratch space for expanding an .esd.
+func ISOWorkDir() string { return filepath.Join(ISODir(), isoWorkDirName) }
+
+// ISODownloadSize is what a fresh download costs, for messages that need to
+// say so. One number, so a refusal and the help text cannot disagree.
+func ISODownloadSize() string { return HumanBytes(isoDownloadBytes) }

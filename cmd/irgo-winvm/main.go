@@ -133,7 +133,7 @@ func runSetup(args []string) error {
 		name    = fs.String("vm", "irgo-win11", "VM name")
 		iso     = fs.String("iso", "", "media to use (default: find one, or build with -fetch)")
 		probes  = fs.String("probes", "", "probe binaries to embed (default: the .bin directory)")
-		fetch   = fs.Bool("fetch", false, "download 4.2 GB from Microsoft if no media is present")
+		fetch   = fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if no media is present")
 		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	)
@@ -400,36 +400,23 @@ func runRunDelete(args []string) error {
 // step in `vm`. Separate so it can be done once and kept.
 func runISOCreate(args []string) error {
 	fs := flag.NewFlagSet("iso-create", flag.ExitOnError)
-	fetch := fs.Bool("fetch", false, "download 4.2 GB from Microsoft if nothing local works")
+	fetch := fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if nothing local works")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `iso-create — get the Windows media a VM installs from.
+		fmt.Fprintf(os.Stderr, `iso-create — the Windows media a VM installs from.
 
-Nothing to do with UTM: this is a download from Microsoft and an ISO built
-from it. It works on a machine that has never had a hypervisor installed.
+  %s
 
-It tries four things, in this order, and stops at the first that works:
+  uses media already there, or a .esd already downloaded (~40s to build)
+  -fetch    downloads %s from Microsoft when there is neither
 
-  1. media already in %s
-  2. a .esd already downloaded there — builds from it, no network (~40s)
-  3. with -fetch: asks Microsoft's catalog, downloads 4.2 GB
-  4. expands that and masters a bootable ISO with xorriso
+Installs wimlib and xorriso if missing. iso-delete removes them.
 
-Without -fetch it stops at step 2 rather than starting a 4.2 GB download
-you did not ask for.
-
-It installs wimlib and xorriso if they are missing. iso-delete removes them.
-
-  irgo-winvm iso-create           use what is here, or build from a .esd
-  irgo-winvm iso-create -fetch    download too, if there is nothing to use
-
-Flags:
-`, utmvm.Home(utmvm.ISODir()))
-		fs.PrintDefaults()
+`, utmvm.Home(utmvm.ISODir()), utmvm.ISODownloadSize())
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Elapsed time on every line. A 4.2 GB download and an ISO build take
+	// Elapsed time on every line. A multi-gigabyte download and an ISO build take
 	// minutes, and without this there is no way to tell a slow step from a
 	// stuck one — which is how a 77-second cached-media check went unnoticed.
 	say := stamped()
@@ -475,30 +462,15 @@ func runISODelete(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `iso-delete — undo iso-create.
 
-Removes the media from %s and uninstalls
-wimlib and xorriso.
+  %s
 
-Two artefacts live there and they are not worth the same:
+  no flags   lists what would go, deletes nothing
+  -force     deletes the ISO, keeps the .esd (~40s to rebuild)
+  -all       deletes the .esd too (%s, rate-limited)
 
-  the ISO    mastered locally. Deleting it costs ~40s to rebuild, no network.
-  the .esd   what Microsoft served. Deleting it costs 4.2 GB from a source
-             that rate-limits, and cannot be recreated any other way.
+Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
 
-So -force deletes only the ISO and keeps the .esd. -all deletes both.
-
-Without -force it lists what would go and deletes nothing, which is the
-safe thing to run first.
-
-Only tools installed by Homebrew are removed. Anything you put somewhere
-yourself is named and left alone.
-
-  irgo-winvm iso-delete              list what would go
-  irgo-winvm iso-delete -force       delete the ISO, keep the .esd
-  irgo-winvm iso-delete -force -all  delete everything, including the 4.2 GB
-
-Flags:
-`, utmvm.Home(utmvm.ISODir()))
-		fs.PrintDefaults()
+`, utmvm.Home(utmvm.ISODir()), utmvm.ISODownloadSize())
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -567,7 +539,7 @@ Flags:
 		msg := strings.Join(what, " and ")
 		if len(files) > 0 {
 			if *all {
-				msg += "\n  Includes the .esd: 4.2 GB to re-fetch from a source that rate-limits."
+				msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
 			} else {
 				msg += "\n  The .esd is kept, so iso-create rebuilds this in about three\n" +
 					"  minutes with no network. Add -all to delete that too."

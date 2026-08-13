@@ -8,77 +8,16 @@ convenient rather than where it belonged, and several were added without first
 looking at what already existed. It works and it is measured, but it is not a
 codebase anyone can safely change.
 
-The harm is not aesthetic. Twice, duplication has hidden a real bug: `setup`
-called `EnsureReady` where it needed `RunInstall` (a fresh VM would have sat at
-a UEFI prompt until timeout), and three separate wait-for-agent loops meant a
-400 ms resume was measured with a 10-second poll. Both were found by
-consolidating, not by testing.
-
 **Nothing depends on this repository yet** — no published API, no other
 consumer, no released binary anyone has installed. So this deletes rather than
-deprecates, renames without aliases, and cuts the command surface instead of
-preserving it. The only contract is what `RESULTS.md` records as measured.
-
-This plan is organised by **the properties the code must have**, not by which
-files to move. Moving files is the last and least interesting part.
+deprecates and renames without aliases. The only contract is what `RESULTS.md`
+records as measured.
 
 ---
 
----
+## The pattern underneath every bug
 
-## Why not start a new repository beside this one
-
-It is the obvious question given how much is changing, and the answer is no —
-except for one part, where it is yes. The deciding measurement:
-
-| area | lines | comment lines | density |
-|---|---|---|---|
-| `cmd/irgo-winvm` | 1144 | 138 | **12%** |
-| `utmvm` | 5579 | **1418** | **25%** |
-
-**The value of this repository is not its code. It is roughly 1400 lines of
-recorded findings**, each of which cost hours and none of which is recoverable
-by reading the code they annotate: why the display must be `virtio-ramfb-gl`,
-why ESD image 3 needs `--boot`, why the keystroke count is bounded at eight
-(surplus presses reached Setup's UI and destroyed an install), why the answer
-file must be a CD and not a FAT disk, why `%q` must not be re-escaped for
-AppleScript, why `utmctl exec` output cannot be trusted.
-
-A rewrite either loses those or copies them across — and copying them *is* the
-refactor, minus the compiler checking that each one still sits beside the code
-it explains.
-
-Three further costs a new repo pays:
-
-- **The evidence stops being true.** `RESULTS.md` records measurements — 400 ms
-  resume, a self-built ISO installing unattended, every native capability on
-  Windows ARM64 — taken against *these* binaries. A rewrite invalidates all of
-  it until re-measured, and re-measuring costs 45-minute installs.
-- **The tests encode traps, not behaviour.** `config_test.go` exists because UTM
-  rejects a bad config with one generic "cannot import this VM" naming no field.
-  Porting those is work with no gain.
-- **Git history is provenance.** Which commit discovered which fact is currently
-  answerable, and would not be.
-
-And the refactor is mostly *mechanical* — move, rename, extract — where the
-compiler and the existing tests carry you. The genuinely new work (`context`,
-the `runner` seam, typed errors, one reporting interface) is additive and small.
-A rewrite reaches "compiles and looks nicer" quickly and "actually boots Windows
-unattended" slowly, because the hard part was never the structure.
-
-**The exception, and it is worth taking:** `cmd/irgo-winvm` is 1144 lines at 12%
-density — flag plumbing with almost nothing learned embedded in it. Phase 5
-should therefore be **written fresh against the new `utmvm` API and the old file
-deleted**, rather than carefully split. Untangling boilerplate is slower than
-replacing it, and there is nothing there to lose.
-
-So: refactor `utmvm` in place, rewrite the CLI, keep the repo.
-
----
-
-## The pattern underneath every bug in this repo
-
-Each of the defects found so far looked unrelated. They are one thing.
+Each defect found here looked unrelated to the others. They are one thing.
 
 **Every capability has three consumers**, and each has been re-deriving the
 others' knowledge:
@@ -89,21 +28,20 @@ others' knowledge:
 | **SEQUENCE** | the orchestration | `setup` |
 | **REPORT** | the diagnosis | `doctor`, `status`, `targets`, `verify`, `list` |
 
-Now the defects, sorted by which pair drifted:
+Sorted by which pair drifted:
 
 | defect | what happened |
 |---|---|
-| `EnsureReady` used for `RunInstall` | **SEQUENCE re-implemented DO** — and picked the wrong one |
-| `Prune` missing new guest files | **REPORT re-implemented DO's naming** in a second list |
+| `EnsureReady` used where `RunInstall` was needed | **SEQUENCE re-implemented DO**, and picked the wrong one |
+| `Prune` silently stops cleaning new guest files | **REPORT re-implemented DO's naming** in a second list |
 | nine ways to decide "is this VM usable" | **all three**, in five combinations, two disagreeing on case |
 | **`doctor` installs UTM** | **REPORT called DO's function** — a diagnostic that mutates |
 
-That last one is live and was introduced during this session's own work:
-`runDoctor` calls `EnsureUTM` and `EnsureGuestTools`, both of which install. On
-a machine without UTM, *"let me check what is wrong"* silently installs an
-application and downloads 120 MB. Nobody wrote that intentionally — `doctor`
-predates those functions gaining side effects, and nothing objected when they
-did.
+The last is live, and was introduced during this session's own work: `runDoctor`
+calls `EnsureUTM` and `EnsureGuestTools`, both of which install. On a machine
+without UTM, *"let me check what is wrong"* installs an application and
+downloads 120 MB. Nobody wrote that on purpose — `doctor` predates those
+functions gaining side effects, and nothing objected when they did.
 
 ### The fix: separate the query from the action
 
@@ -114,535 +52,339 @@ Check()  (State,   error)   // pure. No installs, no downloads, no writes.
 Ensure() (Outcome, error)   // acts — and is built on Check
 ```
 
-Then the three consumers stop drifting by construction:
+- **DO** calls `Ensure`.
+- **SEQUENCE** calls the *same* `Ensure`. This is what makes `setup` thin, and
+  what makes reproducing a `setup` failure by hand actually reproduce it.
+- **REPORT** calls `Check` **only**, so a diagnostic *cannot* mutate rather than
+  being trusted not to.
 
-- **DO** calls `Ensure`
-- **SEQUENCE** calls the *same* `Ensure` — which is what makes `setup` thin and
-  makes reproducing its failures by hand actually reproduce them
-- **REPORT** calls `Check` **only** — so a diagnostic *cannot* mutate, rather
-  than merely being trusted not to
-
-This is the organising principle the rest of this document serves. The
-idempotency contract, the thin `setup`, the single `VMState`, the primitives as
-a recovery toolkit — all of them are consequences of it.
-
-**Enforced:** a test asserts no `REPORT` command reaches an `Ensure*`, `Fetch*`
-or `Install*` function. `doctor` mutating is not a mistake anyone would make on
-purpose, which is exactly why it needs a mechanical check rather than a
-convention.
-
-## The properties, and where they are violated today
-
-### 1. Idempotency is a bolted-on layer, not a property of operations
-
-Every expensive operation here is one you will re-run: a 4.2 GB download, a
-45-minute install, a VM that reboots itself mid-session. So re-running must be
-safe and cheap. Today exactly **one** function has that property — `Setup` — and
-it gets it by wrapping primitives that actively refuse:
-
-| operation | re-run today |
-|---|---|
-| `Create` | **fails** — `"already exists; remove it or choose another name"` (`bundle.go:86`) |
-| `BuildISO` | **fails** — `"already exists — this never overwrites"` (`isobuild.go:255`) |
-| `Download` | **fails** if the destination exists (`fetch.go:159`); resumes only via `.part` |
-| `boot` | **unsafe** — re-driving a live Setup sends keystrokes into its UI, which has destroyed an install |
-| `Setup` | idempotent, by doing everyone else's state checks itself |
-
-That is backwards. `Setup` is 338 lines largely because it re-implements
-"is this already done?" for four subsystems that should each answer for
-themselves.
-
-**Target:** every operation takes `ensure` semantics — already done is success,
-not an error — and reports which it was. The refusals that exist for *safety*
-(`CheckWritable` on immutable or hardlinked media) stay; they are a different
-thing from refusing to repeat work.
-
-```go
-// The shape every operation converges on.
-type Outcome struct {
-    Done    bool   // work was performed
-    Detail  string // what, or why it was skipped
-}
-func EnsureX(...) (Outcome, error)
-```
-
-`Setup`'s stage reporting already has exactly this shape — lift it out of
-`setup.go` and make it the package's vocabulary.
-
-### 2. DRY of *facts*, not just of code
-
-Duplicate function bodies are gone — a machine scan returns nothing. What is
-duplicated now is knowledge, which is worse, because the copies drift silently.
-
-**The live bug:** guest temp files are named in `run.go` by string concatenation
-(`irgo-i-`, `irgo-io-`, `irgo-ir-`, `irgo-l-`), and `cleanup.go:121-125`
-separately lists those prefixes so `Prune` can find them. Two sources of truth
-for one naming scheme. Add a prefix and `Prune` silently stops cleaning it —
-with no test that would notice.
-
-| fact | copies | where |
-|---|---|---|
-| guest temp-file naming | **2 schemes** | `run.go` builds them, `cleanup.go` lists them |
-| `win11-arm64.iso` | 5 | `paths.go:83`, `external.go:90,99`, `setup.go:257`, comments |
-| default VM name `irgo-win11` | 3 | `setup.go:87`, `mise.toml`, `external.go:99` |
-| timeouts | **8 distinct literals** | `10m×3, 45m×2, 2m×2, 60m, 15m, 5m, 10s` — no policy anywhere |
-
-**Target:** one declaration per fact. A `guestFile(kind, stamp)` constructor that
-`Prune` also consumes, so the two cannot disagree. Named timeout constants with
-the reason attached (`agentPoll`, `installLimit`, `bootStall`), because
-`45*time.Minute` at a call site tells you nothing about why 45.
-
-### 3. One retry primitive
-
-Six hand-written poll/retry loops: `bootassist.go:110,196`, `control.go:202,269`,
-`install.go:136`, `cleanup.go:93`. Each picks its own interval and its own idea
-of what a timeout means. This is where the 10-second-poll bug lived.
-
-**Target:** one `retry(limit, interval, fn)` — or `WaitForAgentEvery`'s shape
-generalised — used by all six. The interval becomes a decision made once, with a
-reason, rather than a literal typed six times.
-
-### 4. Atomicity and resumability
-
-Partly right already, and worth keeping deliberately rather than by accident:
-
-- `Download` writes `.part` and renames — **good**, keep. It also keeps the file
-  on a hash mismatch rather than deleting 4 GB — **good**.
-- `BuildISO` removes a partial ISO on failure — **good**: a half-written image is
-  the right size to look plausible and fails later as an unbootable VM.
-- `ExpandESD` has **no** resume: a failure at image 6 of 8 redoes all six.
-- `Delete` removes files 30 s after asking QEMU to stop, whether or not it did.
-
-**Target:** state the guarantee for every operation that writes, and make
-`ExpandESD` skip images already exported.
-
-### 5. One seam per external thing
-
-22 `exec.Command` sites across 8 files. `osascript` is driven from both
-`bootassist.go` and `control.go` under different escaping assumptions — and the
-trap table records that `%q` double-escaping made every Go-driven boot silently
-fail. Two implementations is how that bug returns.
-
-**Target:** `utmctl(...)`, `osascriptRun(...)` — each the only place that knows
-how to quote for its tool. `brew` and the ISO tools are already consolidated.
-
-### 6. The CLI and `mise.toml` are two interfaces to one thing, with no rule
-
-There is no source of truth today, and it has already drifted. Measured:
-
-| | count |
-|---|---|
-| mise tasks that are **thin wrappers** over a CLI command | 20 |
-| mise tasks containing **real shell logic** | 7 (`probes` 13 lines, `upstream:link` 24, `vm:iso-test` 10, …) |
-| already broken | `vm:up` (line 227) calls `irgo-winvm up`, which Phase 4 deletes |
-
-The thin wrappers are drift surface: 20 places that restate a command's name and
-flags, each free to fall behind.
-
-Worse, the logic tasks hide a **product gap**. `probes` is 13 lines that
-cross-compile every Windows probe binary — and it exists *only* in mise. A
-developer who runs `go install github.com/…/irgo-winvm@latest`, exactly as the
-README tells them to, **cannot build probes at all**. The CLI has `probe` (run
-them in the VM) and no way to produce them. The task runner has been quietly
-carrying product functionality, so the binary is incomplete and nothing said so.
-
-**The rule:**
-
-> **`mise` is a maintainer tool for this repository. Nothing else.**
->
-> A person using the binary never installs mise. A developer working on a
-> project that *uses* this tool never installs mise. Only someone changing this
-> repository does — to build, test, lint, and work on the upstream clones.
->
-> Everything else is a CLI subcommand, because the binary is the product.
-
-This deletes most of the file. Of 30 tasks, **~20 are wrappers that exist for
-people who already have the binary** — `mise run vm:status` over
-`irgo-winvm status -vm irgo-win11` buys a default VM name and costs a drift
-surface. They go.
-
-| task | becomes |
-|---|---|
-| `probes` (13 lines) | **`irgo-winvm probes build -o <dir>`** — product functionality that was hiding in the task runner |
-| `vm:iso-test` (10 lines) | deleted — it is `setup` with a throwaway name |
-| `vm:*`, `iso:*`, `setup*`, `doctor`, `example*` | deleted — all are CLI commands already |
-| `check`, `fuzz`, `lint`, `upstream:*` | **kept** — these are maintainer work and belong nowhere else |
-
-`mise.toml` ends up around eight tasks. The `IRGO_*` env block stays, since the
-Go code reads those variables directly and a maintainer wants them defaulted;
-a user sets them or accepts the defaults without mise existing at all.
-
-The README must change with it — and further: **it should not list CLI commands
-at all.** Every command and flag written into prose is a copy that will fall
-behind the code, exactly as `mise run vm:up` already has. The binary's own
-`-h` output is generated from the flag definitions and cannot drift.
-
-So the README explains *why the project exists*, the concepts a newcomer needs
-(the ISO is hardlinked; every boot needs driving; UTM rescans only at launch),
-and the one command to discover the rest:
-
-```sh
-irgo-winvm -h
-```
-
-Worked examples that must stay accurate — the `setup` flow, the suspend/resume
-timing — belong in `RESULTS.md`, where they are recorded as *measurements with a
-date* rather than as instructions. A measurement that goes stale is a fact about
-the past; an instruction that goes stale is a lie.
-
-**Enforced**, because a convention this specific will not survive on trust: a
-test parses `mise.toml` and fails if a task name matches the CLI's subcommand
-list, or if a task outside the maintainer allowlist exists at all. Drift becomes
-a red build rather than a discovery six weeks later.
-
-### 6b. Duplicate *responsibility* — which no scanner can see
-
-The earlier audit asked "is this text repeated?", got a clean result, and
-concluded duplication was gone. That was the wrong question. The right one is
-**"who else performs this responsibility?"** — and it finds things a syntactic
-scan structurally cannot.
-
-**"Is this VM usable?" is answered in nine places, four different ways**, each
-combining them differently: `AgentReady()`, `Status() == "started"`,
-`IsPaused()`, `BootEntryWritten`.
-
-| where | how it decides |
-|---|---|
-| `run.go:180` | `AgentReady`, else `Status != "started"` |
-| `install.go:121` | `st != "started"` |
-| `bootassist.go:181` | `!strings.EqualFold(st, "started")` |
-| `cleanup.go:94` | `!strings.EqualFold(st, "started")` |
-| `setup.go:166,177,217` | `AgentReady`, `IsPaused`, `BootEntryWritten` |
-| `main.go:290,303,358,522,1113` | all four, in five combinations |
-
-Two of those disagree on **case sensitivity** for the same question — one is
-`EqualFold`, one is `==`. That is a latent bug sitting in the open, and no
-duplicate-body scan will ever report it, because the code is not duplicated. The
-*decision* is.
-
-**Target:** one concept, asked once.
-
-```go
-type VMState int   // Absent, Stopped, Paused, Installing, Booting, Ready
-func (v VM) State(bundlePath string) (VMState, error)
-```
-
-Everything then asks `State()` rather than re-deriving it from three primitives
-in its own combination. This is also what lets `setup` be thin: its stage
-decisions become `switch state` instead of six ad-hoc checks.
-
-Same audit, second finding: **six files know where the Windows media lives**
-(`bundle.go`, `external.go`, `isoguard.go`, `paths.go`, `setup.go`, `main.go`).
-`Paths` exists to own that and does not.
-
-### 7. Architectural gaps the duplication was hiding
-
-Deduplication is the shallow layer. These are structural, and several explain
-*why* the bugs happened rather than merely recording that they did.
-
-**No `context.Context` anywhere — zero occurrences.** Operations here run for 45
-minutes (install), 4.2 GB (download), and poll for minutes (boot). None can be
-cancelled, none carries a deadline, and Ctrl-C leaves a half-written ISO or a VM
-mid-boot. For a tool whose unit of work is an hour, this is the largest missing
-piece. Every long-running exported function should take a `ctx` and honour it.
-
-**Nothing VM-related is unit-testable, and that is structural.** 22
-`exec.Command` calls are made directly against `utmctl`, `osascript`, `plutil`,
-`hdiutil`, `ditto`, `bsdtar`, `wimlib-imagex` and `xorriso`. There is no seam, so
-the only way to exercise any of it is a real VM — which is why coverage is thin.
-It is not laziness. One narrow interface (`type runner interface { run(ctx,
-name string, args ...string) (string, error) }`) makes most of the package
-testable with a fake, and Phase 5's consolidation is the natural moment to
-introduce it.
-
-**Errors are strings, so callers cannot branch.** One sentinel exists
-(`ErrUTMNotInstalled`). Everything else is `fmt.Errorf`, so nothing can
-distinguish *VM not found* from *agent not ready* from *UTM not running* from
-*out of space*. `Setup` therefore cannot decide anything on failure — it aborts.
-Typed errors for the handful of states that matter would let `setup` recover
-rather than stop.
-
-**Four progress mechanisms, and a library that prints.** `progress func(done,
-total int64)`, `progress func(step string)`, `Log io.Writer`, `log
-func(string)`, plus direct `fmt.Printf` and `os.Stderr` writes *inside* `utmvm`.
-A library writing to stdout cannot be used by anything but this CLI, and rules
-out machine-readable output for CI. One reporting interface; the CLI decides the
-format.
-
-**`Ensure*` means five different things, and that caused a real bug.**
-`EnsureUTM` installs an app, `EnsureGuestTools` downloads a file, `EnsureReady`
-boots a VM and waits, `EnsureWork` makes a directory and checks free space,
-`EnsureISOTools` installs two binaries. `setup` called `EnsureReady` where it
-needed `RunInstall` precisely because the name promises "make it ready" — which
-is what the caller wanted, and not what it does. Verbs need fixed meanings:
-`Ensure` = idempotent make-it-so, `Fetch` = network, `Build` = produce an
-artefact, `Run` = drive something to completion.
-
-**No concurrency safety at all — zero locks.** Two `irgo-winvm` processes can
-create, boot or delete the same VM simultaneously. `setup` is idempotent but not
-re-entrant, and its checks are classic time-of-check-to-time-of-use. A lockfile
-per VM bundle is cheap and honest.
-
-**Config precedence is implicit, undocumented and untested.** `IRGO_*`
-environment variables, flags and defaults interact with no stated order — and
-`mise.toml` *sets* those variables, so the same command behaves differently
-under `mise run` than run directly. That is a footgun the maintainer-only rule
-above reduces but does not remove: precedence needs stating and a test.
-
-**The platform guard is applied inconsistently.** `CanCreateVMs()` exists and
-its own comment says callers should prefer it over comparing `runtime.GOOS` —
-and `bundle.go:15` compares `runtime.GOOS` anyway.
+Everything below is a consequence of this: the idempotency contract, the thin
+`setup`, the single `VMState`, the primitives kept as a recovery toolkit.
 
 ---
 
----
+## Two decisions taken up front
 
-## Phases
+### Refactor `utmvm` in place; rewrite the CLI
 
-Ordered so every `utmvm` API change lands before the CLI is rewritten against
-it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
+| area | lines | comment lines | density |
+|---|---|---|---|
+| `cmd/irgo-winvm` | 1144 | 138 | **12%** |
+| `utmvm` | 5579 | **1418** | **25%** |
 
-| # | phase | size | verify | why here |
-|---|---|---|---|---|
-| 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
-| 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
-| 3 | One retry primitive | S | CI | no dependencies |
-| 4 | Decide probe distribution | S | decision | blocks 10 |
-| 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
-| 5b | Split `Check` from `Ensure`; make `doctor` pure | M | CI | fixes a live bug: `doctor` installs UTM |
-| 6 | Idempotency contract | M | CI + twice-run test | needs 5's tests to be safe |
-| 7 | `context.Context` through long operations | M | **VM** | signature change, after 5 and 6 settle |
-| 8 | One `VMState`; verbs, typed errors, locking | M | CI | last API change before the CLI is written |
-| 9 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
-| 10 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
-| 11 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
-| 12 | Tighten enforcement | M | CI | thresholds set from the finished code |
+The value of this repository is not its code. It is ~1400 lines of **recorded
+findings**, each of which cost hours and none of which is recoverable by reading
+the code they annotate: why the display must be `virtio-ramfb-gl`, why ESD image
+3 needs `--boot`, why the keystroke count is bounded at eight (surplus presses
+reached Setup's UI and destroyed an install), why the answer file must be a CD,
+why `%q` must not be re-escaped for AppleScript.
 
-### The CLI has two layers, and only one of them may be cut
+A rewrite either loses those or copies them across — and copying them *is* the
+refactor, minus the compiler checking each still sits beside the code it
+explains. It would also invalidate `RESULTS.md`, whose measurements were taken
+against these binaries, at 45 minutes an install to retake.
 
-This is the correction to an earlier version of this plan, which proposed
-deleting `start` for "powering a VM on headlessly, yielding a UEFI prompt nobody
-can type at — a footgun with a friendly name". That judged it as a *user*
-command. Its real job is **diagnostic**.
+**The exception:** `cmd/irgo-winvm` at 12% density is flag plumbing with nothing
+learned embedded in it. Untangling it is slower than replacing it, so it is
+written fresh against the final API.
 
-**Orchestration** — `setup`. One command that drives the whole sequence.
+### The CLI has two layers; only one may be cut
 
+**Orchestration** — `setup`.
 **Primitives** — `create`, `start`, `boot`, `install`, `suspend`, `resume`,
 `delete`, `status`, `screenshot`, `exec`, `run`, `probe`, `iso`, `fetch-iso`,
-`build-iso`, `verify`, `list`, `prune`, `doctor`, `targets`. Each does exactly
-one thing with no orchestration around it.
+`build-iso`, `verify`, `list`, `prune`, `doctor`, `targets`.
 
-**The primitives are the recovery toolkit, and they are not optional.** This
-project's history is failure *mid-sequence*: Windows reboots itself during
-Update and the agent drops with "Port is not connected"; the install has two
-boot phases and lands back in the UEFI shell between them; UTM does not see a
-new bundle until relaunched; keystrokes miss the CD prompt. When `setup` dies at
-stage five of seven you do not want to re-run the orchestration — you want to
-stand at that point and poke it: power the VM on *without* driving a boot, drive
-a boot *without* creating anything, photograph the screen, run one command in
-the guest.
+**The primitives are the recovery toolkit and are not surface to be trimmed.**
+This project's normal case is failure *mid-sequence*: Windows reboots itself
+during Update and the agent drops with "Port is not connected"; the install has
+two boot phases with a UEFI shell between them; UTM does not see a new bundle
+until relaunched; keystrokes miss the CD prompt. When `setup` dies at stage five
+of seven you do not re-run the orchestration — you stand at that point and poke
+it.
 
-`start` is exactly that: power on with no side effects, which is what you need
-to find out what the firmware does unaided, or to attach a display yourself, or
-to confirm a bundle is valid before blaming the boot driver. "Yields a prompt
-nobody can type at" is the *point* — it isolates the failure.
+`start` is the clearest case. An earlier draft of this plan proposed deleting it
+as "a footgun with a friendly name" for powering a VM on headlessly and leaving
+a UEFI prompt. That judged a diagnostic as a user command: powering on with no
+side effects is exactly how you isolate whether the bundle, the firmware or the
+boot driver is at fault.
 
-The README already said this, and the earlier plan contradicted it:
+The README already said so, and that draft contradicted it:
 
 > `up` is `create` + `RestartUTM` + `boot`. **The steps stay separate underneath
 > because each fails differently and is worth retrying alone.**
 
-### …and `setup` must be thin, calling down through those primitives
+**Rule:** a primitive is removed only when another primitive does the same
+thing. Never for being low-level or misusable. Only `up` goes — it is
+orchestration duplicating `setup`, not a primitive.
 
-The layering is worthless unless the orchestration runs *the same code* the
-primitives run. Otherwise reproducing a `setup` failure by hand does not
-reproduce it — you execute a different path and get a different result, which is
-worse than having no recovery toolkit at all, because it misleads.
+---
 
-`setup` today is not thin. It is a **parallel implementation**, measured:
+## What is wrong today
+
+Measured, not estimated.
+
+### Idempotency is bolted on, not a property of operations
+
+Every expensive operation here is one you re-run: 4.2 GB download, 45-minute
+install, a VM that reboots itself. Exactly **one** function is idempotent —
+`Setup` — and it gets there by wrapping primitives that actively refuse:
+
+| operation | re-run today |
+|---|---|
+| `Create` | **fails** — "already exists; remove it or choose another name" (`bundle.go:86`) |
+| `BuildISO` | **fails** — "already exists — this never overwrites" (`isobuild.go:255`) |
+| `Download` | **fails** if the destination exists (`fetch.go:159`) |
+| `Setup` | idempotent, by doing everyone else's state checks itself |
+
+Refusals that exist for **safety** — `CheckWritable` on immutable or hardlinked
+media — stay. Refusing to *repeat work* is a different thing and goes.
+
+### `setup` is a parallel implementation, not thin
+
+Nineteen entry points, several of which no primitive uses:
 
 | job | `setup` calls | the primitive calls |
 |---|---|---|
 | boot | `EnsureReady` | **`BootAndWait`** — `setup` never calls it |
 | media | its own 80-line private `ensureMedia` | `fetch-iso` → `build-iso` |
 | install | `RunInstall` *and* `EnsureReady` | `RunInstall` |
-| state checks | `os.Stat`, `ISOLinks`, `Find`, `AgentReady`, `IsPaused`, `Inspect` | — |
+| state | `os.Stat`, `ISOLinks`, `Find`, `AgentReady`, `IsPaused`, `Inspect` | — |
 
-Nineteen entry points, several of which no primitive uses. This is how `setup`
-came to call `EnsureReady` where it needed `RunInstall`: the two layers had
-drifted far enough apart that the wrong one looked right.
+That drift is the mechanism behind the `EnsureReady`/`RunInstall` defect: the
+layers had separated far enough that the wrong function looked right.
 
-**Target:** `setup` becomes a list of calls, each one *exactly* what the
-corresponding primitive command invokes, with the outcome reported. Its own
-`ensureMedia` is deleted in favour of the same `Ensure` functions `fetch-iso`
-and `build-iso` use. Once phase 6 makes each operation idempotent and
-`Outcome`-returning, `setup` should be **roughly 40 lines**, not 338:
+### Duplicate *responsibility*, which no scanner sees
+
+A scan for duplicate function bodies returns clean. The right question is **"who
+else performs this responsibility?"**
+
+**"Is this VM usable?" is decided in nine places, four ways** — `AgentReady()`,
+`Status() == "started"`, `IsPaused()`, `BootEntryWritten` — in five
+combinations. Two disagree about case for the same question:
 
 ```go
-for _, step := range []step{
-    {"UTM",           EnsureUTM},
-    {"guest tools",   EnsureGuestTools},
-    {"Windows media", EnsureMedia},      // what fetch-iso + build-iso run
-    {"protected",     EnsureProtected},
-    {"VM bundle",     EnsureBundle},     // what create runs
-    {"Windows",       EnsureInstalled},  // what boot / install run
-} { ... }
+install.go:121      if st, _ := vm.Status(); st != "started"
+bootassist.go:181   if st, _ := vm.Status(); !strings.EqualFold(st, "started")
 ```
 
-**Enforceable:** a test asserts each `setup` stage resolves to the same `utmvm`
-entry point as its primitive. Drift between the layers then fails the build
-rather than surfacing as a VM stuck at a prompt.
+A latent bug in the open that no duplicate-body scan will ever report, because
+the code is not duplicated — the *decision* is.
 
-**So the rule is:** a primitive is removed only if another primitive does the
-same thing. Never because it is low-level, never because it can be misused. Only
-`up` goes, and only because it is orchestration that duplicates `setup` — not
-because it is small.
+Same audit: **six files know where the Windows media lives** (`bundle.go`,
+`external.go`, `isoguard.go`, `paths.go`, `setup.go`, `main.go`). `Paths` exists
+to own that and does not.
 
-The rule the order follows: **every `utmvm` API change lands before the CLI is
-written against it** (5–8 before 10), and **the phase that makes testing
-possible comes before the phases that need testing** (5 before 6–8).
+### DRY of facts
 
-**1 — Lint baseline, then delete what it finds.** Land `.golangci.yml` with only
-the checks the code already passes, and turn on `unused` — which identifies the
-dead code rather than trusting a grep. Then delete it: Eight symbols with no caller: `BuildFATImage`,
-`GuestToolsInstallCommand` (still carries a `start`-wildcard bug already fixed
-in the answer file), `OpenDisplay`, `BootAssist`, `IfaceVirtIO`,
-`SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`. The last is a
-footgun that reports success while power-cutting the guest; its finding stays in
-`RESULTS.md` and the trap table, which is where it is useful.
+| fact | copies | where |
+|---|---|---|
+| guest temp-file naming | **2 schemes** | `run.go` builds them, `cleanup.go:121` lists them for `Prune` |
+| `win11-arm64.iso` | 5 | `paths.go:83`, `external.go:90,99`, `setup.go:257` |
+| default VM name `irgo-win11` | 3 | `setup.go:87`, `mise.toml`, `external.go:99` |
+| timeouts | **8 literals** | `10m×3, 45m×2, 2m×2, 60m, 15m, 5m, 10s` — no policy |
+
+The first is a live bug: add a guest-file prefix and `Prune` silently stops
+cleaning it.
+
+### Six retry loops, 22 exec sites, no seam
+
+Poll/retry is hand-written at `bootassist.go:110,196`, `control.go:202,269`,
+`install.go:136`, `cleanup.go:93`, each with its own interval. This is where the
+10-second-poll bug lived.
+
+22 `exec.Command` calls across 8 files reach `utmctl`, `osascript`, `plutil`,
+`hdiutil`, `ditto`, `bsdtar`, `wimlib-imagex`, `xorriso`. `osascript` is driven
+from two files under different escaping assumptions — and the trap table records
+that `%q` double-escaping made every Go-driven boot silently fail.
+
+**There is no seam, so nothing VM-related is unit-testable.** That is why
+coverage is thin: it is structural, not laziness.
+
+### Missing infrastructure
+
+- **`context.Context`: zero occurrences.** Operations run 45 minutes, download
+  4.2 GB, poll for minutes. Nothing is cancellable; Ctrl-C leaves partial state.
+- **One sentinel error.** Nothing can distinguish *VM not found* from *agent not
+  ready* from *out of space*, so `setup` can only abort, never recover.
+- **Four progress mechanisms**, and `utmvm` writes to stdout itself — so the
+  package is unusable by anything but this CLI and machine-readable output is
+  impossible.
+- **Zero locks.** Two processes can create or delete the same VM concurrently.
+- **`Ensure` means five things** — install an app, download a file, boot a VM,
+  make a directory, install two binaries. That ambiguity is what made
+  `EnsureReady` look right.
+- **`CanCreateVMs()` is bypassed** at `bundle.go:15`, which compares
+  `runtime.GOOS` directly despite the helper's own comment saying not to.
+
+### The CLI and `mise.toml` have no boundary
+
+30 mise tasks: **20 thin wrappers** over CLI commands, **7 with real shell
+logic**. `vm:up` already invokes `irgo-winvm up`, which this plan deletes.
+
+Worse, `probes` — 13 lines that cross-compile every Windows probe — exists
+*only* in mise. Someone who runs `go install …@latest` **cannot build probes at
+all**, and `create -probes <dir>` needs binaries they have no way to obtain. So
+`irgo-winvm probe` is already broken for anyone who did not clone.
+
+> **`mise` is a maintainer tool for this repository. Nothing else.**
+> A person using the binary never installs mise. A developer on a project that
+> *uses* this tool never installs mise. Only someone changing **this** repo does.
+
+That deletes the 20 wrappers and leaves ~8 tasks: `check`, `fuzz`, `lint`,
+`upstream:*`. The README changes with it — and further: **it should not list CLI
+commands at all.** Every command in prose is a copy that falls behind, as
+`mise run vm:up` already has. `irgo-winvm -h` is generated from the flag
+definitions and cannot drift. Worked examples belong in `RESULTS.md` as **dated
+measurements** — a stale measurement is a fact about the past; a stale
+instruction is a lie.
+
+---
+
+## Phases
+
+Two rules set the order: **every `utmvm` API change lands before the CLI is
+written against it** (6–9 before 11), and **the phase that makes testing
+possible comes before the phases that need testing** (5 before everything
+risky).
+
+| # | phase | size | verify | why here |
+|---|---|---|---|---|
+| 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
+| 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
+| 3 | One retry primitive | S | CI | no dependencies |
+| 4 | Decide probe distribution | S | decision | blocks 11 |
+| 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
+| 6 | `Check`/`Ensure` split, `VMState`, pure `doctor` | L | CI | **the keystone; fixes the live `doctor` bug** |
+| 7 | Idempotency through `Ensure`; `setup` becomes thin | M | CI + twice-run | needs 6's `Ensure` to exist |
+| 8 | `context.Context` through long operations | M | **VM** | signature change, after 6–7 settle |
+| 9 | Verbs, typed errors, locking | M | CI | last API change before the CLI |
+| 10 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
+| 11 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
+| 12 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
+| 13 | Tighten enforcement | M | CI | thresholds set from the finished code |
+
+**1 — Lint baseline, then delete.** Land `.golangci.yml` with only the checks
+the code already passes, and turn on `unused` so it *identifies* the dead code
+rather than a grep being trusted. Then delete the eight symbols with no caller:
+`BuildFATImage`, `GuestToolsInstallCommand` (still carries a `start`-wildcard
+bug already fixed in the answer file), `OpenDisplay`, `BootAssist`,
+`IfaceVirtIO`, `SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`.
+The last reports success while power-cutting the guest; its finding stays in
+`RESULTS.md`.
 
 **2 — One source of truth for facts.** `guestFile()` shared by `run.go` and
-`Prune`, fixing the live drift bug; named timeout constants carrying their
-reason; ISO name and default VM name declared once in `paths.go`.
+`Prune`, fixing the live drift; named timeout constants carrying their reason;
+ISO name and default VM name declared once in `Paths`.
 
-**3 — One retry primitive.** Collapse the six hand-written loops.
+**3 — One retry primitive.** Collapse the six loops.
 
-**4 — Decide probe distribution.** Embed, download, or maintainer-only. Blocks
-phase 10, because it decides whether `probes` is a CLI command at all. A
-decision, not code — do it early so phase 10 is not blocked by it.
+**4 — Decide probe distribution.** Embed with `go:embed`, download from a
+release like the guest tools already are, or admit probes are maintainer-only —
+in which case mise is their correct home. A decision, not code; do it early so
+phase 11 is not blocked.
 
 **5 — Reporting seam and `runner` interface.** One reporting mechanism instead
 of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
 The `runner` seam lands here because both are about who may talk to the outside
-world. **This is the phase that makes the package testable without a VM**, which is
-why it comes before idempotency, `context` and the renames rather than after:
-every phase from here on can be verified by a test instead of by hand.
+world. **This is what makes the package testable without a VM**, which is why it
+precedes everything risky: from here on, phases are verified by tests rather
+than by hand.
 
-**5b — Split `Check` from `Ensure`.** Every capability gets a pure `Check` and
-an acting `Ensure` built on it. `doctor`, `status`, `targets` and `verify` are
-rewired to `Check` only — fixing the live bug where `doctor` installs UTM and
-downloads the guest tools. Add the test that no REPORT command reaches an
+**6 — `Check`/`Ensure`, `VMState`, pure `doctor`.** The keystone. Every
+capability gets a pure `Check` and an acting `Ensure` built on it. `VMState`
+replaces the nine ad-hoc answers to "is this VM usable". `doctor`, `status`,
+`targets` and `verify` are rewired to `Check` only — fixing the live bug where
+`doctor` installs UTM. Add the test that no REPORT command reaches an
 `Ensure*`/`Fetch*`/`Install*`.
 
-**6 — Idempotency contract, and `setup` becomes thin.** `Ensure` semantics on
-`Create`, `BuildISO`, `Download`; the `Outcome` type lifted out of `setup.go`;
-`ExpandESD` skipping images already exported. Then `setup` is rewritten to call
-*only* the same entry points its primitives call — deleting its private
-`ensureMedia`, and using `BootAndWait` where the `boot` command does. 338 lines
-to roughly 40. Add the test that asserts each stage matches its primitive.
+**7 — Idempotency, and `setup` becomes thin.** `Ensure` semantics on `Create`,
+`BuildISO`, `Download`; `ExpandESD` skipping images already exported. Then
+`setup` is rewritten to call *only* what its primitives call — deleting
+`ensureMedia`, using `BootAndWait` where `boot` does. 338 lines to roughly 40,
+a list of steps and their outcomes. Add the test asserting each stage resolves
+to the same entry point as its primitive.
 
-**7 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
-`EnsureReady`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
-cleanly instead of leaving partial state. *VM* — cancellation during a real
-install is the only honest test.
+**8 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
+`BootAndWait`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
+cleanly. *VM* — cancellation during a real install is the only honest test.
 
-**8 — One `VMState`, then verbs, typed errors, locking.** Introduce
-`VM.State()` so "is this VM usable?" is answered once instead of nine times in
-four combinations — including the two that disagree about case. Then fix
-`Ensure`'s five meanings:
-`EnsureReady` → `BootInstalled`, which is what it does and would not have been
-mistaken for `RunInstall`. Typed errors for the states `setup` should act on. A
-lockfile per VM bundle. Route the last `runtime.GOOS` through `CanCreateVMs`.
+**9 — Verbs, typed errors, locking.** Give `Ensure`/`Fetch`/`Build`/`Run` fixed
+meanings: `EnsureReady` becomes `BootInstalled`, which is what it does and would
+not have been mistaken for `RunInstall`. Typed errors for the states `setup`
+should act on. A lockfile per VM bundle. Route `bundle.go:15` through
+`CanCreateVMs`.
 
-**9 — Group `utmvm` by subject** with `git mv`: `media_*`, `deps_*`, `vm_*`,
-`host_*`. **No sub-packages** — the parts are coupled and splitting would force
-the exported surface to stay large, defeating phase 11.
+**10 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
+`deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are coupled and
+splitting would force the exported surface to stay large, defeating phase 12.
 
-**10 — Rewrite the CLI.** Written fresh against the now-final `utmvm` API, old
-file deleted. Every **primitive** is carried over unchanged (see below); only
-`up` is dropped, because it is orchestration and `setup` is the orchestration.
-1144 lines at 12%
-comment density is flag plumbing with nothing learned in it. New shape:
+**11 — Rewrite the CLI.** Written fresh against the now-final API, old file
+deleted. Every primitive carried over unchanged; only `up` dropped. New shape:
 `main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
-helper behind the 18 flagsets and 10 copies of *resolve-find-handle*. *VM*.
+helper behind the 18 flagsets and 10 copies of *resolve-find-handle*, so an
+unknown VM reads the same from every command — which it currently does not.
 
-**11 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
+**12 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
 symbols; unexport what is absent. Expect 40–60 to go.
 
-**12 — Enforcement.** See below.
+**13 — Tighten enforcement.** Below.
 
 ### If it stops early
 
-Phases 1–3 are cheap, self-contained and fix a live bug; they are worth doing
-even if nothing else happens. **Phase 5 is the highest-value single phase** —
-without a `runner` seam this codebase cannot be tested at all, and every later
-phase has to be verified by hand against a real VM. Phases 9–11 are cosmetic by
+Phases 1–3 are cheap, self-contained and fix a live bug. **Phase 5 is the
+highest-value single phase** — without a `runner` seam nothing here can be
+tested, and every later phase has to be verified by hand against a real VM.
+**Phase 6 fixes a bug that is shipping today.** Phases 10–12 are cosmetic by
 comparison: stop before them without loss.
 
-### Phase 12 in detail — enforcement
+---
 
-A cleanup that is not enforced decays back. This phase is the reason the others
-are worth doing.
+## Phase 13 in detail — enforcement
 
-**Most of this mess was made by an AI agent that did not read what already
-existed** — three wait-for-agent loops next to a `WaitForAgent` method, a fourth
-byte formatter, `EnsureReady` where `RunInstall` was needed. Prevention has to
-work on that failure mode specifically: a convention nobody reads prevents
-nothing, so it goes in the file agents load automatically.
+A cleanup that is not enforced decays back. **Most of this mess was made by an
+agent that did not read what already existed**, so prevention has to work on
+that failure mode specifically: a convention nobody reads prevents nothing.
 
-### 12a. A linter that catches each mistake actually made
+### A linter that catches each mistake actually made
 
-`golangci-lint` is already available through mise. Enable exactly the checks
-that would have caught the bugs in this repo's history — not a default preset:
+Not a default preset — exactly the checks that would have caught this repo's own
+history:
 
 | linter | the bug it would have caught |
 |---|---|
-| `unused` | all 8 dead symbols in phase 1, at the moment each lost its caller |
-| `dupl` | the 3 wait-for-agent loops, the 3 batch-file blocks, the 4 byte formatters |
+| `unused` | all 8 dead symbols, at the moment each lost its caller |
+| `dupl` | 3 wait-for-agent loops, 3 batch-file blocks, 4 byte formatters |
 | `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3 |
 | `mnd` | the 8 unexplained timeout literals |
 | `funlen`, `gocognit` | `runUp` at 86 lines doing five things |
 | `errcheck`, `gosec` | already clean; keep them clean |
 
-Land a **minimal config in phase 1** with only the checks the code already
-passes, so the refactor itself is gated while churn is highest. Tighten the
-thresholds in phase 12 once the code is final — saving all of it for the end
-leaves the noisiest period ungoverned.
+Land a minimal config in **phase 1** so the refactor itself is gated while churn
+is highest; tighten thresholds here once the code is final.
 
-### 12b. Wire it into the gate, not just the docs
+### Tests that encode the invariants
 
-`.golangci.yml` at the root; `mise run check` gains a `lint` step; the existing
-`.github/workflows/check.yml` gains the same. A rule that only lives in prose is
-a rule that gets skipped at 2am.
-
-### 12c. Tests that encode the invariants
-
-Three properties in this codebase are invisible to the compiler and have each
-already broken once:
+Five properties invisible to the compiler, each of which has already broken:
 
 ```go
-TestGuestFileNamesArePrunable  // generate via guestFile(), assert Prune claims it
-TestOperationsAreIdempotent    // Download/BuildISO/Prune twice; second is a no-op
-TestExportedSurfaceBudget      // count exported symbols; fail if it grows
+TestReportCommandsArePure       // no REPORT command reaches Ensure*/Fetch*/Install*
+TestSetupStagesMatchPrimitives  // each setup stage resolves to its primitive's entry point
+TestGuestFileNamesArePrunable   // generate via guestFile(), assert Prune claims it
+TestOperationsAreIdempotent     // Download/BuildISO/Prune twice; second is a no-op
+TestExportedSurfaceBudget       // count exported symbols; fail if it grows
 ```
 
-The last is unusual and deliberate: 134 exported symbols accumulated because
-nothing ever objected. A budget makes growth a decision someone takes rather
-than a thing that happens.
+The last is deliberate: 134 exported symbols accumulated because nothing ever
+objected. A budget makes growth a decision someone takes.
 
-### 12d. `AGENTS.md` — the file that gets read
+### `AGENTS.md`
 
-Rules for contributors, human and AI, in the location agents load without being
-asked. `CLAUDE.md` points at it so Claude Code picks it up too. It states the
-things this repo has learned the hard way:
-
-- **Search before you write.** `WaitForAgent`, `HumanBytes`, `Tool.resolve`,
-  `pushScript` all exist because someone eventually noticed the third copy.
-- **The comments are findings, not decoration.** Do not compress them.
-- **Idempotency is a contract**, not a feature of `setup`.
-- **Verify against the VM**, not the compiler, for anything touching boot, run
-  or media — those paths have no unit coverage and fail silently.
-- **One fact, one declaration.**
+The rules live where agents load them without being asked, with `CLAUDE.md`
+pointing at it. It carries the three-consumer pattern, the primitives rule,
+"search before you write", and the two questions that catch what a scanner
+cannot: *who else performs this responsibility*, and *what does a person do when
+this fails halfway*.
 
 ---
 
@@ -657,16 +399,16 @@ for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
 done
 ```
 
-**Idempotency — run it twice.** The check this repo does not have; phase 6 adds
-it as a test (phase 6). Most of it needs no VM: `Prune` twice, `Download` twice to an
-existing file, `BuildISO` twice against a fixture.
+**Idempotency — run it twice.** Phase 7 adds it as a test; most needs no VM
+(`Prune` twice, `Download` twice to an existing file, `BuildISO` twice against a
+fixture).
 
 ```sh
 irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
 irgo-winvm iso -protect && irgo-winvm iso -protect
 ```
 
-**Phases 7 and 10 (*VM*)** — a green build means "compiles", not "works", and
+**Phases 8 and 11 (*VM*)** — a green build means "compiles", not "works", and
 these paths fail silently:
 
 ```sh
@@ -678,8 +420,8 @@ irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 The last must still report **~400 ms**. Seconds means a poll interval was lost —
 exactly how that bug happened the first time.
 
-**Once, at the end — a fresh install.** Nothing above exercises it, phases 6 and
-7 both touch it, and it is the only path whose failure costs 45 minutes to
+**Once, at the end — a fresh install.** Nothing above exercises it, phases 7 and
+8 both touch it, and it is the only path whose failure costs 45 minutes to
 observe:
 
 ```sh
@@ -689,117 +431,72 @@ irgo-winvm delete -vm refactor-test -force
 
 Never against `irgo-win11`.
 
-**Rollback.** Each phase is one `--no-ff` merge, so a regression found late is
-`git revert -m 1 <merge>` — one concern, not a hand-unpick. `pre-refactor` tags
-the last commit whose `RESULTS.md` measurements were actually taken.
-
 ---
 
 ## Git strategy
 
-Each phase is a branch off `master`, merged only once verified. The reason is
-not ceremony: **CI cannot prove these phases correct.** Phases touching boot,
-run, media or setup have no unit coverage, so a green build means "compiles",
-not "works" — and the failures are silent.
+A branch per phase, merged only once verified. **CI cannot prove these phases
+correct** — the VM-dependent paths have no unit coverage until phase 5, and
+green means "compiles".
 
 ```sh
-git switch -c refactor/01-facts master
+git switch -c refactor/06-check-ensure master
 # … work, verify …
-git switch master && git merge --no-ff refactor/01-facts
+git switch master && git merge --no-ff refactor/06-check-ensure
 ```
 
-- **`--no-ff`**, so each phase is one revertable merge commit. When a VM-only
-  regression surfaces three phases later, `git revert -m 1 <merge>` takes back
-  exactly one phase.
-- **One phase per branch**, never two. The point of the sequence is that a
-  bisect lands on a single concern.
-- **Do not merge on CI alone** for phases marked *VM* below. Run the checks in
-  Verification first and put the output in the merge commit body — that is the
-  only durable record that it was actually run.
-- **Tag `pre-refactor` at `master` now.** A single known-good point that predates
-  everything, since `RESULTS.md`'s measurements were taken there.
+- **`--no-ff`**, so each phase is one revertable merge. A regression found three
+  phases later is `git revert -m 1 <merge>`, not a hand-unpick.
+- **One phase per branch**, so a bisect lands on a single concern.
+- **Do not merge on CI alone** for phases marked *VM*. Put the verification
+  output in the merge commit body — the only durable record it was run.
+- **`pre-refactor` is tagged** at the last commit whose `RESULTS.md`
+  measurements were actually taken.
 
 ---
 
 ## What not to do
 
-- **Do not "tidy" the comments.** They record findings that cost hours and are
-  not recoverable from the code: why the display is `virtio-ramfb-gl`, why image
-  3 needs `--boot`, why `--save-state` must never be called.
-- **Do not make `boot` idempotent by making it re-drive.** Re-sending keystrokes
-  into a live Setup has destroyed an install. Idempotent here means *detecting
-  that it need not act*, not repeating the action.
-- **Do not touch `assets/`, the answer file, or the plist template.** UTM rejects
-  a bad config with one generic "cannot import this VM" naming no field;
-  `config_test.go` exists because that failure is undebuggable.
 - **Do not delete a primitive because it looks like a footgun.** `start` powers
   a VM on with no side effects and yields a UEFI prompt — which is exactly what
-  makes it useful when `setup` has failed and you need to isolate whether the
-  bundle, the firmware or the boot driver is at fault. The primitives are the
-  recovery toolkit for a project whose normal case is partial failure.
+  isolates the fault when `setup` has failed.
+- **Do not "tidy" the comments.** They record findings that cost hours and are
+  not recoverable from the code.
+- **Do not touch `assets/`, the answer file, or the plist template** without
+  running a real install. UTM rejects a bad config with one generic "cannot
+  import this VM" naming no field; `config_test.go` exists because that failure
+  is undebuggable.
+- **Do not split `utmvm` into sub-packages.**
+- **Do not make `boot` idempotent by re-driving.** Re-sending keystrokes into a
+  live Setup has destroyed an install. Idempotent here means *detecting it need
+  not act*.
 - **Do not do this in one commit.**
 
 ---
 
----
+## Appendix: method
 
-## Method: how these were found, and how the earlier ones were missed
-
-Recorded because the plan itself was written twice, and the second pass found
-things the first could not.
+How these were found, and why earlier passes missed them.
 
 **A bug is not understood until you name the structure that permitted it.** The
-`EnsureReady`/`RunInstall` defect was first written down as "used the wrong
-function" — a slip, worth a one-line correction. The real answer is that
-orchestration and primitives had drifted into two implementations of the same
-job, so the wrong function *looked* right. That framing produces a rule, a test
-and a phase; the first framing produced nothing. Every finding in this document
-that matters came from asking the second question.
+`EnsureReady`/`RunInstall` defect was first recorded as "used the wrong
+function" — a slip worth a one-line correction. The real answer is that
+orchestration and primitives had drifted into two implementations of one job, so
+the wrong function *looked* right. That framing produces a rule, a test and a
+phase; the first produced nothing.
 
-**Ask "who else does this job?", not "is this code repeated?"** A scan for
-duplicate function bodies returned clean, and duplication of *responsibility*
-was everywhere: nine places deciding whether a VM is usable, six knowing where
-the media lives, two implementations of the media pipeline. Syntactic tools are
-blind to it by construction.
+**Ask "who else does this job?", not "is this code repeated?"** A duplicate-body
+scan returned clean while nine places decided whether a VM is usable, six knew
+where the media lives, and two implemented the media pipeline. Syntactic tools
+are blind to this by construction.
 
 **Ask what a person does when it fails halfway.** The case for keeping the
-primitives, and for `setup` calling down through them, is invisible from reading
-code and obvious the moment you picture someone at a VM stuck at a UEFI prompt.
-This project's normal case is partial failure; a plan that reasons only about
-structure will keep proposing to delete the recovery toolkit.
+primitives — and for `setup` calling down through them — is invisible from
+reading code and obvious the moment you picture someone at a VM stuck at a UEFI
+prompt. A plan that reasons only about structure will keep proposing to delete
+the recovery toolkit.
 
-## Appendix: this plan's own flaws, and how they were fixed
-
-Written down because the plan was assembled incrementally and inherited exactly
-the failure it describes.
-
-**The ordering was wrong.** Phase 6b renamed the `utmvm` API *after* Phase 5
-rewrote the CLI against it — writing the CLI twice. **Every `utmvm` API change
-now lands before the CLI is touched.**
-
-**A whole phase was wasted work.** "Cut `up` and `start`" was a separate phase
-*before* the CLI rewrite. If the CLI is being written fresh, you simply do not
-write them. Folded in.
-
-**The numbering (0,1,2,3,4,4b,4c,5,6,6b,7,8) was itself the evidence** — the
-`b`/`c` suffixes are where things were bolted on instead of re-planned.
-Renumbered.
-
-**`probes build` in the CLI is probably wrong, and it exposes a deeper hole.**
-A `go install`ed binary has no `probe/`, `glaze-probes/` or `examples/` source
-tree, so it cannot compile them — the command cannot exist there. Worse, the
-whole probe story is already incoherent: `create -probes <dir>` bakes binaries
-into the payload CD, and an installed binary has no way to obtain those
-binaries. So `irgo-winvm probe` is broken for anyone who did not clone.
-
-That is a **distribution decision, not a placement one**, and it must be made
-before Phase 4:
-
-- **embed** the cross-compiled probes with `go:embed` — a self-contained binary,
-  at the cost of ~20 MB and a release process that cross-compiles first;
-- **download** them from a GitHub release, like the guest tools already are;
-- **accept** that probes are maintainer-only, and say so — then mise *is* their
-  correct home and the "product gap" identified above is not one.
-
-Until this is decided, `probes` stays in mise and the README stops implying
-otherwise.
+This document was itself rewritten after each of those realisations. An earlier
+draft was numbered `0,1,2,3,4,4b,4c,5,6,6b,7,8` — the suffixes were where things
+were bolted on instead of re-planned, which is the same accretion the plan
+exists to undo.

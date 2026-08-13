@@ -240,6 +240,46 @@ test parses `mise.toml` and fails if a task name matches the CLI's subcommand
 list, or if a task outside the maintainer allowlist exists at all. Drift becomes
 a red build rather than a discovery six weeks later.
 
+### 6b. Duplicate *responsibility* — which no scanner can see
+
+The earlier audit asked "is this text repeated?", got a clean result, and
+concluded duplication was gone. That was the wrong question. The right one is
+**"who else performs this responsibility?"** — and it finds things a syntactic
+scan structurally cannot.
+
+**"Is this VM usable?" is answered in nine places, four different ways**, each
+combining them differently: `AgentReady()`, `Status() == "started"`,
+`IsPaused()`, `BootEntryWritten`.
+
+| where | how it decides |
+|---|---|
+| `run.go:180` | `AgentReady`, else `Status != "started"` |
+| `install.go:121` | `st != "started"` |
+| `bootassist.go:181` | `!strings.EqualFold(st, "started")` |
+| `cleanup.go:94` | `!strings.EqualFold(st, "started")` |
+| `setup.go:166,177,217` | `AgentReady`, `IsPaused`, `BootEntryWritten` |
+| `main.go:290,303,358,522,1113` | all four, in five combinations |
+
+Two of those disagree on **case sensitivity** for the same question — one is
+`EqualFold`, one is `==`. That is a latent bug sitting in the open, and no
+duplicate-body scan will ever report it, because the code is not duplicated. The
+*decision* is.
+
+**Target:** one concept, asked once.
+
+```go
+type VMState int   // Absent, Stopped, Paused, Installing, Booting, Ready
+func (v VM) State(bundlePath string) (VMState, error)
+```
+
+Everything then asks `State()` rather than re-deriving it from three primitives
+in its own combination. This is also what lets `setup` be thin: its stage
+decisions become `switch state` instead of six ad-hoc checks.
+
+Same audit, second finding: **six files know where the Windows media lives**
+(`bundle.go`, `external.go`, `isoguard.go`, `paths.go`, `setup.go`, `main.go`).
+`Paths` exists to own that and does not.
+
 ### 7. Architectural gaps the duplication was hiding
 
 Deduplication is the shallow layer. These are structural, and several explain
@@ -316,7 +356,7 @@ it. Sizes are rough; *VM* marks phases that cannot be verified by CI.
 | 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
 | 6 | Idempotency contract | M | CI + twice-run test | needs 5's tests to be safe |
 | 7 | `context.Context` through long operations | M | **VM** | signature change, after 5 and 6 settle |
-| 8 | Verbs, typed errors, locking | M | CI | last API change before the CLI is written |
+| 8 | One `VMState`; verbs, typed errors, locking | M | CI | last API change before the CLI is written |
 | 9 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
 | 10 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
 | 11 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
@@ -444,7 +484,10 @@ to roughly 40. Add the test that asserts each stage matches its primitive.
 cleanly instead of leaving partial state. *VM* — cancellation during a real
 install is the only honest test.
 
-**8 — Verbs, typed errors, locking.** Fix `Ensure`'s five meanings:
+**8 — One `VMState`, then verbs, typed errors, locking.** Introduce
+`VM.State()` so "is this VM usable?" is answered once instead of nine times in
+four combinations — including the two that disagree about case. Then fix
+`Ensure`'s five meanings:
 `EnsureReady` → `BootInstalled`, which is what it does and would not have been
 mistaken for `RunInstall`. Typed errors for the states `setup` should act on. A
 lockfile per VM bundle. Route the last `runtime.GOOS` through `CanCreateVMs`.
@@ -637,6 +680,31 @@ git switch master && git merge --no-ff refactor/01-facts
 ---
 
 ---
+
+## Method: how these were found, and how the earlier ones were missed
+
+Recorded because the plan itself was written twice, and the second pass found
+things the first could not.
+
+**A bug is not understood until you name the structure that permitted it.** The
+`EnsureReady`/`RunInstall` defect was first written down as "used the wrong
+function" — a slip, worth a one-line correction. The real answer is that
+orchestration and primitives had drifted into two implementations of the same
+job, so the wrong function *looked* right. That framing produces a rule, a test
+and a phase; the first framing produced nothing. Every finding in this document
+that matters came from asking the second question.
+
+**Ask "who else does this job?", not "is this code repeated?"** A scan for
+duplicate function bodies returned clean, and duplication of *responsibility*
+was everywhere: nine places deciding whether a VM is usable, six knowing where
+the media lives, two implementations of the media pipeline. Syntactic tools are
+blind to it by construction.
+
+**Ask what a person does when it fails halfway.** The case for keeping the
+primitives, and for `setup` calling down through them, is invisible from reading
+code and obvious the moment you picture someone at a VM stuck at a UEFI prompt.
+This project's normal case is partial failure; a plan that reasons only about
+structure will keep proposing to delete the recovery toolkit.
 
 ## Appendix: this plan's own flaws, and how they were fixed
 

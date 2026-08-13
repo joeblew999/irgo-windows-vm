@@ -13,6 +13,24 @@ by someone reading the code later.
 These rules exist to make that failure mode expensive up front instead of
 expensive later.
 
+## When you find a bug, name the structure that allowed it
+
+"Used the wrong function" is not a finding; it is a symptom. `setup` called
+`EnsureReady` where it needed `RunInstall`, and the useful answer is that
+orchestration and primitives had drifted into two implementations of one job, so
+the wrong function looked right. The first framing yields a one-line fix. The
+second yields a rule and a test.
+
+Two questions that catch what a duplicate-code scan cannot:
+
+- **"Who else performs this responsibility?"** Not "is this text repeated?" A
+  clean duplicate-body scan coexisted with nine places deciding whether a VM is
+  usable, in four different combinations, two of which disagreed about case
+  sensitivity.
+- **"What does a person do when this fails halfway?"** This project's normal
+  case is partial failure. Reasoning only about structure will keep suggesting
+  you delete the commands that exist for recovery.
+
 ## Before you write a function, look for it
 
 The package is small enough to grep and has already converged on helpers.

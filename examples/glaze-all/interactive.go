@@ -426,7 +426,7 @@ func (u *ui) bind() {
 		if err != nil {
 			exe = "glaze-all"
 		}
-		return say("run this in another terminal and watch the log here:\n%s -i hello from a second copy", exe)
+		return say("run this in another terminal and watch the log here:\n%s hello from a second copy", exe)
 	})
 
 	// The report, on demand, in the window it is describing.

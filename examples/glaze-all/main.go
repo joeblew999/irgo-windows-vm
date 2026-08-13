@@ -23,8 +23,14 @@
 // that duplicated four of native's capabilities and added glaze on top told you
 // nothing about which of the two it was really testing.
 //
-// It exits on its own with a status line per capability and a non-zero code if
-// any FAILED, so it can be run unattended.
+// Run it with no flags and it opens the window and waits: every capability is a
+// button, and you drive them by hand. That is the default because it is an
+// example first — a tray icon you can click is the capability, and a table
+// saying the call returned nil is the summary of it.
+//
+// `-probe` is the other half: it runs each one unattended, prints a status line
+// per capability, and exits non-zero if any FAILED. That is what
+// `irgo-winvm app-create -gui ... -probe` runs in the VM.
 package main
 
 import (
@@ -149,7 +155,7 @@ var tinyPNG = []byte{
 // under the guest agent with no window at all, which is the strictest place
 // they can be checked.
 //
-// They still appear in -i, where a human drives them through the window. That
+// They still appear in interactive mode, where a human drives them through the window. That
 // is not the same test: interactive mode exercises the second-instance handoff
 // (singleinstance.Send) and clipboard interop with the host, neither of which a
 // console probe can reach.
@@ -336,18 +342,28 @@ func report() int {
 }
 
 func main() {
-	// Unattended is the default because that is how this is run in the VM, by
-	// `irgo-winvm app-create -gui`, where nobody is there to answer a dialog. -i is the
-	// other half: the same capabilities, on demand, so a person can actually use
-	// them rather than read a table saying they worked.
-	hands := flag.Bool("i", false, "interactive: drive each capability by hand instead of running a report")
+	// Interactive is the default, because this is an example before it is a
+	// test. Someone who builds it and runs it wants to see a tray icon they can
+	// click and a file dialog they can pick a file in — that is what the
+	// capabilities ARE. A table saying they worked is the summary of the thing,
+	// not the thing.
+	//
+	// It was the other way round, and the default suited the automated caller
+	// rather than the person: running the example printed a report and exited
+	// before you could look at it, and the interesting half was behind a flag
+	// nobody discovers by running it.
+	//
+	// So the report is the flag now. `irgo-winvm app-create -gui` passes it,
+	// which is right — an unattended run wants an exit code and no windows left
+	// open, and it should have to say so.
+	report := flag.Bool("probe", false, "run the capability report and exit, instead of opening the window")
 	flag.Parse()
 
-	if *hands {
-		runInteractive()
+	if *report {
+		runReport()
 		return
 	}
-	runReport()
+	runInteractive()
 }
 
 func runReport() {
@@ -366,7 +382,7 @@ func runReport() {
 	w.SetHtml(`<!doctype html><meta charset="utf-8">
 <body style="font:14px system-ui;padding:2rem">
 <h2>irgo windowed probe</h2><p>Exercising every capability that needs a window, then exiting.</p>
-<p style="color:#666">Run with <code>-i</code> to try them by hand instead.</p></body>`)
+<p style="color:#666">Run with no flags to try them by hand instead.</p></body>`)
 
 	go func() {
 		// Give the window a moment to exist before touching anything that needs

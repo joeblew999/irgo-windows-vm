@@ -5,9 +5,9 @@ any list of where things live goes stale the day someone moves them.
 
 ## Three stages, isolated
 
-`iso-create` gets the Windows media. `vm-create` makes a VM from it. `run` puts
-a binary on that. Each has an undo, and each owns its own paths and constants in
-its own files:
+`iso-create` gets the Windows media. `vm-create` makes a VM from it.
+`app-create` puts a binary on that. Each has an undo, and each owns its own
+paths and constants in its own files:
 
 - **iso** knows nothing about UTM. It is a download from Microsoft and an ISO
   built with `xorriso`, and it works on a machine that has never had a
@@ -15,10 +15,10 @@ its own files:
   message, which meant fetching media required UTM to be installed.
 - **vm** owns UTM entirely: finding it, installing it, `utmctl`, the bundle
   layout, the guest tools.
-- **run** drives the guest through `vm`'s `utmctl`, and owns the guest-side
+- **app** drives the guest through `vm`'s `utmctl`, and owns the guest-side
   paths.
 
-Dependencies run one way: `vm` and `run` use the ISO API, nothing comes back.
+Dependencies run one way: `vm` and `app` use the ISO API, nothing comes back.
 `doctor` reports on all three and calls into them rather than holding its own
 copy of where anything is.
 
@@ -137,6 +137,93 @@ making.
 Non-negotiable, and the reason this project exists. A bug worked around in an
 example still ships to everyone using those libraries, and the workaround hides
 it. `UPSTREAM.md` is the ledger.
+
+## Where things go
+
+One place, fixed, nothing to configure:
+
+```
+~/Library/Application Support/irgo-winvm/
+  media/    the ISO, the .esd it was built from, and scratch
+  bin/      binaries staged into a VM
+  logs/     every command, appended across runs
+  shots/    a screenshot per stage of every run
+```
+
+VMs go where UTM keeps them, because UTM reads nowhere else. Committed
+screenshots — evidence chosen for documentation — are `docs/screens/`, kept
+apart from `shots/` so the record does not drown in the noise.
+
+It needs macOS on Apple Silicon, and UTM, which `vm-create` installs from its
+signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
+`iso-create` and removed by `iso-delete`, only when building media from scratch.
+
+One thing nothing can install for you: macOS asks, once, in a dialog, whether
+this may control UTM. `vm-create` checks that before doing anything expensive,
+because without it a boot cannot be driven and the failure arrives forty minutes
+into an install as a timeout that mentions nothing about permissions.
+
+## The four programs it runs
+
+Split by what a capability *needs*, with exactly one owner each. A capability
+probed in two places is two things to fix when upstream changes and two reports
+to reconcile when they disagree.
+
+| program | library | needs |
+|---|---|---|
+| `probe/` | native — clipboard, power, single-instance, mmap | headless; runs under the guest agent in session 0 |
+| `examples/glaze-all` | native + glaze — openurl, tray, no-capture, menu, file dialogs, app icon | `-gui` |
+| `glaze-probes/verify` | glaze — the portless `app://` path | `-gui` |
+| `glaze-probes/verifyevents` | glaze — the Events bridge | `-gui` |
+
+`glaze-all` opens its window and waits by default, because it is an example
+before it is a test. `-probe` is the unattended report, and the mise task passes
+it.
+
+## Things that cost hours
+
+Each of these fails silently. UTM rejects a bad config with one generic *"cannot
+import this VM"* that names no field; a wrong boot command produces a prompt
+nobody sees; a truncated ISO produces a VM that will not boot.
+
+| trap | what happens |
+|---|---|
+| `virtio-gpu-pci` display | no framebuffer on aarch64, no legacy VGA — guest boots **invisibly** and looks hung |
+| VirtIO system disk | Windows ARM64 has no inbox driver; Setup reports no drive found. Use **NVMe** |
+| `virtio-net-pci` without guest tools | no inbox driver — **no network at all** in the guest |
+| missing `PS2Controller` | non-optional decode, no default; whole document rejected |
+| `UsbBusSupport: "USB3_0"` | the enum is `"2.0"` / `"3.0"` |
+| `CPUFlags` | the keys are `CPUFlagsAdd` and `CPUFlagsRemove` |
+| reading UTM's schema from `main` | `main` was v5.0.4 while the app was v4.7.5, and they disagree. Read the **tag** |
+| Windows ISOs are **UDF**, not ISO9660 | `install.wim` exceeds ISO9660's 4 GB limit, so ISO9660 readers fail on every path |
+| answer file on a FAT disk | Setup ignores it and runs interactive. Use an ISO9660 **CD** |
+| ISO padded past its declared volume size | mounts fine on macOS, ignored by Setup. Trim to the PVD size |
+| Joliet disabled | `autounattend.xml` becomes `AUTOUNAT.XML`, which Setup never looks for |
+| El Torito marked BIOS (`-b`) | correctly sized, correctly named, **does not boot**. UEFI needs `-e` |
+| `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs |
+| `utmctl start` then keystrokes | headless VM has no display, and UTM routes input through it — keystrokes vanish |
+| driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell. Keystrokes land in whatever has focus — see `docs/screens/keystrokes-into-a-running-desktop.png`, three Bing tabs searching for the EFI path |
+| `utmctl delete` | prints its failure and **exits 0** |
+| `utmctl exec` | never returns the guest's output and always exits 0. Everything that needs output goes through a batch file that captures it to a file the host then pulls |
+| `utmctl exec` with a whole command line as one string | the agent looks for a file by that entire name and answers "No such file or directory" — indistinguishable from a dead agent |
+| `cmd` `del` on a glob matching nothing | **exits 1**. So an undo succeeds while there is something to undo and fails the moment there is not |
+| `dir` and `del` disagree on the message | `dir` says "File Not Found", `del` says "Could Not Find". Handling one and not the other prints the other's error text as if it were a filename |
+| `utmctl suspend --save-state` | **reports success and power-cuts the guest.** No state file, VM left `stopped`, guest's next boot goes through "Diagnosing your PC". Use plain `suspend` |
+| `ln` to an immutable file | `EPERM` — so protecting the ISO silently turns a hardlink into a 5 GB copy |
+| `rm` on a bundle holding that hardlink | `EPERM`, directory left behind. Clear the flag first, restore it after |
+
+### In the guest programs
+
+| trap | what happens |
+|---|---|
+| every package defines its **own** `ErrUnsupported` | none wrap `errors.ErrUnsupported`, so a check against that alone matches nothing and a platform behaving as documented reports **FAILED** with a non-zero exit. `glaze.SetAppIcon` is unsupported on Windows by design — the platform this exists to test |
+| `tray.Run` **blocks**, driving the event loop until `Stop` | waiting on it deadlocks. Post it and leave it; `Stop` is safe from any goroutine |
+| the tray started **before** the window | glaze's `New` runs a temporary `[NSApp run]` that ends only when `applicationDidFinishLaunching` fires — once per process. A tray started first consumes it and `glaze.New` blocks forever, with no window and nothing printed |
+| `menu.Set` with no `Options.Window` | required on Windows (the HWND); it returns an error naming it, on the one platform that matters here |
+| `menu.Set` with `Options.Dispatch` set **before** `Run` | Set blocks until its UI work has run, and nothing drains the queue until the run loop starts |
+| `file://` URL built by concatenation | Windows paths are `C:\dir`; the URL wants `file:///C:/dir`. Without the leading slash `net/url` writes `file:C:/dir` and ShellExecuteW rejects it |
+| `openurl.Open != nil` as a capability check | a function value is never nil. `go vet` says so outright — the check checked nothing |
+| an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` sub-resource names a scheme WebView2 has never heard of. Fails silently: no error, no console message, no stylesheet |
 
 ## Do not
 

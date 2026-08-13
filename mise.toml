@@ -43,7 +43,19 @@ run = "go run ./cmd/irgo-winvm app-create"
 # same path without rebuilding — app-delete only needs to know what to remove.
 
 [tasks."app:create:glaze-all"]
-description = "examples/glaze-all — every windowed capability, on the VM"
+description = "examples/glaze-all — the windowed capability report, on the VM"
+# -probe because glaze-all opens its window and waits when run with no flags:
+# it is an example first, and its default is the hands-on mode. An unattended
+# caller wants an exit code and nothing left open, so it says so.
+run = [
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
+  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/glaze-all.exe -probe",
+]
+
+[tasks."app:create:glaze-all:hands"]
+description = "examples/glaze-all — the window, on the VM, to drive by hand"
+# No -probe: this is the mode a person wants, left open on the guest's desktop.
+# It does not return until the window is closed, so watch it with vm:screen.
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
   "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/glaze-all.exe",

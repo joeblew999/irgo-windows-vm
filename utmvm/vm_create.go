@@ -139,7 +139,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 	if _, sErr := os.Stat(iso); sErr != nil {
 		return res, stage("the Windows media", false, "", fmt.Errorf(
-			"no media at %s\n  Run `irgo-winvm iso-create` first", Home(ISODir())))
+			"no media at %s\n  AppCreate `irgo-winvm iso-create` first", Home(ISODir())))
 	}
 	_ = stage("the Windows media", true, filepath.Base(iso), nil)
 	res.ISO = iso

@@ -29,12 +29,13 @@ func usage() {
 
   iso-create   the Windows media, downloaded from Microsoft or built
   vm-create    a Windows VM that answers, installed from that media
-  run          put a binary on the VM and run it
+  app-create   put a binary on the VM and start it
 
   iso-delete   -> remove the media
   vm-delete    -> remove the VM
-  run-delete   -> remove what run put on the guest
+  app-delete   -> remove it from the guest
 
+  vm-screen    photograph the VM's screen — what is it actually doing
   doctor       what is here; changes nothing
 
 Every command takes -h.
@@ -51,14 +52,16 @@ func run(args []string) error {
 		return runVMCreate(args[1:])
 	case "vm-delete":
 		return runVMDelete(args[1:])
-	case "run":
-		return runRun(args[1:])
-	case "run-delete":
-		return runRunDelete(args[1:])
+	case "app-create":
+		return runAppCreate(args[1:])
+	case "app-delete":
+		return runAppDelete(args[1:])
 	case "iso-create":
 		return runISOCreate(args[1:])
 	case "iso-delete":
 		return runISODelete(args[1:])
+	case "vm-screen":
+		return runVMScreen(args[1:])
 	case "doctor":
 		return runDoctor()
 	case "-h", "--help", "help":
@@ -278,7 +281,7 @@ func runVMDelete(args []string) error {
 }
 
 // runRun is the inner loop: build on the Mac, run on Windows, read output back.
-func runRun(args []string) error {
+func runAppCreate(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
 	name := fs.String("vm", "", "VM name or UUID (required)")
@@ -307,7 +310,7 @@ func runRun(args []string) error {
 	}
 
 	local := fs.Arg(0)
-	res, err := utmvm.Run(e.UUID, local, utmvm.RunOptions{
+	res, err := utmvm.AppCreate(e.UUID, local, utmvm.AppOptions{
 		Args:    fs.Args()[1:],
 		GUI:     *gui,
 		User:    *user,
@@ -337,8 +340,8 @@ func bundleOf(e utmvm.Entry) string {
 
 // runRunDelete removes what `run` put on the guest: the binaries it pushed and
 // any scratch files a run that did not finish left behind.
-func runRunDelete(args []string) error {
-	fs := flag.NewFlagSet("run-delete", flag.ExitOnError)
+func runAppDelete(args []string) error {
+	fs := flag.NewFlagSet("app-delete", flag.ExitOnError)
 	name := fs.String("vm", "", "VM name or UUID (required)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -354,7 +357,7 @@ func runRunDelete(args []string) error {
 		fmt.Printf("\nUTM knows no VM %q; nothing to delete\n", *name)
 		return nil
 	}
-	if err := utmvm.RunCleanReport(e.UUID, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }, fs.Args()...); err != nil {
+	if err := utmvm.AppDelete(e.UUID, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }, fs.Args()...); err != nil {
 		return err
 	}
 	fmt.Printf("cleaned %s\n", e.Name)
@@ -550,4 +553,29 @@ func stamped() func(string, ...any) {
 	return func(f string, a ...any) {
 		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
 	}
+}
+
+// runVMScreen photographs the guest's display.
+//
+// The only thing that answers "what is it actually doing" when a VM is stuck:
+// a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
+// exactly like a working one from the host.
+func runVMScreen(args []string) error {
+	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
+	name := fs.String("vm", "irgo-win11", "VM name")
+	out := fs.String("o", "", "where to write the PNG (default: alongside the media)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		*out = filepath.Join(utmvm.VMScreensDir(), *name+".png")
+	}
+	say := stamped()
+	say("vm:     %s", *name)
+	say("shot:   %s", utmvm.Home(*out))
+	if err := utmvm.Screenshot(*name, *out); err != nil {
+		return err
+	}
+	say("written")
+	return nil
 }

@@ -2,6 +2,7 @@ package utmvm
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"net"
@@ -22,7 +23,8 @@ import (
 const (
 	// vmStageDirName is where binaries staged onto a VM's payload medium are
 	// looked for by default.
-	vmStageDirName = "bin"
+	vmStageDirName   = "bin"
+	vmScreensDirName = "screens"
 
 	// Where UTM itself lives, and what it keeps inside its container. UTM
 	// decides all of this; we only have to spell it correctly, and spelling it
@@ -33,6 +35,11 @@ const (
 	utmDocuments = "Documents"
 	utmToolsDir  = "GuestSupportTools"
 	utmToolsISO  = "utm-guest-tools-latest.iso"
+
+	// utmctlTimeout bounds every utmctl call. Guest-side commands wait forever
+	// when the agent is absent, which is the normal state of a VM that has not
+	// finished installing.
+	utmctlTimeout = 20 * time.Second
 
 	// What goes inside a bundle we generate.
 	bundleExt   = ".utm"
@@ -90,12 +97,25 @@ type VM struct{ Ref string }
 // Named returns a handle to a VM. Nothing is validated until a call is made.
 func Named(ref string) VM { return VM{Ref: ref} }
 
-func (v VM) run(args ...string) (string, error) {
-	cmd := exec.Command(utmctlPath(), append(args, v.Ref)...)
+func (v VM) run(args ...string) (string, error) { return v.runFor(utmctlTimeout, args...) }
+
+// runFor is `utmctl <args> <vm>` with a deadline.
+//
+// The deadline is not optional. `utmctl ip-address` against a guest with no
+// agent does not fail — it waits, forever, and so does everything built on it:
+// AgentReady, and every command that asks whether a VM is usable. A VM with no
+// Windows installed hung the CLI for ten minutes with no output.
+func (v VM) runFor(d time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, utmctlPath(), append(args, v.Ref)...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	combined := strings.TrimSpace(out.String() + errb.String())
+	if ctx.Err() != nil {
+		return combined, fmt.Errorf("utmctl %s on %s: gave up after %s", strings.Join(args, " "), v.Ref, d)
+	}
 	if err != nil {
 		return combined, fmt.Errorf("utmctl %s: %w: %s", strings.Join(args, " "), err, combined)
 	}
@@ -454,3 +474,6 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
 func utmContainerDir(home string) string {
 	return filepath.Join(home, "Library", "Containers", utmContainer, "Data")
 }
+
+// VMScreensDir is where screenshots go.
+func VMScreensDir() string { return filepath.Join(appRoot(), vmScreensDirName) }

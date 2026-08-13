@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
@@ -425,67 +424,35 @@ func runISODelete(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	iso := utmvm.DefaultPaths().ISO()
-	dirs := utmvm.ISOSearchDirs()
-	fmt.Printf("media: %s\n", utmvm.Home(iso))
-	for _, d := range dirs {
-		fmt.Printf("  also looking in %s\n", utmvm.Home(d))
-	}
 
-	st, err := utmvm.ISOLinks(iso, dirs)
+	// One path. The media lives where `iso` puts it and nowhere else.
+	//
+	// This used to hunt through ~/Downloads and UTM's bundle directory for
+	// other names, then decide what to do based on how many it found. That made
+	// the simplest command in the tool the hardest to predict: what it deleted
+	// depended on what happened to be sitting in an unrelated folder.
+	iso := utmvm.DefaultPaths().ISO()
+	fmt.Printf("media: %s\n", utmvm.Home(iso))
+
+	fi, err := os.Stat(iso)
 	if err != nil {
-		// Nothing to delete is the goal already met, not a failure. An undo
-		// that errors when there is nothing to undo cannot be run twice, which
-		// defeats the point of having it. Saying WHERE it looked matters as
-		// much: "nothing to delete" is indistinguishable from "looked in the
-		// wrong place" otherwise.
-		fmt.Println("\nnothing there; nothing to delete")
+		fmt.Println("nothing there; nothing to delete")
 		return nil
 	}
 	if !*force {
-		return fmt.Errorf("this deletes %s of media that costs 4.2 GB to re-fetch\n"+
-			"  from a source that rate-limits. Pass -force if you mean it",
-			utmvm.HumanBytes(st.Bytes))
+		return fmt.Errorf("this deletes %s that costs 4.2 GB to re-fetch from a\n"+
+			"  source that rate-limits. Pass -force if you mean it",
+			utmvm.HumanBytes(fi.Size()))
 	}
 
-	// Every name, not just this one. The bytes are shared, so unlinking a
-	// single name frees nothing — an earlier version removed one, announced
-	// success, and left all 5.27 GB on disk under the other four.
-	//
-	// uchg lives on the inode and blocks unlink through any name, so it is
-	// cleared once and the whole set goes.
-	if st.Protected {
-		_ = utmvm.UnprotectISO(iso)
-	}
-	names := append([]string{iso}, st.Found...)
-	seen := map[string]bool{}
-	var gone int
-	var inVM []string
-	for _, n := range names {
-		if seen[n] {
-			continue
-		}
-		seen[n] = true
-		// A copy inside a VM bundle belongs to that VM; vm-delete owns it.
-		if strings.Contains(n, ".utm/") {
-			inVM = append(inVM, n)
-			continue
-		}
-		if err := os.Remove(n); err == nil {
-			fmt.Printf("  · removed %s\n", utmvm.Home(n))
-			gone++
-		}
+	// uchg lives on the inode and blocks unlink, so it is cleared first. Any
+	// other name for these bytes keeps them alive, which is correct: a VM
+	// holding this ISO still needs it, and vm-delete owns that copy.
+	_ = utmvm.UnprotectISO(iso)
+	if err := os.Remove(iso); err != nil {
+		return err
 	}
 	_ = os.Remove(iso + ".scan")
-
-	if len(inVM) > 0 {
-		fmt.Printf("\n%d copy(ies) are inside VM bundles and were left alone:\n", len(inVM))
-		for _, n := range inVM {
-			fmt.Printf("  %s\n", utmvm.Home(n))
-		}
-		fmt.Printf("The %s is not freed until those VMs go — use vm-delete.\n", utmvm.HumanBytes(st.Bytes))
-		return nil
-	}
-	fmt.Printf("\nremoved %d name(s); %s freed\n", gone, utmvm.HumanBytes(st.Bytes))
+	fmt.Printf("removed %s (%s)\n", utmvm.Home(iso), utmvm.HumanBytes(fi.Size()))
 	return nil
 }

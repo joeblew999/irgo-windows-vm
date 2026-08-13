@@ -403,16 +403,19 @@ func runISO(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	p := utmvm.DefaultPaths()
-	res, err := utmvm.Setup(utmvm.SetupOptions{
-		ISO:       "",
-		Fetch:     *fetch,
-		MediaOnly: true,
-	}, p, func(s string) { fmt.Println(s) })
+	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
+	// ESD expansion; a hypervisor is not involved, and this used to run the
+	// whole setup chain — so fetching an ISO required UTM to be installed first.
+	iso, detail, skipped, err := utmvm.Media(utmvm.MediaOptions{Fetch: *fetch},
+		utmvm.DefaultPaths(), func(f string, a ...any) { fmt.Printf(f+"\n", a...) })
 	if err != nil {
 		return err
 	}
-	fmt.Printf("media: %s\n", res.ISO)
+	if skipped {
+		fmt.Printf("media: %s (already there — %s)\n", utmvm.Home(iso), detail)
+		return nil
+	}
+	fmt.Printf("media: %s (%s)\n", utmvm.Home(iso), detail)
 	return nil
 }
 

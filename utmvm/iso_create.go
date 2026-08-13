@@ -492,7 +492,7 @@ func refuseUnsafeDest(dest string) error {
 	msg := fmt.Sprintf("utmvm: %s already exists (%s)", dest, HumanBytes(fi.Size()))
 
 	if _, nlink, ok := inodeInfo(dest); ok && nlink > 1 {
-		st, sErr := ISOLinks(dest, ISOSearchDirs())
+		st, sErr := ISOLinks(dest, isoSearchDirs())
 		if sErr == nil {
 			// Not len(Found)-1: dest may not be among Found at all, because the
 			// search covers ~/Downloads and UTM's bundles, and dest is usually
@@ -517,3 +517,95 @@ func refuseUnsafeDest(dest string) error {
 }
 
 // ISOInfo is what we can learn about Windows install media without mounting it.
+
+// MediaOptions configures Media.
+type MediaOptions struct {
+	ISO   string // use this file; empty means find or make one
+	Fetch bool   // permit a 4.2 GB download when nothing local works
+}
+
+// Media finds usable Windows media, or makes some.
+//
+// It has nothing to do with UTM, and deliberately does not touch it. Getting a
+// Windows ISO is a download from Microsoft or an expansion of an ESD; a
+// hypervisor is not involved, and requiring one to be installed first — which
+// this did, via the setup chain — made fetching media impossible on a machine
+// that had not installed UTM yet.
+
+// ensureMedia finds usable Windows media, or makes some.
+//
+// The order is what a developer would want if they thought about it: use what
+// is here, then what they built earlier, then build from an ESD they already
+// downloaded, and only then spend 4.2 GB of somebody's bandwidth.
+func Media(opts MediaOptions, paths Paths, say func(string, ...any)) (iso, detail string, skipped bool, err error) {
+	// Named explicitly.
+	if opts.ISO != "" {
+		if _, sErr := os.Stat(opts.ISO); sErr != nil {
+			return "", "", false, fmt.Errorf("no such ISO: %s", opts.ISO)
+		}
+		return opts.ISO, filepath.Base(opts.ISO), true, nil
+	}
+
+	// Already in the cache, under either name.
+	for _, candidate := range []string{
+		paths.ISO(),
+		filepath.Join(paths.Cache, builtISOName),
+	} {
+		if _, sErr := os.Stat(candidate); sErr != nil {
+			continue
+		}
+		info, iErr := InspectISO(candidate)
+		if iErr != nil || !info.IsARM64 {
+			say("  … %s is not ARM64 media; ignoring it", filepath.Base(candidate))
+			continue
+		}
+		return candidate, filepath.Base(candidate), true, nil
+	}
+
+	// An ESD already downloaded — build from it rather than downloading again.
+	esd := filepath.Join(paths.Cache, esdName)
+	if _, sErr := os.Stat(esd); sErr == nil {
+		built := filepath.Join(paths.Cache, builtISOName)
+		say("  … building an ISO from the .esd already in the cache")
+		if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
+			return "", "", false, bErr
+		}
+		return built, filepath.Base(built), false, nil
+	}
+
+	if !opts.Fetch {
+		return "", "", false, fmt.Errorf(
+			"no Windows media found.\n"+
+				"     Put an ARM64 ISO at %s, or re-run with -fetch to download\n"+
+				"     4.2 GB from Microsoft and build one (needs wimlib and xorriso).",
+			Home(paths.ISO()))
+	}
+
+	// Download, then build.
+	all, cErr := FetchCatalog(2 * time.Minute)
+	if cErr != nil {
+		return "", "", false, cErr
+	}
+	match := FilterCatalog(all, "ARM64", "en-us", "CLIENTCONSUMER")
+	if len(match) != 1 {
+		return "", "", false, fmt.Errorf("catalog matched %d ARM64 en-us images, expected exactly 1", len(match))
+	}
+	e := match[0]
+	say("  … downloading %s (%s)", e.Build(), HumanBytes(e.Size))
+	if err := os.MkdirAll(paths.Cache, 0o755); err != nil {
+		return "", "", false, err
+	}
+	if dErr := Download(e.FilePath, esd, e.Sha1, func(done, total int64) {
+		if total > 0 {
+			say("      %s / %s", HumanBytes(done), HumanBytes(total))
+		}
+	}); dErr != nil {
+		return "", "", false, dErr
+	}
+
+	built := filepath.Join(paths.Cache, builtISOName)
+	if bErr := buildFromESD(esd, built, paths, say); bErr != nil {
+		return "", "", false, bErr
+	}
+	return built, filepath.Base(built), false, nil
+}

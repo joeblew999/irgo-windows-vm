@@ -133,7 +133,7 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	if len(immutable) > 0 {
 		step("… releasing %d protected file(s) so the bundle can be removed", len(immutable))
 	}
-	reprotect := releaseImmutable(immutable, append(ISOSearchDirs(), dp.Cache, dp.Work))
+	reprotect := releaseImmutable(immutable, append(isoSearchDirs(), dp.Cache, dp.Work))
 	defer func() {
 		for _, p := range reprotect {
 			_ = ProtectISO(p)
@@ -382,4 +382,21 @@ func CheckAutomation() error {
 		"  Privacy & Security -> Automation, then run this again.\n"+
 		"  Without it the boot cannot be driven and an install stops at a UEFI prompt",
 		strings.TrimSpace(string(out)))
+}
+
+// isoSearchDirs are the places worth looking for other names for an ISO: where
+// a browser puts a download, and where UTM keeps the bundles that use it.
+//
+// It lives here rather than with the ISO code because knowing about VM bundles
+// is vm-delete's business. Getting media has nothing to do with UTM.
+func isoSearchDirs() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dirs := []string{filepath.Join(home, "Downloads")}
+	if vmDir, err := DefaultVMDir(); err == nil {
+		dirs = append(dirs, vmDir)
+	}
+	return dirs
 }

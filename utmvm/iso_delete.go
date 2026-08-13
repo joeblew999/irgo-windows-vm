@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Finding every name for an ISO, protecting it, and removing it.
@@ -91,20 +90,6 @@ func chflags(path string, set bool) error {
 	return nil
 }
 
-// ISOSearchDirs are the places worth looking for other names for an ISO: where
-// a browser puts a download, and where UTM keeps the bundles that use it.
-func ISOSearchDirs() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	dirs := []string{filepath.Join(home, "Downloads")}
-	if vmDir, err := DefaultVMDir(); err == nil {
-		dirs = append(dirs, vmDir)
-	}
-	return dirs
-}
-
 // FoundISO is one installation image found on this machine.
 type FoundISO struct {
 	Path  string
@@ -112,74 +97,4 @@ type FoundISO struct {
 	Inode uint64
 	Links int
 	InUse bool // shares its blocks with a VM bundle or the repo's cache
-}
-
-// ScanISOs finds every large ISO in the usual places and says which are
-// actually used.
-//
-// It exists because these are 5 GB each, they are produced by a GUI tool that
-// names them after a Windows build rather than anything meaningful, and a
-// second one is invisible until the disk fills. Asking "which of these is the
-// one that works?" from filenames alone is not answerable — but "does it share
-// blocks with a VM bundle" is, and that is what InUse reports.
-//
-// minBytes filters out the small ISOs that are not Windows media: the answer
-// file this repo generates is 32 MB and the guest tools are 121 MB.
-func ScanISOs(extraDirs []string, minBytes int64) []FoundISO {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	dirs := []string{
-		filepath.Join(home, "Downloads"),
-		filepath.Join(home, "Documents"),
-		filepath.Join(home, "Desktop"),
-	}
-	dirs = append(dirs, extraDirs...)
-
-	// Inodes reachable from a VM bundle, which is what "in use" means. Anything
-	// UTM boots is here, whatever it is called elsewhere.
-	used := map[uint64]bool{}
-	if vmDir, dErr := DefaultVMDir(); dErr == nil {
-		_ = filepath.WalkDir(vmDir, func(p string, d os.DirEntry, wErr error) error {
-			if wErr != nil || d.IsDir() {
-				return nil //nolint:nilerr
-			}
-			if ino, _, ok := inodeInfo(p); ok {
-				used[ino] = true
-			}
-			return nil
-		})
-	}
-
-	seen := map[uint64]bool{}
-	var out []FoundISO
-	for _, dir := range dirs {
-		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, wErr error) error {
-			if wErr != nil || d.IsDir() {
-				return nil //nolint:nilerr
-			}
-			if !strings.EqualFold(filepath.Ext(p), ".iso") {
-				return nil
-			}
-			info, iErr := d.Info()
-			if iErr != nil || info.Size() < minBytes {
-				return nil
-			}
-			ino, nlink, ok := inodeInfo(p)
-			if !ok || seen[ino] {
-				return nil
-			}
-			seen[ino] = true
-			out = append(out, FoundISO{
-				Path:  p,
-				Bytes: info.Size(),
-				Inode: ino,
-				Links: int(nlink),
-				InUse: used[ino],
-			})
-			return nil
-		})
-	}
-	return out
 }

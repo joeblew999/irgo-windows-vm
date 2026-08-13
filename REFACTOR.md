@@ -1144,8 +1144,9 @@ TestGuestFileNamesArePrunable   // generate via guestFile(), assert Prune claims
 TestOperationsAreIdempotent     // Download/BuildISO/Prune twice; second is a no-op
 TestExportedSurfaceBudget       // count exported symbols; fail if it grows
 TestGuardsRefuseWhenUnknown     // unanswerable inode/flags ⇒ refuse, on darwin and not
-TestNoKeystrokesWhenAgentUp     // via the phase-6 seam: zero osascript calls
+TestNoKeystrokesWhenAgentUp     // via the phase-3 seam: zero osascript calls
 TestShortDownloadFails          // truncated body ⇒ error, and no file at dest
+TestCleanUndoesEnsure           // per capability: Ensure, then Clean, then assert a clean tree
 ```
 
 `TestExportedSurfaceBudget` is deliberate: 134 exported symbols accumulated

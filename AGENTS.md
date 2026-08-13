@@ -22,8 +22,16 @@ had is two of them re-deriving the other's knowledge:
 - **SEQUENCE** — the orchestration (`setup`)
 - **REPORT** — the diagnosis (`doctor`, `status`, `targets`, `verify`)
 
-So each capability exposes exactly two entry points: **`Check()` is pure** — no
-installs, no downloads, no writes — and **`Ensure()` acts**, built on `Check`.
+So each capability exposes exactly three entry points: **`Check()` is pure** — no
+installs, no downloads, no writes — **`Ensure()` acts**, built on `Check`, and
+**`Clean()` removes what `Ensure` created**.
+
+`Clean` is not bookkeeping. It is what makes a failed stage recoverable —
+**fix the code, delete what the stage did, run it again** — and its absence is
+already three live bugs: `RunInteractive` leaves an `irgo-l-*.bat` in the guest
+on every call, `Create` leaves a half-built bundle it cannot remove, and
+`Download` leaves a `.part` that makes a later 416 permanent. If you add an
+`Ensure`, you owe a `Clean`.
 
 DO and SEQUENCE both call `Ensure`, which is what makes reproducing a `setup`
 failure by hand actually reproduce it. **REPORT calls `Check` only.** A

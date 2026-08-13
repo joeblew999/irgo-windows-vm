@@ -68,6 +68,33 @@ window up on the guest's desktop to drive by hand instead of reporting.
 When something is stuck, `mise run vm:screen` photographs the guest — from the
 host a stuck boot and a working one look identical.
 
+## The docs site
+
+<https://joeblew999.github.io/irgo-windows-vm/> is **generated from the markdown
+in this repository** and published by `pages.yml` on every push to `main`. There
+is no separate copy to edit: if a page is wrong, the markdown is wrong.
+
+```sh
+mise run site:serve    # build it and open http://localhost:8127
+mise run site:build    # just build, into site/dist (gitignored)
+```
+
+`site:serve` stops whatever already holds the port, because the failure it
+prevents is silent — a leftover server keeps answering and the page in front of
+you is the *old* build.
+
+CI fails on any local link that names a file the site does not publish, and on
+an absolute URL that has been rewritten as a repository path. Both have
+happened; neither is visible from looking at a page that renders.
+
+`README.md`, `RESULTS.md`, `UPSTREAM.md`, `AGENTS.md` and this file each become
+a page. Adding another means one line in `site/main.go` — nothing is discovered
+by scanning a directory, so nothing gets published by accident.
+
+Screenshots come from `docs/screens/vm/`, and are put there by the tool rather
+than by hand: `mise run vm:shots` copies the newest shot of each stage in under
+its stage name. Do not copy them across yourself.
+
 ## A glaze or native bug is fixed at crgimenes, not here
 
 **Non-negotiable, and the reason this project exists.** A failing probe means a

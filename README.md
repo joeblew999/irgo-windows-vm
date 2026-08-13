@@ -30,14 +30,30 @@ macOS on Apple Silicon. It installs UTM itself if you do not have it.
 
 ## What it is for
 
+This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)** — a
+hypermedia-driven framework for building native iOS, Android and **desktop**
+apps in Go with Datastar, no JavaScript framework involved.
+
+Desktop is the hard word in that sentence. An app that runs on one desktop is
+not a desktop app; it has to work on Windows and Linux as well as on the Mac it
+was written on. The desktop half rests on
 [glaze](https://github.com/crgimenes/glaze) and
-[native](https://github.com/crgimenes/native) are cgo-free Go desktop libraries.
-Their Windows support is the half that is hardest to check from a Mac, so this
-exists to check it — automatically, on a real Windows, from the machine you
-already have.
+[native](https://github.com/crgimenes/native) — cgo-free Go libraries for a
+webview and the OS integration around it — and *"it works on my Mac"* is not
+evidence about any of the others.
+
+Windows is the one that cannot be checked by reading the code. It is a
+different windowing system, a different webview, a different set of things that
+fail silently, and none of it is visible from macOS. So this exists to check it
+the only way that counts: install a real Windows on a real VM, run the binary
+there, and read back what it actually did.
 
 Everything else here is in service of that: getting the media, making the VM,
 and running a binary on it.
+
+Once that is dependable, it belongs to Irgo rather than to a repository beside
+it — the VM machinery is meant to be ported in, so that verifying a desktop
+build on every platform is part of building one.
 
 ## Three steps
 

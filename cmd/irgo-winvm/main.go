@@ -568,15 +568,29 @@ func runISODelete(args []string) error {
 func runVMScreen(args []string) error {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
 	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
-	out := fs.String("o", "", "where to write the PNG (default: alongside the media)")
+	out := fs.String("o", "", "where to write the PNG (default: the shots directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *out == "" {
-		*out = filepath.Join(utmvm.VMScreensDir(), *name+".png")
-	}
 	say := utmvm.Printer("vm-screen")
 	say("vm:     %s", *name)
+
+	// Into shots/, outside the repository, and timestamped.
+	//
+	// This wrote docs/screens/<vm>.png, which is a tracked file: every
+	// diagnostic screenshot overwrote committed evidence and left the working
+	// tree dirty, and taking two in a row silently destroyed the first. Those
+	// two directories are not the same thing — docs/screens is evidence chosen
+	// to be kept, shots/ is every look at a running VM.
+	if *out == "" {
+		p, err := utmvm.Shot(*name, "vm-screen")
+		if err != nil {
+			return err
+		}
+		say("shot:   %s", utmvm.Home(p))
+		say("written")
+		return nil
+	}
 	say("shot:   %s", utmvm.Home(*out))
 	if err := utmvm.Screenshot(*name, *out); err != nil {
 		return err

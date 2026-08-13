@@ -46,9 +46,9 @@ func run(args []string) error {
 	}
 	switch args[0] {
 	case "vm":
-		return runSetup(args[1:])
+		return runVM(args[1:])
 	case "vm-delete":
-		return runDelete(args[1:])
+		return runVMDelete(args[1:])
 	case "run":
 		return runRun(args[1:])
 	case "run-delete":
@@ -75,46 +75,49 @@ func run(args []string) error {
 // alone. Every stage is idempotent, so running it twice is safe and the second
 // run takes seconds — which matters because the two expensive stages are a
 // 4.2 GB download and a 45-minute install.
-func runSetup(args []string) error {
-	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+func runVM(args []string) error {
+	fs := flag.NewFlagSet("vm", flag.ContinueOnError)
 	var (
 		name    = fs.String("vm", "irgo-win11", "VM name")
-		iso     = fs.String("iso", "", "media to use (default: find one, or build with -fetch)")
-		probes  = fs.String("probes", "", "probe binaries to embed (default: the .bin directory)")
-		fetch   = fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if no media is present")
+		stage   = fs.String("stage", "", "directory of binaries to put on the install medium")
 		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *probes == "" {
+	if *stage == "" {
 		if _, err := os.Stat(utmvm.VMStageDir()); err == nil {
-			*probes = utmvm.VMStageDir()
+			*stage = utmvm.VMStageDir()
 		}
 	}
+	say := stamped()
 
-	fmt.Printf("setting up %s\n\n", *name)
+	// Same shape as iso-create: name every location first, then narrate each
+	// step before doing it. This is the command that can take 45 minutes, so
+	// silence here is the difference between waiting and wondering.
+	b, _ := utmvm.BundlePath(*name)
+	say("vm:     %s", *name)
+	say("bundle: %s", utmvm.Home(b))
+	say("media:  %s", utmvm.Home(utmvm.ISODir()))
+	if *stage != "" {
+		say("stage:  %s", utmvm.Home(*stage))
+	}
+
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
 		VMName:   *name,
-		ISO:      *iso,
-		ProbeDir: *probes,
-		Fetch:    *fetch,
+		ProbeDir: *stage,
 		Install:  *install,
 		Timeout:  *timeout,
 	}, func(line string) { fmt.Println(line) })
 	if err != nil {
 		return err
 	}
-
-	fmt.Println()
 	if res.Ready {
-		fmt.Printf("%s is ready.\n\n", res.VM)
-		fmt.Printf("  irgo-winvm run -vm %s          run the native capability probes\n", res.VM)
-		fmt.Printf("  irgo-winvm run -gui -vm %s <exe> run a windowed binary\n", res.VM)
+		say("%s is ready", res.VM)
 		return nil
 	}
-	fmt.Printf("%s is not ready yet — see the stages above for what remains.\n", res.VM)
+	say("%s is not ready yet — see the steps above for what remains", res.VM)
 	return nil
 }
 
@@ -228,35 +231,47 @@ func reportExternals() {
 	}
 }
 
-func runDelete(args []string) error {
-	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
-	force := fs.Bool("force", false, "stop the VM first if it is running")
-	dry := fs.Bool("dry-run", false, "report what would be removed and stop")
-	ref, err := vmRef(fs, args)
+func runVMDelete(args []string) error {
+	fs := flag.NewFlagSet("vm-delete", flag.ContinueOnError)
+	name := fs.String("vm", "irgo-win11", "VM name")
+	force := fs.Bool("force", false, "actually delete; without this it only lists")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	say := stamped()
+
+	b, _ := utmvm.BundlePath(*name)
+	say("STEP 1/2  the VM")
+	say("          %s", utmvm.Home(b))
+
+	e, fErr := utmvm.Find(*name)
+	if fErr != nil {
+		say("          UTM knows no VM %q; nothing to delete", *name)
+		return nil
+	}
+	r, iErr := utmvm.InspectRemoval(*name)
+	if iErr != nil {
+		return iErr
+	}
+	say("          %s, %s", e.Status, utmvm.HumanBytes(r.TotalBytes))
+
+	say("STEP 2/2  would delete:")
+	say("          %-9s %s", utmvm.HumanBytes(r.TotalBytes), utmvm.Home(r.Path))
+	if r.Running {
+		say("          it is running and will be stopped first")
+	}
+	if !*force {
+		return fmt.Errorf("%s of VM, and the Windows on it.\n"+
+			"  Reinstalling takes about 45 minutes. Pass -force to do it",
+			utmvm.HumanBytes(r.TotalBytes))
+	}
+
+	say("STEP 2/2  deleting")
+	out, err := utmvm.Delete(*name, true, func(f string, a ...any) { say("          "+f, a...) })
 	if err != nil {
 		return err
 	}
-	if *dry {
-		r, err := utmvm.InspectRemoval(ref)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("would remove %s (%s reclaimed, running=%v)\n",
-			r.Path, utmvm.HumanBytes(r.TotalBytes), r.Running)
-		return nil
-	}
-	if b, bErr := utmvm.BundlePath(ref); bErr == nil {
-		fmt.Printf("bundle: %s\n", utmvm.Home(b))
-	}
-	if _, fErr := utmvm.Find(ref); fErr != nil {
-		fmt.Printf("\nUTM knows no VM %q; nothing to delete\n", ref)
-		return nil
-	}
-	r, err := utmvm.Delete(ref, *force, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) })
-	if err != nil {
-		return err
-	}
-	fmt.Printf("removed %s — %s reclaimed\n", r.Path, utmvm.HumanBytes(r.TotalBytes))
+	say("removed %s — %s reclaimed", utmvm.Home(out.Path), utmvm.HumanBytes(out.TotalBytes))
 	return nil
 }
 
@@ -349,18 +364,6 @@ func runRunDelete(args []string) error {
 func runISOCreate(args []string) error {
 	fs := flag.NewFlagSet("iso-create", flag.ExitOnError)
 	fetch := fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if nothing local works")
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `iso-create — the Windows media a VM installs from.
-
-  %s
-
-  uses media already there, or a .esd already downloaded (40s to build)
-  -fetch    downloads %s from Microsoft when there is neither
-
-Installs wimlib and xorriso if missing. iso-delete removes them.
-
-`, utmvm.Home(utmvm.ISODir()), utmvm.ISODownloadSize())
-	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -407,19 +410,6 @@ func runISODelete(args []string) error {
 	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
 	force := fs.Bool("force", false, "actually delete; without this it only lists")
 	all := fs.Bool("all", false, "also delete the .esd, the one thing that cannot be rebuilt")
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `iso-delete — undo iso-create.
-
-  %s
-
-  no flags   lists what would go, deletes nothing
-  -force     deletes the ISO, keeps the .esd (40s to rebuild)
-  -all       deletes the .esd too (%s, rate-limited)
-
-Uninstalls wimlib and xorriso. Tools you installed elsewhere are left alone.
-
-`, utmvm.Home(utmvm.ISODir()), utmvm.ISODownloadSize())
-	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

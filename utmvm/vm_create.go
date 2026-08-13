@@ -32,11 +32,6 @@ type VMCreateOptions struct {
 	ProbeDir string // Windows probe binaries to embed
 	Timeout  time.Duration
 
-	// Fetch permits downloading 4.2 GB from Microsoft when no ISO is present.
-	// Off by default: a command that starts a multi-gigabyte download because
-	// you ran it in the wrong directory is a bad command.
-	Fetch bool
-
 	// Install drives the unattended Windows installation, which takes about 45
 	// minutes. Off by default for the same reason.
 	Install bool
@@ -72,6 +67,12 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		}
 	}
 	last := time.Now()
+	step := 0
+	const steps = 6
+	begin := func(name string) {
+		step++
+		say("STEP %d/%d  %s", step, steps, name)
+	}
 	stage := func(name string, skipped bool, detail string, err error) error {
 		took := time.Since(last)
 		last = time.Now()
@@ -81,11 +82,11 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		res.Stages = append(res.Stages, VMCreateStage{name, skipped, detail, err})
 		switch {
 		case err != nil:
-			say("✗ %s: %v", name, err)
+			say("          ✗ %s", err)
 		case skipped:
-			say("· %s — already done (%s)", name, detail)
+			say("          already done (%s)", detail)
 		default:
-			say("✓ %s — %s", name, detail)
+			say("          %s", detail)
 		}
 		return err
 	}
@@ -99,7 +100,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	res.VM = opts.VMName
 
 	// 1. The hypervisor. Nothing else can be checked without it.
-	say("… checking UTM")
+	begin("UTM")
 	in, err := EnsureUTM()
 	if err != nil {
 		return res, stage("UTM", false, "", err)
@@ -110,6 +111,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 
 	// 2. The guest tools. Skipped VMs boot fine and are then unreachable —
 	// no network, no exec, no IP — so this is checked before anything is built.
+	begin("the guest tools")
 	hadTools := true
 	if _, tErr := GuestToolsISO(); tErr != nil {
 		hadTools = false
@@ -125,18 +127,21 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 
 	// 3. ISOGet. Three ways to already have it, in order of preference, then
 	// building one.
-	say("… checking Windows media (scans the ISO the first time; cached after)")
-	iso, isoDetail, isoSkipped, err := ISOGet(ISOGetOptions{ISO: opts.ISO, Fetch: opts.Fetch}, say)
-	if err != nil {
-		return res, stage("Windows media", false, "", err)
+	begin("the Windows media")
+	iso := isoBuiltPath()
+	if _, sErr := os.Stat(iso); sErr != nil {
+		iso = isoPath()
 	}
-	if err := stage("Windows media", isoSkipped, isoDetail, nil); err != nil {
-		return res, err
+	if _, sErr := os.Stat(iso); sErr != nil {
+		return res, stage("the Windows media", false, "", fmt.Errorf(
+			"no media at %s\n  Run `irgo-winvm iso-create` first", Home(ISODir())))
 	}
+	_ = stage("the Windows media", true, filepath.Base(iso), nil)
 	res.ISO = iso
 
 	// 4. Protect it. Free, and the difference between a slip and a 4.2 GB
 	// re-download of something rate-limited.
+	begin("protecting the media")
 	if st, sErr := isoLinks(iso, nil); sErr == nil && st.Protected {
 		_ = stage("protect the media", true, "immutable", nil)
 	} else if pErr := isoProtect(iso); pErr != nil {
@@ -152,12 +157,14 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	// dialog. Asked here rather than at boot time so a missing grant costs a
 	// second instead of forty minutes of install followed by a timeout that
 	// says nothing about permissions.
+	begin("permission to drive UTM")
 	if aErr := CheckAutomation(); aErr != nil {
 		return res, stage("control UTM", false, "", aErr)
 	}
 	_ = stage("control UTM", true, "permitted", nil)
 
 	// 6. The VM bundle.
+	begin("the VM bundle")
 	existing, findErr := Find(opts.VMName)
 	if findErr == nil {
 		_ = stage("VM bundle", true, opts.VMName+" ("+existing.Status+")", nil)
@@ -220,7 +227,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	// reboots, and lands back in the UEFI shell needing a different boot, off
 	// the ESP this time. EnsureReady does not know about the second phase, so a
 	// fresh VM would sit at a shell prompt until the timeout.
-	say("… installing Windows unattended; this takes about 45 minutes")
+	begin("installing Windows unattended — about 45 minutes")
 	e, fErr := Find(opts.VMName)
 	if fErr != nil {
 		return res, stage("install Windows", false, "", fErr)

@@ -32,10 +32,9 @@ import (
 
 // VMCreateOptions configures VMCreate.
 type VMCreateOptions struct {
-	VMName   string
-	ISO      string // media to use; empty means "find or build one"
-	ProbeDir string // Windows probe binaries to embed
-	Timeout  time.Duration
+	VMName  string
+	ISO     string // media to use; empty means "find or build one"
+	Timeout time.Duration
 
 	// Install drives the unattended Windows installation, which takes about 45
 	// minutes. Off by default for the same reason.
@@ -177,7 +176,6 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		if _, cErr := Create(Options{
 			Name:       opts.VMName,
 			InstallISO: iso,
-			ProbeDir:   opts.ProbeDir,
 		}); cErr != nil {
 			return res, stage("VM bundle", false, "", cErr)
 		}
@@ -275,7 +273,6 @@ type Options struct {
 	Name         string // VM name; also the bundle filename
 	InstallISO   string // path to the Windows ARM64 ISO
 	UnattendISO  string // prebuilt answer-file medium; leave empty to generate one
-	ProbeDir     string // Windows test binaries to embed in the generated medium
 	NoGuestTools bool   // skip the guest tools CD (utmctl exec will not work)
 	OutDir       string // parent directory; defaults to DefaultVMDir()
 	DiskGiB      int    // system disk size, sparse
@@ -394,7 +391,7 @@ func Create(opts Options) (string, error) {
 			return "", fmt.Errorf("unattend medium: %w", err)
 		}
 	} else {
-		if err := BuildPayload(unattendImg, PayloadOptions{ProbeDir: opts.ProbeDir}); err != nil {
+		if err := BuildPayload(unattendImg, PayloadOptions{}); err != nil {
 			return "", fmt.Errorf("building unattend medium: %w", err)
 		}
 	}
@@ -688,10 +685,6 @@ func indexXMLIllegal(s string) int {
 
 // PayloadOptions describes what goes onto the unattend medium.
 type PayloadOptions struct {
-	// ProbeDir is an optional directory whose top-level files are copied to the
-	// image ROOT — not a subdirectory. go-diskfs mangles Joliet names inside
-	// nested directories into UCS-2 garbage; root entries survive.
-	ProbeDir string
 
 	// SizeMiB sizes the image. It must fit the probes with room to spare.
 	SizeMiB int
@@ -732,46 +725,8 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	// Probe binaries go at the ROOT, not in a subdirectory. go-diskfs's Joliet
 	// encoding mangles names inside nested directories into UCS-2 garbage —
 	// root entries survive intact. Flat is uglier and it works.
-	if opts.ProbeDir != "" {
-		dst := stage
-		entries, err := os.ReadDir(opts.ProbeDir)
-		if err != nil {
-			return fmt.Errorf("probe dir: %w", err)
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			if err := copyFile(filepath.Join(opts.ProbeDir, e.Name()), filepath.Join(dst, e.Name())); err != nil {
-				return err
-			}
-		}
-	}
 
 	return isoBuildImage(imagePath, stage, opts.SizeMiB)
-}
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }() // read-only
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	// Close is CHECKED, not deferred away. A deferred close on a file being
-	// written discards the error, and that error is where a full disk shows
-	// up — the copy reports success and the file is short.
-	if _, err := out.ReadFrom(in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 // Phase is where an unattended install has got to, inferred from the host side

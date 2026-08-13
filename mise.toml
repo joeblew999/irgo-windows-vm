@@ -122,6 +122,22 @@ echo "app create and delete cycle complete"
 description = "irgo-winvm vm-screen"
 run = "go run ./cmd/irgo-winvm vm-screen"
 
+[tasks."app:probe"]
+description = "Build the native capability probe and run it on the VM"
+run = '''
+set -e
+VM=${VM:-irgo-win11}
+BIN=$(go env GOPATH)/../irgo-probe.exe
+BIN=${TMPDIR:-/tmp}/nativeprobe-arm64.exe
+
+# The probe is not special: it is a Windows binary, and app-create runs any
+# Windows binary. This is what the whole repository exists to do -- build a
+# glaze or native program on the Mac, run it on real Windows, read the result.
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o "$BIN" .
+echo "built $BIN"
+go run ./cmd/irgo-winvm app-create -vm "$VM" "$BIN"
+'''
+
 [tasks."iso:create"]
 description = "irgo-winvm iso-create"
 run = "go run ./cmd/irgo-winvm iso-create"

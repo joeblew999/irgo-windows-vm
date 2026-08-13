@@ -384,7 +384,11 @@ var bootScript string
 // guest and every Go-driven boot silently failed at the shell prompt, while
 // hand-written osascript worked. %q, once, is the whole answer.
 
-// VMStageDir is where `vm` looks for binaries to stage onto the payload medium.
+// VMStageDir is where binaries built for the guest are kept.
+//
+// Nothing stages them onto the install medium any more: app-create pushes a
+// binary to a running VM, and having two ways to get one there meant two
+// answers to "why is my binary not in the guest".
 func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
 
 // BundlePath is where UTM keeps the bundle for a VM of this display name.

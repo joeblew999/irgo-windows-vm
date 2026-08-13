@@ -25,20 +25,32 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `irgo-winvm — a Windows VM on Apple Silicon, and your binaries on it.
+	fmt.Fprint(os.Stderr, `irgo-winvm — build a Go program on your Mac, run it on real Windows.
 
-  iso-create   the Windows media, downloaded from Microsoft or built
-  vm-create    a Windows VM that answers, installed from that media
-  app-create   put a binary on the VM and start it
+Three steps, in this order. Each one is cheap to repeat: if it is already
+done, it says so and stops.
 
-  iso-delete   -> remove the media
-  vm-delete    -> remove the VM
-  app-delete   -> remove it from the guest
+  1  iso-create   get the Windows installer (4.2 GB from Microsoft, or
+                  built locally from an .esd you already have)
+  2  vm-create    make a VM and install Windows on it (about 45 minutes,
+                  unattended — you do not click anything)
+  3  app-create   push your .exe into that VM, run it, print what it said
 
-  vm-screen    photograph the VM's screen — what is it actually doing
-  doctor       what is here; changes nothing
+Undo, in the same shape:
 
-Every command takes -h.
+     iso-delete   remove the installer
+     vm-delete    remove the VM
+     app-delete   remove your .exe from the VM
+
+When something is wrong:
+
+     vm-screen    save a PNG of the VM's screen — the only way to see a
+                  boot that is stuck, since it looks identical from here
+     doctor       what is installed, what is missing, what to run next
+
+Your .exe is anything you built with GOOS=windows GOARCH=arm64. The probes
+in probe/ and glaze-probes/ are examples of that, and what this repository
+uses to find out what breaks in glaze and native on Windows.
 `)
 }
 
@@ -84,17 +96,11 @@ func runVMCreate(args []string) error {
 	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	var (
 		name    = fs.String("vm", "irgo-win11", "VM name")
-		stage   = fs.String("stage", "", "directory of binaries to put on the install medium")
 		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if *stage == "" {
-		if _, err := os.Stat(utmvm.VMStageDir()); err == nil {
-			*stage = utmvm.VMStageDir()
-		}
 	}
 	say := stamped()
 
@@ -105,15 +111,11 @@ func runVMCreate(args []string) error {
 	say("vm:     %s", *name)
 	say("bundle: %s", utmvm.Home(b))
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
-	if *stage != "" {
-		say("stage:  %s", utmvm.Home(*stage))
-	}
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
-		VMName:   *name,
-		ProbeDir: *stage,
-		Install:  *install,
-		Timeout:  *timeout,
+		VMName:  *name,
+		Install: *install,
+		Timeout: *timeout,
 	}, func(line string) { fmt.Println(line) })
 	if err != nil {
 		return err

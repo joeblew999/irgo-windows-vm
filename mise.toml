@@ -31,6 +31,51 @@ run = "go run ./cmd/irgo-winvm vm-create"
 description = "irgo-winvm vm-delete"
 run = "go run ./cmd/irgo-winvm vm-delete"
 
+[tasks."vm:test"]
+description = "Create a VM and delete it, against a disposable name"
+run = '''
+set -e
+VM=irgo-test-cycle
+
+# vm-create restarts UTM so it sees the new bundle, and quitting UTM takes any
+# running VM down with it. Refuse rather than cost somebody a 45-minute
+# install they had running.
+if go run ./cmd/irgo-winvm doctor 2>/dev/null | grep -q started; then
+  echo "a VM is running; vm-create restarts UTM and would stop it" >&2
+  exit 1
+fi
+
+echo "=== create ==="
+go run ./cmd/irgo-winvm vm-create -vm "$VM"
+
+echo
+echo "=== it exists ==="
+utmctl status "$VM" || { echo "UTM does not know $VM" >&2; exit 1; }
+
+echo
+echo "=== delete refuses without -force ==="
+if go run ./cmd/irgo-winvm vm-delete -vm "$VM"; then
+  echo "vm-delete deleted without -force" >&2; exit 1
+fi
+
+echo
+echo "=== delete ==="
+go run ./cmd/irgo-winvm vm-delete -vm "$VM" -force
+
+echo
+echo "=== it is gone, and no phantom entry is left ==="
+if utmctl status "$VM" 2>/dev/null; then
+  echo "$VM still registered with UTM" >&2; exit 1
+fi
+
+echo
+echo "=== deleting again is success, not an error ==="
+go run ./cmd/irgo-winvm vm-delete -vm "$VM"
+
+echo
+echo "create and delete cycle complete"
+'''
+
 [tasks."iso:create"]
 description = "irgo-winvm iso-create"
 run = "go run ./cmd/irgo-winvm iso-create"

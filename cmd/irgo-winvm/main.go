@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
@@ -394,8 +395,8 @@ func runISO(args []string) error {
 	}
 	p := utmvm.DefaultPaths()
 	res, err := utmvm.Setup(utmvm.SetupOptions{
-		ISO:      "",
-		Fetch:    *fetch,
+		ISO:       "",
+		Fetch:     *fetch,
 		MediaOnly: true,
 	}, p, func(s string) { fmt.Println(s) })
 	if err != nil {
@@ -409,31 +410,59 @@ func runISO(args []string) error {
 // rather than failing with EPERM.
 func runISODelete(args []string) error {
 	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
-	force := fs.Bool("force", false, "remove it even though it is protected")
+	force := fs.Bool("force", false, "delete it even though re-fetching costs 4.2 GB")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	p := utmvm.DefaultPaths()
-	iso := p.ISO()
+	iso := utmvm.DefaultPaths().ISO()
 	st, err := utmvm.ISOLinks(iso, utmvm.ISOSearchDirs())
 	if err != nil {
 		return fmt.Errorf("no media at %s", iso)
 	}
-	if st.Links > 1 {
-		fmt.Printf("  · %d other name(s) share this file; removing this one frees nothing\n", st.Links-1)
+	if !*force {
+		return fmt.Errorf("this deletes %s of media that costs 4.2 GB to re-fetch\n"+
+			"  from a source that rate-limits. Pass -force if you mean it",
+			utmvm.HumanBytes(st.Bytes))
 	}
+
+	// Every name, not just this one. The bytes are shared, so unlinking a
+	// single name frees nothing — an earlier version removed one, announced
+	// success, and left all 5.27 GB on disk under the other four.
+	//
+	// uchg lives on the inode and blocks unlink through any name, so it is
+	// cleared once and the whole set goes.
 	if st.Protected {
-		if !*force {
-			return fmt.Errorf("%s is protected — 4.2 GB to re-fetch. Pass -force if you mean it", iso)
+		_ = utmvm.UnprotectISO(iso)
+	}
+	names := append([]string{iso}, st.Found...)
+	seen := map[string]bool{}
+	var gone int
+	var inVM []string
+	for _, n := range names {
+		if seen[n] {
+			continue
 		}
-		fmt.Println("  … clearing the protection flag")
-		if uErr := utmvm.UnprotectISO(iso); uErr != nil {
-			return uErr
+		seen[n] = true
+		// A copy inside a VM bundle belongs to that VM; vm-delete owns it.
+		if strings.Contains(n, ".utm/") {
+			inVM = append(inVM, n)
+			continue
+		}
+		if err := os.Remove(n); err == nil {
+			fmt.Printf("  · removed %s\n", utmvm.Home(n))
+			gone++
 		}
 	}
-	if err := os.Remove(iso); err != nil {
-		return err
+	_ = os.Remove(iso + ".scan")
+
+	if len(inVM) > 0 {
+		fmt.Printf("\n%d copy(ies) are inside VM bundles and were left alone:\n", len(inVM))
+		for _, n := range inVM {
+			fmt.Printf("  %s\n", utmvm.Home(n))
+		}
+		fmt.Printf("The %s is not freed until those VMs go — use vm-delete.\n", utmvm.HumanBytes(st.Bytes))
+		return nil
 	}
-	fmt.Printf("removed %s — %s\n", iso, utmvm.HumanBytes(st.Bytes))
+	fmt.Printf("\nremoved %d name(s); %s freed\n", gone, utmvm.HumanBytes(st.Bytes))
 	return nil
 }

@@ -197,7 +197,7 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration) error {
 		if err := vm.StartWithDisplay(); err != nil {
 			return err
 		}
-		if err := vm.WaitForAgent(timeout); err == nil {
+		if err := vm.waitForAgent(timeout); err == nil {
 			return nil
 		}
 	}

@@ -197,7 +197,7 @@ func Setup(opts SetupOptions, paths Paths, log func(string)) (SetupResult, error
 		if rErr := vm.Resume(); rErr != nil {
 			return res, stage("resume", false, "", rErr)
 		}
-		if vm.WaitForAgentEvery(2*time.Minute, time.Second) == nil {
+		if vm.waitForAgentEvery(2*time.Minute, time.Second) == nil {
 			res.Ready = true
 			_ = stage("resume", false, "restored from suspend, agent answering", nil)
 			return res, nil

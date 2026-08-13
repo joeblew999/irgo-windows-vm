@@ -363,7 +363,7 @@ const (
 // UTM says so outright when you try:
 //
 //	Failed to save VM snapshot. Usually this means at least one device does
-//	not support snapshots. Suspend is not supported when GPU acceleration
+//	not support snapshots. suspend is not supported when GPU acceleration
 //	is enabled.
 //
 // Without snapshots, every boot has to be driven through the UEFI shell by
@@ -534,7 +534,7 @@ end tell`, v.Ref)
 // Stop requests a shutdown.
 func (v VM) Stop() error { _, err := v.run("stop"); return err }
 
-// Suspend pauses the VM with its RAM intact, so Resume returns it in seconds
+// suspend pauses the VM with its RAM intact, so Resume returns it in seconds
 // without going near firmware.
 //
 // This is the fast path and the reason it matters: a cold boot on UTM's aarch64
@@ -545,10 +545,10 @@ func (v VM) Stop() error { _, err := v.run("stop"); return err }
 // Resuming reaches none of it.
 //
 // The state lives in memory, so it survives neither quitting UTM nor rebooting
-// the host. SuspendToDisk is the durable version — where it is permitted.
-func (v VM) Suspend() error { _, err := v.run("suspend"); return err }
+// the host. suspendToDisk is the durable version — where it is permitted.
+func (v VM) suspend() error { _, err := v.run("suspend"); return err }
 
-// SuspendToDisk is `utmctl suspend --save-state`, and it is NOT SAFE on this
+// suspendToDisk is `utmctl suspend --save-state`, and it is NOT SAFE on this
 // hardware. It is exported only so the finding below is checkable; nothing in
 // this repository calls it, and the CLI does not expose it.
 //
@@ -558,8 +558,8 @@ func (v VM) Suspend() error { _, err := v.run("suspend"); return err }
 //
 //  1. Refuses honestly, naming a device that cannot be snapshotted:
 //
-//     Suspend is not supported when GPU acceleration is enabled.
-//     Suspend is not supported when an emulated NVMe device is active.
+//     suspend is not supported when GPU acceleration is enabled.
+//     suspend is not supported when an emulated NVMe device is active.
 //
 //     Removing GPU acceleration (Options.NoGPUAccel) clears the first and
 //     reveals the second. NVMe is not removable: Windows ARM64 Setup has no
@@ -574,10 +574,10 @@ func (v VM) Suspend() error { _, err := v.run("suspend"); return err }
 // indistinguishable from one by exit code, and it risks whatever the guest had
 // in flight. A command that can do that must not be offered as a convenience.
 //
-// Use Suspend instead — in-memory, genuinely instant to resume (measured at
+// Use suspend instead — in-memory, genuinely instant to resume (measured at
 // 300–500 ms to a live guest agent), and it does not lie. The only thing it
 // cannot do is survive UTM quitting.
-func (v VM) SuspendToDisk() error { _, err := v.run("suspend", "--save-state"); return err }
+func (v VM) suspendToDisk() error { _, err := v.run("suspend", "--save-state"); return err }
 
 // Resume brings a suspended VM back. It is the same utmctl verb as a cold
 // start, which is why there is no separate "resume" in UTM: a VM with saved
@@ -646,22 +646,22 @@ func (v VM) AgentReady() bool {
 	return err == nil
 }
 
-// WaitForAgent blocks until the guest agent answers or the timeout elapses.
+// waitForAgent blocks until the guest agent answers or the timeout elapses.
 //
 // This is the honest "is the VM actually usable" check. Status reports
 // "started" the instant QEMU launches, long before Windows has booted — so
 // polling status tells you nothing about whether you can do anything with it.
-func (v VM) WaitForAgent(timeout time.Duration) error {
-	return v.WaitForAgentEvery(timeout, 10*time.Second)
+func (v VM) waitForAgent(timeout time.Duration) error {
+	return v.waitForAgentEvery(timeout, 10*time.Second)
 }
 
-// WaitForAgentEvery is WaitForAgent with the poll interval exposed.
+// waitForAgentEvery is waitForAgent with the poll interval exposed.
 //
 // The interval matters more than it looks, because the two things worth waiting
 // for differ by two orders of magnitude: a cold boot takes about a minute, so
 // polling every ten seconds costs nothing, while a resume is back in ~400 ms
 // and a ten-second poll would report it as four hundred times slower than it is.
-func (v VM) WaitForAgentEvery(timeout, interval time.Duration) error {
+func (v VM) waitForAgentEvery(timeout, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if v.AgentReady() {

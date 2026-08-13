@@ -909,25 +909,32 @@ drive a boot, instead of on the whole run.
 itself, which was the entire reason an earlier draft proposed writing a `clone`
 primitive. There is nothing to write.
 
-Two measured constraints:
+**But do not use it.** Measured: it **refuses on a running VM**, and whether it
+copy-on-writes is unknown — so it may duplicate 27 GB per clone.
 
-- **It refuses on a running VM** — *"The virtual machine must be stopped before
-  this operation can be performed."* So the flow is install golden → stop →
-  clone per test, and the stop is not free: a cold boot back needs the UEFI
-  shell driven with keystrokes on an unlocked screen.
-- **Whether it copy-on-writes is UNMEASURED**, and it is the number that decides
-  whether clone-per-test is affordable at all. `cp -c` is CoW here (0.003 s,
-  ~0 bytes, measured); whether UTM's clone takes that path is not known.
+`cp -c -R` is the better tool, and this is measured, not assumed:
 
-**Phase 1 measures it**, against the disposable golden image once that exists —
-free space before, `utmctl clone`, free space after. If the delta is ~0, clone
-per risky phase and stop worrying about corruption. If it is 27 GB, the reuse
-strategy stands and clones are reserved for the few phases that can damage the
-guest.
+```
+bundle holding 2 GB of real blocks
+cp -c -R  →  0.003 s, 0 MiB consumed, clone reports 2.0G
+```
 
-Do **not** measure it against `irgo-win11`. It is the only installed VM on the
-machine, cold-booting it back is the risky path this repo has records of
-breaking, and its deletion is currently broken by the immutable-hardlink defect.
+A whole bundle clones recursively, copy-on-write, instantly and free. It costs
+only what the clone later *writes*.
+
+| | cost | UUID / MAC | needs the VM stopped |
+|---|---|---|---|
+| `utmctl clone` | **unknown**, may duplicate 27 GB | handled for you | **yes** |
+| `cp -c -R` | **0 bytes, 3 ms** | `newUUID` + `randomMAC`, already in `bundle.go` | no |
+
+`utmctl clone`'s only advantage was regenerating the identity, and `bundle.go`
+already generates both. So: **clone with `cp -c -R`, then rewrite UUID and MAC
+with the existing helpers.** Still no new primitive — this is `Create`'s
+existing identity code pointed at a copied bundle.
+
+The one caveat: UTM enumerates bundles at launch, so a cloned bundle is
+invisible to `utmctl` until a restart — the operation that must not run while
+another VM is started. Hence: **batch the clones, restart once.**
 
 **One snapshot, as insurance.** If a phase corrupts the test VM, the 45 minutes
 is lost. The VMs are on APFS, so a copy-on-write snapshot of the known-good

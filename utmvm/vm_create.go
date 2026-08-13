@@ -72,7 +72,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 	last := time.Now()
 	step := 0
-	const steps = 6
+	const steps = 7
 	begin := func(name string) {
 		step++
 		say("STEP %d/%d  %s", step, steps, name)
@@ -242,9 +242,12 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 
 	// An installed VM that is merely off needs recovering, not reinstalling —
 	// and reinstalling would destroy it. The boot entry Setup registers is what
-	// distinguishes the two.
+	// distinguishes the two, and it is a GUESS: a partially installed disk
+	// satisfies it too. So this boots and waits for the agent rather than
+	// announcing an install that may not have finished, and the timeout is the
+	// answer when it did not.
 	if Inspect(e.UUID, bundle).BootEntryWritten {
-		say("  … Windows is installed; booting it")
+		say("          it looks installed — booting to find out")
 		if rErr := EnsureReady(e.UUID, bundle, opts.Timeout); rErr != nil {
 			return res, stage("boot Windows", false, "", rErr)
 		}

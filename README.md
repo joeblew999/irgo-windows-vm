@@ -21,14 +21,32 @@ and running a binary on it.
 Each stage has an undo, so a step that fails can be cleaned and re-run rather
 than leaving the machine somewhere between two states.
 
-| stage | what it gets you | undo |
-|---|---|---|
-| **`iso-create`** | the Windows media, downloaded from Microsoft or built from an `.esd` | `iso-delete` |
-| **`vm-create`** | a Windows VM that answers, installed from that media | `vm-delete` |
-| **`run`** | your binary, executed in the guest, output back | `run-delete` |
+| step | what it gets you | cost | undo |
+|---|---|---|---|
+| **`iso-create`** | the Windows installer | 4.2 GB, or 40s from an `.esd` you have | `iso-delete` |
+| **`vm-create`** | a VM with Windows on it, answering | ~45 min, unattended | `vm-delete` |
+| **`app-create`** | your `.exe` running in that VM, output back | seconds | `app-delete` |
 
-They run in that order. `vm-create` does not fetch media — it says to run
-`iso-create` first, because a stage that runs another stage is not a stage.
+They run in that order, and each is cheap to repeat: already-done says so and
+stops. `vm-create` does not fetch media — it tells you to run `iso-create`
+first, because a stage that runs another stage is not a stage.
+
+Two more, for when something is wrong:
+
+- **`vm-screen`** saves a PNG of the VM's screen. A stuck boot looks identical
+  to a working one from the host; this is the only way to see the difference.
+- **`doctor`** reports what is installed and what is missing, and changes
+  nothing.
+
+## Your .exe
+
+Anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`. That is the whole
+contract — `app-create` pushes it, runs it, and prints what it printed.
+
+`probe/` and `glaze-probes/` are examples of exactly that, and are what this
+repository runs to find out what breaks in glaze and native on Windows.
+`mise run app:probe` builds one and runs it, which is the entire point of the
+project in one command.
 
 `doctor` reports what is present and changes nothing.
 

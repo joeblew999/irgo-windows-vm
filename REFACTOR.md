@@ -909,10 +909,24 @@ drive a boot, instead of on the whole run.
 itself, which was the entire reason an earlier draft proposed writing a `clone`
 primitive. There is nothing to write.
 
-**But do not use it.** Measured: it **refuses on a running VM**, and whether it
-copy-on-writes is unknown — so it may duplicate 27 GB per clone.
+**But there are never two VMs.** Cloning per phase means N registry entries, N
+UUIDs, N MACs, and an orphan from every phase that failed — and `Delete` is
+broken today, so they accumulate, each needing a UTM restart to become visible.
+That is a fleet to keep straight in exchange for insurance that one file can
+provide.
 
-`cp -c -R` is the better tool, and this is measured, not assumed:
+> **Two bundles, ever: the test VM, and one snapshot of its known-good state.**
+
+The snapshot is not a VM. It is a directory UTM has never heard of, so it has no
+registry entry, no UUID, no MAC and no restart. Recovery is **restore in place**
+— stop, replace the bundle contents, start — and because the bundle path and
+identity never change, UTM does not need to re-enumerate and `newUUID` /
+`randomMAC` are not involved at all.
+
+That is why restore-in-place beats clone-per-phase on more than tidiness: it
+deletes the entire identity problem rather than solving it.
+
+`cp -c -R` makes it free, and this is measured, not assumed:
 
 ```
 bundle holding 2 GB of real blocks
@@ -922,19 +936,18 @@ cp -c -R  →  0.003 s, 0 MiB consumed, clone reports 2.0G
 A whole bundle clones recursively, copy-on-write, instantly and free. It costs
 only what the clone later *writes*.
 
-| | cost | UUID / MAC | needs the VM stopped |
-|---|---|---|---|
-| `utmctl clone` | **unknown**, may duplicate 27 GB | handled for you | **yes** |
-| `cp -c -R` | **0 bytes, 3 ms** | `newUUID` + `randomMAC`, already in `bundle.go` | no |
+So the whole mechanism is two shell operations against a directory:
 
-`utmctl clone`'s only advantage was regenerating the identity, and `bundle.go`
-already generates both. So: **clone with `cp -c -R`, then rewrite UUID and MAC
-with the existing helpers.** Still no new primitive — this is `Create`'s
-existing identity code pointed at a copied bundle.
+```sh
+snapshot:  cp -c -R  $VM.utm  $SNAP        # after the install succeeds. 3 ms, 0 bytes
+restore:   rm -rf $VM.utm && cp -c -R $SNAP $VM.utm   # only when a phase broke it
+```
 
-The one caveat: UTM enumerates bundles at launch, so a cloned bundle is
-invisible to `utmctl` until a restart — the operation that must not run while
-another VM is started. Hence: **batch the clones, restart once.**
+No new primitive, no new command, no identity rewrite, no UTM restart, and at
+most two bundles on disk. `utmctl clone` is not used: it refuses on a running
+VM, its copy-on-write behaviour is unmeasured so it may duplicate 27 GB, and its
+only advantage — regenerating identity — is a problem restore-in-place does not
+have.
 
 **One snapshot, as insurance.** If a phase corrupts the test VM, the 45 minutes
 is lost. The VMs are on APFS, so a copy-on-write snapshot of the known-good

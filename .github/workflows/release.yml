@@ -4,6 +4,13 @@
 # `mise run go:build` so a maintainer can produce byte-identical artefacts
 # locally and see what CI will publish before tagging.
 #
+# That sentence was false when it was written, and is true now because it was
+# checked. v0.1.0's published binary could not be reproduced from its own tag:
+# Go stamps the commit, the build time and a dirty-tree flag into every binary,
+# so CI (vcs.modified=false), a working copy (true) and a clean worktree (no
+# stamps at all) produced three different binaries from one commit. go:build
+# passes -buildvcs=false, and the checksums mean something again.
+#
 # macOS only, deliberately. The tool drives UTM, which is macOS-only, so a Linux
 # binary would build and then refuse to do anything useful.
 name: release
@@ -44,20 +51,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/irgo-winvm-darwin-* dist/SHA256SUMS \
             --title "$GITHUB_REF_NAME" \
             --notes "$(printf '%s\n' \
               'A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.' \
               '' \
-              '    tar xzf irgo-winvm-darwin-arm64.tar.gz' \
+              'Download the one for your Mac — `arm64` for Apple Silicon — then:' \
+              '' \
+              '    chmod +x irgo-winvm-darwin-arm64' \
+              '    xattr -d com.apple.quarantine irgo-winvm-darwin-arm64' \
               '    ./irgo-winvm-darwin-arm64' \
+              '' \
+              'The second line is macOS refusing anything downloaded from the internet;' \
+              'without it Gatekeeper reports the binary as damaged.' \
               '' \
               'Three steps, in order: iso-create, vm-create, app-create. Each has an undo.' \
               'It installs UTM itself if you do not have it.' \
               '' \
-              'Checksums are in SHA256SUMS.')"
+              'Checksums are in SHA256SUMS, and they are reproducible: `mise run go:build`' \
+              'on the same tag produces byte-identical binaries.')"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: github.ref_type != 'tag'
         with:
           name: irgo-winvm-dev

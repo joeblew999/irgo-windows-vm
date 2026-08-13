@@ -1,9 +1,31 @@
 # irgo-windows-vm
 
+<https://github.com/joeblew999/irgo-windows-vm>
+
 A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.
 
 Build on the Mac, run on Windows, read the output back. No GUI, no manual
 install, nothing to click.
+
+## Get it
+
+**[All releases →](https://github.com/joeblew999/irgo-windows-vm/releases)** —
+every version, with checksums.
+The [latest](https://github.com/joeblew999/irgo-windows-vm/releases/latest) is
+the one you want.
+
+Download the binary for your Mac — `arm64` for Apple Silicon — then:
+
+```sh
+chmod +x irgo-winvm-darwin-arm64
+xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
+./irgo-winvm-darwin-arm64
+```
+
+The second line is macOS refusing anything downloaded from the internet;
+without it Gatekeeper reports the binary as damaged.
+
+macOS on Apple Silicon. It installs UTM itself if you do not have it.
 
 ## What it is for
 

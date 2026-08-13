@@ -147,15 +147,28 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 # binary would build and then refuse to do anything — the cross-compile in
 # go:check exists to prove `targets` still reports honestly on those hosts, not
 # to ship them.
+# The binary itself, not a tarball of it. A user who downloads one thing should
+# be able to run that thing: `tar xzf` before you can try a CLI is a step that
+# exists only because the release process wanted it. It also made the published
+# checksum useless for verifying the binary, since gzip stamps a timestamp into
+# the archive and no two builds of identical code produced the same tar.
+#
+# -buildvcs=false so the checksums mean something. Go stamps the commit, the
+# build time and whether the tree was dirty into every binary, so the same
+# source built in CI and on a laptop differed -- and this file used to claim a
+# maintainer could produce byte-identical artefacts locally, which was measured
+# and was not true: CI had vcs.modified=false, a working copy had true, and a
+# clean worktree had no vcs stamps at all. Three different binaries, one commit.
+# The version is passed in through -X, which is the part worth knowing anyway.
 for arch in arm64 amd64; do
   name="irgo-winvm-darwin-$arch"
-  CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
+  CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -buildvcs=false \
     -ldflags "-s -w -X main.version=$V" -o "$OUT/$name" ./cmd/irgo-winvm
-  ( cd "$OUT" && tar czf "$name.tar.gz" "$name" && rm "$name" )
-  echo "built $OUT/$name.tar.gz"
+  chmod +x "$OUT/$name"
+  echo "built $OUT/$name"
 done
 
-( cd "$OUT" && shasum -a 256 *.tar.gz > SHA256SUMS )
+( cd "$OUT" && shasum -a 256 irgo-winvm-darwin-* > SHA256SUMS )
 cat "$OUT/SHA256SUMS"
 '''
 

@@ -292,12 +292,51 @@ crgimenes.** `ProbeDir` becomes `StageDir` and means what it does — files to
 place on the payload medium. The upstream-clone inventory and `IRGO_UPSTREAM_DIR`
 move to System B, which is the only thing that has ever wanted them.
 
-**One repo or two?** One, for now — but only because the boundary is dirty.
-Splitting today distributes the tangle across two repos *and* adds a module
-version to manage between them. Once `utmvm` contains no System B symbol, the
-split is a `git mv` and a `go.mod`, and the decision can be taken on its merits
-— the strongest argument for it being that a Go developer who wants a Windows VM
-should not `go install` something whose README opens with rules about glaze.
+### One repo. DECIDED.
+
+The strongest argument for splitting was that a Go developer installing a VM
+tool should not drag in glaze. **That is already solved at the module boundary,
+deliberately**, and the modules say so themselves:
+
+```
+go.mod               → go-diskfs. Zero glaze, zero native, zero crgimenes.
+glaze-probes/go.mod  → "Separate module: … should not drag that dependency
+                        into the VM tooling."
+examples/go.mod      → "Separate module so glaze and native stay out of the
+                        VM tooling's dependency graph."
+```
+
+`go install …/cmd/irgo-winvm@latest` already resolves a clean graph. The module
+split did the work the repo split would have done.
+
+**"Two systems" is an architecture statement; "two repos" is a distribution
+statement, and they do not have to agree.** Here they should not, because
+**System B is how System A gets tested**. A repo split puts a tag-and-bump
+version boundary in the middle of the feedback loop that finds System A's bugs:
+every `utmvm` fix a probe discovers would need releasing before the probe could
+consume it. For one maintainer that is friction paid daily for a benefit already
+held.
+
+Phase 13 gives the separation that matters, and gives it *harder* than a split
+would: a test that fails if `utmvm` names a probe, glaze, native or crgimenes. A
+repo boundary is enforced by nothing.
+
+**What would change the answer**, on evidence rather than taste:
+
+- someone other than the maintainer depends on System A, so it needs its own
+  release cadence and issue tracker;
+- System A is published or announced as a standalone tool;
+- the two genuinely stop co-evolving — System A stable for months while System B
+  churns.
+
+None hold today. If one does later, the split costs a `git mv` and a `go.mod`,
+because phase 13 will already have removed every symbol that crosses.
+
+**Two module defects to fix while there** (phase 13, since both are boundary
+facts): `probe/go.mod` declares `module nativeprobe` — unqualified, unlike its
+two siblings, so it cannot be referred to by path; and the four modules declare
+three Go versions (`1.25.0` at root, `1.26.5` elsewhere), which makes CI's
+`go-version-file: go.mod` install 1.25 and then download a second toolchain.
 
 ### Found by reading, not grepping
 

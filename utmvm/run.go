@@ -350,19 +350,6 @@ func runInteractive(vmRef, guestExe string, args []string, user string, timeout 
 	return res, nil
 }
 
-// RunClean removes everything `run` put on the guest: the binaries it pushed
-// and any scratch files left by a run that did not finish.
-//
-// This is `run`'s undo, and it exists because `run` had none. A pushed binary
-// was never deleted at all, and RunInteractive left its scheduled-task launcher
-// behind on every single call — so a VM used for testing accumulated one
-// irgo-l-*.bat per invocation, forever.
-//
-// Guest-side deletion only. The VM itself is `vm-delete`.
-func RunClean(vmRef string, binaries ...string) error {
-	return RunCleanReport(vmRef, nil, binaries...)
-}
-
 // runCleanReport is RunClean with a callback naming each thing removed. A
 // delete that prints nothing is indistinguishable from one that did nothing.
 // RunCleanReport is RunClean, naming each thing it removes.

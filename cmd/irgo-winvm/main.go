@@ -171,7 +171,7 @@ func runSetup(args []string) error {
 
 // reportISOTools says whether this machine can build its own Windows media.
 //
-// Reported by doctor rather than discovered by build-iso, because the answer
+// Reported by doctor rather than discovered by iso-create, because the answer
 // changes what a new developer does first: with both tools they never touch
 // CrystalFetch, and without them they should not start a download they cannot
 // finish.
@@ -197,7 +197,7 @@ func reportISOTools() {
 	}
 
 	if wim.Found() && master.Found() {
-		fmt.Printf("\n  both present: irgo-winvm vm, then build-iso.\n")
+		fmt.Printf("\n  both present: irgo-winvm iso-create can build media.\n")
 	} else {
 		fmt.Printf("\n  until then, get the ISO with CrystalFetch —\n")
 		fmt.Printf("  `irgo-winvm vm -list` says which build and its SHA-1.\n")

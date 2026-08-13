@@ -983,13 +983,6 @@ const (
 	BootInstalled
 )
 
-// BootAssistWatched is BootAssist with a disk to watch for progress. When
-// diskPath is empty no progress check is possible and every candidate is tried,
-// which is only safe before an OS exists.
-func BootAssistWatched(vmRef string, target BootTarget, diskPath string) error {
-	return bootAssist(vmRef, target, "", diskPath)
-}
-
 // BootAssistOn drives the shell using a specific filesystem, e.g. "fs2:".
 // Empty means fs0:, where the install medium has always been found.
 func BootAssistOn(vmRef string, target BootTarget, override string) error {
@@ -1095,48 +1088,5 @@ func typeBootCommand(vmRef, fsn, path string) error {
 // guest and every Go-driven boot silently failed at the shell prompt, while
 // hand-written osascript worked. %q, once, is the whole answer.
 
-// BootAndWait starts a VM, drives it past the UEFI shell, and waits for signs
-// of life — disk writes during an install, or the guest agent once installed.
-func BootAndWait(vmRef string, target BootTarget, diskPath string, timeout time.Duration) error {
-	vm := Named(vmRef)
-	// Nothing is typed at a guest that is already answering. RunInstall gates on
-	// this; BootAndWait did not, so `boot` against a healthy logged-in Windows
-	// sent fs0:, an EFI path and eight Enters straight into the desktop.
-	if vm.AgentReady() {
-		return nil
-	}
-	if !vm.IsRunning() {
-		// Must be StartWithDisplay: keystrokes go nowhere on a headless VM.
-		if err := vm.StartWithDisplay(); err != nil {
-			return err
-		}
-	}
-	// Let the firmware finish enumerating and reach the shell prompt.
-	time.Sleep(30 * time.Second)
-
-	if err := BootAssistWatched(vmRef, target, diskPath); err != nil {
-		return err
-	}
-
-	deadline := time.Now().Add(timeout)
-	// ok is honoured: discarding it pinned the baseline at 0 for an unreadable
-	// path, so the growth check silently never fired and every boot burned the
-	// full timeout before reporting "no disk activity".
-	start, baseOK := diskUsage(diskPath)
-	for time.Now().Before(deadline) {
-		if vm.AgentReady() {
-			return nil
-		}
-		if now, ok := diskUsage(diskPath); ok && baseOK && now > start+(64<<20) {
-			return nil // Setup is writing; the boot took
-		}
-		time.Sleep(15 * time.Second)
-	}
-	return fmt.Errorf("no disk activity or guest agent within %s after boot assist", timeout)
-}
-
 // VMStageDir is where `vm` looks for binaries to stage onto the payload medium.
 func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
-
-// VMScreensDir is where screenshots go.
-func VMScreensDir() string { return filepath.Join(appRoot(), vmScreensDirName) }

@@ -61,6 +61,49 @@ Ensure() (Outcome, error)   // acts — and is built on Check
 Everything below is a consequence of this: the idempotency contract, the thin
 `setup`, the single `VMState`, the primitives kept as a recovery toolkit.
 
+## The second pattern: "cannot tell" silently means "allow"
+
+Reading the package line by line turned up a defect class the three-consumers
+frame does not cover, and it is the more dangerous of the two, because it
+disables the machinery this project exists to have.
+
+Every destructive-operation guard is written `if ok && bad { refuse }`:
+
+```go
+if flags, ok := fileFlags(abs); ok && flags&uchgFlag != 0 { return ...immutable }
+if _, nlink, ok := inodeInfo(abs); ok && nlink > 1     { return ...shared    }
+```
+
+So when the question **cannot be answered**, the guard does not fire and the
+write proceeds. "Unknown" and "safe" are the same value. The same shape recurs
+in `bundle.go:80` (`err == nil && !sp.OK` — a space check that vanishes when it
+errors), `isoguard.go:62` (a stat failure reports `Protected == false`, which
+`setup.go:131` reads as *not protected*), and `paths.go:171` (any stat error
+returns "writable", skipping both checks below it).
+
+Two things make this more than a nitpick.
+
+**The comments claim the opposite, in the file whose entire job is this.**
+`sysfile_other.go:25` says reporting `ok=false` *"makes callers treat every file
+as potentially shared, which is the safe direction."* It is the unsafe
+direction: every caller reads `ok=false` as *not shared* and proceeds. Twenty
+lines above, the same file states the principle it breaks — *"a wrong answer
+about whether two files share blocks, or whether one is protected, is worse than
+no answer: it would let a destructive operation proceed on the grounds that
+nothing said otherwise."* That is a precise description of the bug, sitting
+directly above it.
+
+**On any non-darwin build, all of it is off at once.** `sysfile_other.go` returns
+`ok=false` for `inodeInfo` and `fileFlags` unconditionally, so `CheckWritable`
+degrades to the VM-directory test alone. And `hasDotDot` (`paths.go:187`)
+hardcodes `"../"`, while `filepath.Rel` on Windows returns `..\x` — so even that
+last guard inverts, reporting every outside path as inside.
+
+The fix is a tri-state, not a boolean. A guard must distinguish *no*, *yes* and
+*could not determine*, and the caller decides which way "could not determine"
+falls — refusing by default, with an explicit override. Whichever is chosen, it
+must be **stated at the call site** rather than encoded in a dropped `ok`.
+
 ---
 
 ## Two decisions taken up front
@@ -269,6 +312,169 @@ cannot be reviewed" (`main.go:702`). It exists; this session wrote it.
 **A garbled user-facing string** — `main.go:935` prints *"boot took — Setup is
 running or the guest agent answered"*.
 
+### The boot driver can type into a running Windows
+
+The most destructive thing in the repo, and its own comments say so: keystrokes
+landing in Setup's UI *"wrecked an install that had already partitioned the
+disk"* and were found sitting in the Product key field. Three separate paths
+reach that state today.
+
+**`BootAssistWatched` ignores the disk it exists to watch.**
+
+```go
+func BootAssistWatched(vmRef string, target BootTarget, diskPath string) error {
+	return BootAssistOn(vmRef, target, "")   // diskPath never referenced
+}
+```
+
+Its doc promises progress-checking between candidates. `BootAndWait` passes a
+real disk path into it. The parameter is dead, and so is the safety it names.
+
+**The installed-Windows loop types into a booting desktop.** `bootassist.go:105`
+tries five filesystems, allowing `4 × 10 s` for `AgentReady()` per candidate.
+Windows ARM64 routinely takes longer than 40 s to answer, and with
+`Options.NoGuestTools` it *never* answers — so the loop advances and sends
+`fs3:`, an EFI path and eight Enters into a live logon screen. The comment above
+it asserts the opposite: *"once it boots the loop stops."* It stops only if the
+agent answers.
+
+**It then reports success having failed five times** — `bootassist.go:117` is a
+bare `return nil` after the loop exhausts every candidate. Both callers treat
+`nil` as *the boot took*.
+
+**`BootAndWait` never checks whether the guest is already up** before typing
+(`bootassist.go:181`). `RunInstall` does gate on `p.AgentUp`; this does not. So
+`irgo-winvm boot -vm X` against a healthy, logged-in Windows sends a boot
+command straight into the desktop.
+
+**And the progress check that would catch it is disabled** — `start, _ :=
+diskUsage(diskPath)` (`:195`) discards `ok`, so an unreadable path silently
+pins the baseline at 0 and the check never fires. Same shape as the pattern
+above.
+
+**A comment and its own asset now disagree about a fact learned the hard way.**
+`keystrokeDelay` says *"Exactly ONE key may be sent at the 'Press any key' prompt"*;
+`assets/boot.applescript` sends **eleven**, and carries its own careful note
+explaining why eight is right and forty was not. The asset was corrected and the
+constant's comment was not. Under this repo's rule that comments are findings,
+one of these two is now a lie, and there is no way to tell which from the code.
+
+`startup.nsh` and `bootassist.go` likewise assert **opposite facts about the
+same two loaders** — whether `cdboot_noprompt.efi` or `bootaa64.efi` boots. Two
+shipped assets in one package cannot both be right.
+
+### Downloads can produce a plausible, wrong 5 GB file
+
+Three defects in `fetch.go` compose:
+
+- **No length check.** The copy loop breaks on `io.EOF` and renames `.part` into
+  place. `done` is never compared to `total`. A connection dropped at 60 % is
+  indistinguishable from success.
+- **No `fsync` before rename.** After a crash the final name can exist at full
+  length with unflushed tail blocks.
+- **The destination guard is bypassed.** `refuseUnsafeDest` runs at line 34;
+  `os.Rename(part, dest)` at line 128 clobbers unconditionally — hours later for
+  a 4.5 GB download, including a `dest` hardlinked into a VM bundle in between.
+
+The only thing standing between these and a corrupt ISO is the SHA-1 — which is
+`""` for both the UTM `.dmg` (`installutm.go:61`) and the guest-tools ISO
+(`ensure.go:157`), so for those two it is off. `main.go:437` prints
+`verified sha1 %s` unconditionally after `Download` returns, so an empty hash
+prints *"verified sha1 "* and verified nothing.
+
+Related: the UTM `.dmg` is installed into `/Applications` with no checksum and
+`hdiutil -noverify`, which disables the image's own integrity pass. The
+justification in the comment — that macOS verifies the signature at launch — is
+the only verification claimed anywhere, and nothing runs `codesign` or `spctl`.
+
+### `-b` where the file's own header says `-e`
+
+`isobuild.go:298`: the `mkisofs` fallback marks the El Torito entry **BIOS**,
+contradicting both the file header (*"must be marked EFI (platform 0xEF)"*) and
+the `xorriso` branch six lines up (*"-b describes a BIOS entry and the firmware
+ignores it"*). The fallback yields a correctly sized, correctly named,
+**non-bootable** ISO. The `switch` has no `default`, so a third masterer would
+run with zero arguments.
+
+### Cleanup and deletion act on guesses
+
+- **`Prune`'s prefix list contains `"irgo-"`**, which is a prefix of every other
+  entry and matches anything in `os.TempDir()` starting with it — including the
+  batch file a *concurrently running* `pushScript` has open. `main.go:895` calls
+  it on `os.TempDir()` with no dry-run.
+- Two entries in that list, `irgo-i-` and `irgo-l-`, **can never match**: those
+  names only ever exist as *guest* paths under `C:\Users\Public`. Meanwhile the
+  guest files they describe are never cleaned — `RunInteractive` leaks an
+  `irgo-l-*.bat` on every call.
+- **`Prune` declares `error` and cannot return non-nil**; unreadable directories
+  are swallowed by `continue`, reporting "0 removed, no error".
+- **`freed` is counted before removal and regardless of success**, using the
+  directory entry's own size — ~96 bytes for payload trees that are gigabytes.
+  That number is what `main.go:902` prints as "MB reclaimed".
+- **`Delete` reconstructs the bundle path from the display name**
+  (`cleanup.go:39`) and never consults the UUID it already holds. `Create`
+  accepts a custom `OutDir`, and UTM permits a display name differing from the
+  filename — so this either misses, or removes a same-named bundle belonging to
+  a different VM.
+- **`Delete` proceeds after a failed stop.** `vm.Stop()`'s error is discarded and
+  the wait loop just ends after 30 s, then `RemoveAll` runs on a live QEMU —
+  exactly the scenario the doc comment says the ordering exists to prevent.
+
+**And protecting the ISO makes the VM undeletable.** `setup` sets `uchg` on the
+ISO inode *before* `Create` hardlinks that same inode into the bundle. The flag
+is per-inode, so `os.RemoveAll` fails with `EPERM` on any bundle whose ISO was
+ever protected, and nothing calls `UnprotectISO` first. The same defeats
+`Create`'s own failure cleanup, whose error is discarded — so a half-built
+bundle survives a failure the comment promises to clean up.
+
+Setup also `chflags`-es a **user-supplied** `-iso` path immutable as a silent
+side effect.
+
+### Two heuristics presented as facts
+
+**`BootEntryWritten`** (`install.go:62`) is a two-file mtime comparison with a
+one-minute margin. UTM itself writes `efi_vars.fd` on first power-on, so a VM
+merely *booted once* with no Windows on it reports `true` → `PhaseFinalising` at
+0 MiB, and `setup` announces *"Windows is installed; booting it"*. Conversely
+any settings change in UTM's UI rewrites `config.plist` and flips it back to
+false on a genuinely installed VM. This single flag is what `setup.go:215`
+uses to choose between recovering and reinstalling, under a comment reading
+*"reinstalling would destroy it"*.
+
+**`Inspect` cannot say "I could not find the disk."** `install.go:59` discards
+`ok` from `diskUsage`, so a missing disk image and *nothing written yet* are the
+same `DiskMiB == 0` — and that is the state that fires keystrokes, up to six
+times, into whatever the guest is actually doing.
+
+### Guest command injection
+
+`run.go:269` interpolates the username into a batch file unquoted:
+
+```go
+"... /sc once /st 23:59 /ru " + user + " /it /f\r\n"
+```
+
+A guest account with a space breaks it; one containing `&` or `>` is injection
+into a batch file running in the guest. `quoteForCmd` exists in the same file
+for exactly this and is not used. `schtasks`'s own failure is invisible, because
+`utmctl exec` always exits 0 — surfacing five minutes later as a timeout.
+
+### Comments that contradict their code
+
+Beyond those already named, reading found a dozen more: `control.go:61` says the
+fallback matches on name and it falls back *to* the name from a UUID (and since
+every internal caller passes a UUID, this "fallback" is the normal path — every
+`StartWithDisplay` runs one guaranteed-failing osascript first); `fatimage.go`
+and `isoimage.go` make **flatly opposite claims about the same experiment**
+(whether Setup reads `autounattend.xml` from FAT); `GuestToolsInstallCommand`
+says it exists *"so the answer file and the drive wiring cannot drift apart"*
+and has drifted, still holding the `start`-wildcard bug that `assets_test.go`
+was written to prevent; `external.go:82` says guest tools cannot be fetched
+while `ensure.go` fetches them; `Prune`'s and `Push`'s doc comments are glued to
+the wrong declarations, so `go doc` shows them on a variable and a helper.
+
+`config.go:33` points at `NewConfig`, which does not exist anywhere in the repo.
+
 ### Test coverage is thinner than "thin"
 
 | | |
@@ -283,7 +489,7 @@ The untested list is every file that touches a VM, media or setup: `control`,
 `external`, `installutm`, `iso`, `fatimage`, and both `sysfile_*`.
 
 Only `config`, `isoimage`, `catalog`, `assets`, `bootassist` and the prune
-regression have any. This is the strongest argument for phase 5: **without the
+regression have any. This is the strongest argument for phase 6: **without the
 `runner` seam, 22 files cannot be tested at all**, and every phase after it is
 verified by hand against a 45-minute install.
 
@@ -320,34 +526,52 @@ instruction is a lie.
 ## Phases
 
 Two rules set the order: **every `utmvm` API change lands before the CLI is
-written against it** (6–9 before 11), and **the phase that makes testing
-possible comes before the phases that need testing** (5 before everything
+written against it** (7–12 before 14), and **the phase that makes testing
+possible comes before the phases that need testing** (6 before everything
 risky).
+
+The reading pass added three phases (4, 8, 9). Phase 4 moved early because it is
+live data-loss and needs no VM. Phase 8 is the *most severe* defect found and
+deliberately does **not** come first: proving that no keystroke is sent to a
+running guest requires observing what was sent, which is precisely the `runner`
+seam phase 6 installs. Fixing it before then means verifying by hand against a
+45-minute install, which is how these bugs survived.
 
 | # | phase | size | verify | why here |
 |---|---|---|---|---|
 | 1 | Lint baseline, then delete what it finds | S | CI | `unused` finds the dead code for you |
 | 2 | One source of truth for facts | S | CI | fixes a live bug; no dependencies |
 | 3 | One retry primitive | S | CI | no dependencies |
-| 4 | Decide probe distribution | S | decision | blocks 11 |
-| 5 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
-| 6 | `Check`/`Ensure` split, `VMState`, pure `doctor` | L | CI | **the keystone; fixes the live `doctor` bug** |
-| 7 | Idempotency through `Ensure`; `setup` becomes thin | M | CI + twice-run | needs 6's `Ensure` to exist |
-| 8 | `context.Context` through long operations | M | **VM** | signature change, after 6–7 settle |
-| 9 | Verbs, typed errors, locking | M | CI | last API change before the CLI |
-| 10 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
-| 11 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
-| 12 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
-| 13 | Tighten enforcement | M | CI | thresholds set from the finished code |
+| 4 | **Guards become tri-state** | M | CI | **live data-loss; needs no VM, so it goes early** |
+| 5 | Decide probe distribution | S | decision | blocks 14 |
+| 6 | Reporting seam + `runner` interface | L | CI | **unlocks unit tests — everything after is testable** |
+| 7 | `Check`/`Ensure` split, `VMState`, pure `doctor` | L | CI | **the keystone; fixes the live `doctor` bug** |
+| 8 | **Boot driver correctness** | M | **VM** | **most severe defect** — but needs 6's seam to be provable |
+| 9 | **Download and media integrity** | M | CI + **VM** | needs 6's seam; independent of 7 |
+| 10 | Idempotency through `Ensure`; `setup` becomes thin | M | CI + twice-run | needs 7's `Ensure` to exist |
+| 11 | `context.Context` through long operations | M | **VM** | signature change, after 7–10 settle |
+| 12 | Verbs, typed errors, locking | M | CI | last API change before the CLI |
+| 13 | Group `utmvm` by subject (`git mv`) | S | CI | move files only once content is final |
+| 14 | Rewrite the CLI | L | **VM** | against the now-final API, written once |
+| 15 | Shrink the exported surface | S | CI | needs the CLI's real usage to know what is unused |
+| 16 | Tighten enforcement | M | CI | thresholds set from the finished code |
 
 **1 — Lint baseline, then delete.** Land `.golangci.yml` with only the checks
 the code already passes, and turn on `unused` so it *identifies* the dead code
-rather than a grep being trusted. Then delete the eight symbols with no caller:
-`BuildFATImage`, `GuestToolsInstallCommand` (still carries a `start`-wildcard
-bug already fixed in the answer file), `OpenDisplay`, `BootAssist`,
-`IfaceVirtIO`, `SchemaConfigurationVersion`, `EnsureISOTools`, `SuspendToDisk`.
-The last reports success while power-cutting the guest; its finding stays in
-`RESULTS.md`.
+rather than a grep being trusted. Then delete the twelve symbols with no caller:
+`BuildFATImage`, `copyIntoFS`, `GuestToolsInstallCommand` (still carries a
+`start`-wildcard bug already fixed in the answer file), `OpenDisplay`,
+`BootAssist`, `BootAssistWatched`, `IfaceVirtIO`,
+`SchemaConfigurationVersion`, `EnsureISOTools`, `HumanSize`,
+`CatalogURLWindows10`, `SuspendToDisk`.
+
+Three carry a finding worth keeping before the code goes: `SuspendToDisk`
+reports success while power-cutting the guest; `EnsureISOTools` exists to fail
+fast on both ISO tools at once, and its absence is why you currently discover
+the second is missing ten minutes into expanding a 4 GB archive — so phase 9
+should call it rather than delete it; and `CatalogURLWindows10` is referenced
+only by a test asserting two compile-time constants differ, which cannot fail.
+Move each finding to `RESULTS.md` or the relevant comment first.
 
 **2 — One source of truth for facts.** `guestFile()` shared by `run.go` and
 `Prune`, fixing the live drift; named timeout constants carrying their reason;
@@ -355,68 +579,122 @@ ISO name and default VM name declared once in `Paths`.
 
 **3 — One retry primitive.** Collapse the six loops.
 
-**4 — Decide probe distribution.** Embed with `go:embed`, download from a
+**4 — Guards become tri-state.** `inodeInfo`, `fileFlags`, `diskUsage` and
+`statfsAvailable` return an explicit *unknown* that callers must handle, so
+`ok &&` cannot silently mean *allow*. `CheckWritable` refuses on unknown by
+default; anything choosing otherwise says so at the call site. Fix
+`hasDotDot` to use `filepath.Separator`, `isoguard.go`'s `Protected` to be
+tri-state, and `bundle.go:80`'s vanishing space check. Rewrite
+`sysfile_other.go`'s inverted comment to match what its callers do.
+
+Testable with temp files, hardlinks and `chflags` — **no VM**, which is why it
+precedes phase 6 despite being a real fix rather than a cleanup. Tests: a
+hardlinked destination is refused; an immutable one is refused; an
+*unanswerable* one is refused; and on a `!darwin` build `CheckWritable` still
+refuses rather than degrading to the directory test.
+
+**5 — Decide probe distribution.** Embed with `go:embed`, download from a
 release like the guest tools already are, or admit probes are maintainer-only —
 in which case mise is their correct home. A decision, not code; do it early so
-phase 11 is not blocked.
+phase 14 is not blocked.
 
-**5 — Reporting seam and `runner` interface.** One reporting mechanism instead
+**6 — Reporting seam and `runner` interface.** One reporting mechanism instead
 of four; every `fmt.Printf`/`os.Stderr` write moves out of `utmvm` into the CLI.
 The `runner` seam lands here because both are about who may talk to the outside
 world. **This is what makes the package testable without a VM**, which is why it
 precedes everything risky: from here on, phases are verified by tests rather
 than by hand.
 
-**6 — `Check`/`Ensure`, `VMState`, pure `doctor`.** The keystone. Every
+Note the seam must cover `osascript` too, not just `utmctl` — phase 8's central
+assertion is *which keystrokes were sent*, and that is unobservable otherwise.
+
+**7 — `Check`/`Ensure`, `VMState`, pure `doctor`.** The keystone. Every
 capability gets a pure `Check` and an acting `Ensure` built on it. `VMState`
 replaces the nine ad-hoc answers to "is this VM usable". `doctor`, `status`,
 `targets` and `verify` are rewired to `Check` only — fixing the live bug where
 `doctor` installs UTM. Add the test that no REPORT command reaches an
 `Ensure*`/`Fetch*`/`Install*`.
 
-**7 — Idempotency, and `setup` becomes thin.** `Ensure` semantics on `Create`,
+**8 — Boot driver correctness.** The most severe defect found, and the one that
+has already destroyed an install. Delete `BootAssistWatched`'s dead `diskPath`
+or make it real — do not keep a parameter that names a safety property it does
+not have. The installed-Windows loop must not advance to the next candidate
+while the guest may be booting, and must return an error when it exhausts them
+instead of `nil`. `BootAndWait` gates on `AgentReady` before typing, as
+`RunInstall` already does. `diskUsage`'s `ok` is honoured (phase 4 makes it
+impossible to ignore).
+
+Then **resolve the three contradictions by experiment, not by editing prose**:
+how many keypresses the prompt actually needs, whether `cdboot_noprompt.efi` or
+`bootaa64.efi` boots, and whether Setup reads `autounattend.xml` from FAT. Each
+is currently asserted in two places with opposite answers, so one of each pair
+is a lie and the code cannot say which. Record the answers in `RESULTS.md` with
+a date and delete the losing claim.
+
+**VM.** The unit tests assert what was sent through the phase-6 seam — *no
+keystrokes when the agent is already up*, *an error when candidates are
+exhausted* — but only a real install proves the keypress count.
+
+**9 — Download and media integrity.** `Download` compares `done` to
+`ContentLength` and fails on a short read; `f.Sync()` before close; the
+destination guard re-checked immediately before `os.Rename`, not hours earlier;
+`ContentLength == -1` handled rather than producing a negative total. Delete
+416 as a dead end by removing the stale `.part`. Then the missing hashes:
+publish or pin one for the UTM `.dmg` and the guest-tools ISO, or state in the
+code why unverified is acceptable — and stop printing `verified sha1` when
+nothing was verified. Fix `mkisofs`'s `-b` → `-e` and give the `switch` a
+`default` that errors.
+
+**CI + VM.** Truncation and rename-clobber are unit-testable against a local
+server; the `-b`/`-e` fix is only proven by booting the ISO that fallback path
+produces — which has, as far as the record shows, never been done.
+
+**10 — Idempotency, and `setup` becomes thin.** `Ensure` semantics on `Create`,
 `BuildISO`, `Download`; `ExpandESD` skipping images already exported. Then
 `setup` is rewritten to call *only* what its primitives call — deleting
 `ensureMedia`, using `BootAndWait` where `boot` does. 338 lines to roughly 40,
 a list of steps and their outcomes. Add the test asserting each stage resolves
 to the same entry point as its primitive.
 
-**8 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
+**11 — `context.Context`.** `Download`, `ExpandESD`, `BuildISO`, `RunInstall`,
 `BootAndWait`, `WaitForAgent*`, `Setup`. Ctrl-C should stop a 45-minute install
 cleanly. *VM* — cancellation during a real install is the only honest test.
 
-**9 — Verbs, typed errors, locking.** Give `Ensure`/`Fetch`/`Build`/`Run` fixed
+**12 — Verbs, typed errors, locking.** Give `Ensure`/`Fetch`/`Build`/`Run` fixed
 meanings: `EnsureReady` becomes `BootInstalled`, which is what it does and would
 not have been mistaken for `RunInstall`. Typed errors for the states `setup`
 should act on. A lockfile per VM bundle. Route `bundle.go:15` through
-`CanCreateVMs`.
+`CanCreateVMs`. `Delete` resolves the bundle by UUID rather than rebuilding a
+path from the display name, and `UnprotectISO`s before removing.
 
-**10 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
+**13 — Group `utmvm` by subject** with `git mv` so history follows: `media_*`,
 `deps_*`, `vm_*`, `host_*`. **No sub-packages** — the parts are coupled and
-splitting would force the exported surface to stay large, defeating phase 12.
+splitting would force the exported surface to stay large, defeating phase 15.
 
-**11 — Rewrite the CLI.** Written fresh against the now-final API, old file
+**14 — Rewrite the CLI.** Written fresh against the now-final API, old file
 deleted. Every primitive carried over unchanged; only `up` dropped. New shape:
 `main.go` (dispatch only) plus `cmd_{setup,vm,boot,guest,media}.go`, with one
 helper behind the 18 flagsets and 10 copies of *resolve-find-handle*, so an
 unknown VM reads the same from every command — which it currently does not.
 
-**12 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
+**15 — Shrink the exported surface.** Grep `cmd/` for each of the 134 exported
 symbols; unexport what is absent. Expect 40–60 to go.
 
-**13 — Tighten enforcement.** Below.
+**16 — Tighten enforcement.** Below.
 
 ### If it stops early
 
-Phases 1–3 are cheap, self-contained and fix a live bug. **Phase 5 is the
-highest-value single phase** — without a `runner` seam nothing here can be
+Phases 1–4 are cheap, self-contained and fix live bugs — **phase 4 is data-loss
+and needs no VM**, so it is the best value per hour in the plan. **Phase 6 is
+the highest-value single phase**: without a `runner` seam nothing here can be
 tested, and every later phase has to be verified by hand against a real VM.
-**Phase 6 fixes a bug that is shipping today.** Phases 10–12 are cosmetic by
-comparison: stop before them without loss.
+**Phases 7 and 8 fix bugs that are shipping today**, 8 being the one that has
+already destroyed an install. Phases 13–15 are cosmetic by comparison: stop
+before them without loss.
 
 ---
 
-## Phase 13 in detail — enforcement
+## Phase 16 in detail — enforcement
 
 A cleanup that is not enforced decays back. **Most of this mess was made by an
 agent that did not read what already existed**, so prevention has to work on
@@ -429,19 +707,26 @@ history:
 
 | linter | the bug it would have caught |
 |---|---|
-| `unused` | all 8 dead symbols, at the moment each lost its caller |
-| `dupl` | 3 wait-for-agent loops, 3 batch-file blocks, 4 byte formatters |
-| `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3 |
-| `mnd` | the 8 unexplained timeout literals |
+| `unused` | all 12 dead symbols, at the moment each lost its caller |
+| `unparam` | **`BootAssistWatched`'s ignored `diskPath`** — a safety parameter that does nothing |
+| `dupl` | 3 wait-for-agent loops, 3 batch-file blocks, 5 byte formatters |
+| `goconst` | `win11-arm64.iso` ×5, `irgo-win11` ×3, `win11-arm64-built.iso` ×3 |
+| `mnd` | the unexplained timeout literals (now counted at 15+) |
 | `funlen`, `gocognit` | `runUp` at 86 lines doing five things |
 | `errcheck`, `gosec` | already clean; keep them clean |
+| `exhaustive` | `switch tool.Name` with no `default`, which would run `xorriso` with no arguments |
+| `nilerr` | `Prune` returning `nil` after swallowing `ReadDir`; `BootAssistOn` returning `nil` after five failures |
+
+`unparam` is the newly important one: it is the only check here that catches a
+parameter which *names a safety property the body does not implement*, which is
+how `diskPath` came to be documented, passed, and ignored.
 
 Land a minimal config in **phase 1** so the refactor itself is gated while churn
 is highest; tighten thresholds here once the code is final.
 
 ### Tests that encode the invariants
 
-Five properties invisible to the compiler, each of which has already broken:
+Properties invisible to the compiler, each of which has already broken:
 
 ```go
 TestReportCommandsArePure       // no REPORT command reaches Ensure*/Fetch*/Install*
@@ -449,10 +734,29 @@ TestSetupStagesMatchPrimitives  // each setup stage resolves to its primitive's 
 TestGuestFileNamesArePrunable   // generate via guestFile(), assert Prune claims it
 TestOperationsAreIdempotent     // Download/BuildISO/Prune twice; second is a no-op
 TestExportedSurfaceBudget       // count exported symbols; fail if it grows
+TestGuardsRefuseWhenUnknown     // unanswerable inode/flags ⇒ refuse, on darwin and not
+TestNoKeystrokesWhenAgentUp     // via the phase-6 seam: zero osascript calls
+TestShortDownloadFails          // truncated body ⇒ error, and no file at dest
 ```
 
-The last is deliberate: 134 exported symbols accumulated because nothing ever
-objected. A budget makes growth a decision someone takes.
+`TestExportedSurfaceBudget` is deliberate: 134 exported symbols accumulated
+because nothing ever objected. A budget makes growth a decision someone takes.
+
+### The check no linter can do
+
+Three pairs of comments in this repo assert **opposite facts about the same
+experiment**, and every one of them is a fact that cost hours to learn. No tool
+can find these, because both halves are prose.
+
+What makes them possible is that a finding is recorded in two places — a Go
+comment *and* an asset, or two files that both explain the same discovery. The
+rule that follows: **a hard-won fact gets one home, and other sites point at
+it.** Where the fact is about an asset's content, its home is next to the asset.
+`RESULTS.md` is the index, with dates.
+
+Add to `AGENTS.md`: *when you correct a comment that records a measurement,
+grep for the other copy — there is usually one, and leaving it is worse than
+having neither, because the reader cannot tell which is current.*
 
 ### `AGENTS.md`
 
@@ -475,7 +779,7 @@ for t in darwin/arm64 linux/amd64 windows/amd64 windows/arm64; do
 done
 ```
 
-**Idempotency — run it twice.** Phase 7 adds it as a test; most needs no VM
+**Idempotency — run it twice.** Phase 10 adds it as a test; most needs no VM
 (`Prune` twice, `Download` twice to an existing file, `BuildISO` twice against a
 fixture).
 
@@ -484,7 +788,7 @@ irgo-winvm setup && irgo-winvm setup       # second run: every stage skipped
 irgo-winvm iso -protect && irgo-winvm iso -protect
 ```
 
-**Phases 8 and 11 (*VM*)** — a green build means "compiles", not "works", and
+**Phases 8, 9, 11 and 14 (*VM*)** — a green build means "compiles", not "works", and
 these paths fail silently:
 
 ```sh
@@ -496,8 +800,8 @@ irgo-winvm suspend -vm irgo-win11 && irgo-winvm resume -vm irgo-win11
 The last must still report **~400 ms**. Seconds means a poll interval was lost —
 exactly how that bug happened the first time.
 
-**Once, at the end — a fresh install.** Nothing above exercises it, phases 7 and
-8 both touch it, and it is the only path whose failure costs 45 minutes to
+**Once, at the end — a fresh install.** Nothing above exercises it, phases 8,
+9 and 10 all touch it, and it is the only path whose failure costs 45 minutes to
 observe:
 
 ```sh
@@ -512,7 +816,7 @@ Never against `irgo-win11`.
 ## Git strategy
 
 A branch per phase, merged only once verified. **CI cannot prove these phases
-correct** — the VM-dependent paths have no unit coverage until phase 5, and
+correct** — the VM-dependent paths have no unit coverage until phase 6, and
 green means "compiles".
 
 ```sh

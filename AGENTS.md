@@ -81,6 +81,34 @@ the code:
 Move them with their code. Do not compress, summarise or "tidy" them. If a
 comment is wrong, fix the fact — do not delete the explanation.
 
+## "Cannot tell" is not "safe"
+
+Every guard here is written `if ok && bad { refuse }`, so a question that cannot
+be answered does not refuse — it allows. That is backwards for every guard in
+this package, because all of them stand in front of something destructive.
+
+- A check returns **three** answers: yes, no, and *could not determine*.
+- The caller handles the third **explicitly**. Refusing is the default; choosing
+  otherwise is stated at the call site, not hidden in a dropped `ok`.
+- Never write a comment claiming a fallback is "the safe direction" without
+  reading the callers. `sysfile_other.go` said exactly that, and every caller did
+  the opposite of what it claimed.
+
+## A hard-won fact gets exactly one home
+
+Three pairs of comments in this repo assert **opposite facts about the same
+experiment** — how many keypresses the boot prompt needs, which EFI loader
+boots, whether Setup reads the answer file from FAT. Each cost hours to learn.
+Each was corrected in one place and left standing in the other, so the code now
+records both the finding and its refutation with no way to tell which is
+current. That is worse than having neither.
+
+When you correct a comment that records a measurement, **grep for the other
+copy**. There is usually one. Where the fact concerns an asset, its home is
+beside the asset, and the Go side points at it. `RESULTS.md` is the index, with
+dates — and a date is what makes a stale measurement a fact about the past
+rather than a lie.
+
 ## Idempotency is a contract
 
 Every expensive operation here is one somebody will re-run: a 4.2 GB download, a

@@ -291,3 +291,28 @@ Everything the plan files tracked is done and measured above. What is left:
 
 **No irgo integration until this works standalone with glaze.** Integrating a
 tool that does not yet work makes the framework absorb its failures.
+
+## The ISO scan verdict is recorded at build time — 13 Aug 2026
+
+Checking "is this media ARM64" reads the whole file. On a 4.9 GB ISO that is
+**77 seconds**, and it happened on every `iso-create`, printing nothing while
+it ran.
+
+The verdict is now cached beside the ISO, keyed by size and mtime, and written
+by the build itself — which knows the answer, having just mastered the ISO from
+an ARM64 `.esd`.
+
+| | |
+|---|---|
+| first check of a fresh ISO, before | 77.2 s |
+| same check, after | **0.0 s** |
+| rebuild from a kept `.esd`, no network | 39.5 s |
+| full fetch + expand + master from nothing | 250 s |
+
+The rebuild figure is why `iso-delete` keeps the `.esd` by default: the ISO
+costs 39 seconds of local work to recreate, the `.esd` costs 4.2 GB from a
+source that rate-limits.
+
+Not covered by a test: that the build still records the verdict. That path
+needs a real `.esd`, so deleting the call leaves the unit tests green. This
+measurement is the check.

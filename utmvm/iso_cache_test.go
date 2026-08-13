@@ -113,3 +113,35 @@ func TestInspectISOUsesTheCache(t *testing.T) {
 		t.Error("the cached verdict was not returned")
 	}
 }
+
+// A freshly built ISO must carry its verdict.
+//
+// It did not, and the cost was exact: the next command read all 4.9 GB to
+// rediscover an architecture the build already knew, 77 seconds, printing
+// nothing while it did.
+//
+// NOTE what this does and does not prove. It stores a verdict the way the
+// build does and checks the verdict is used — it does NOT prove the build
+// still calls isoStoreVerdict, because that path needs a real 4.2 GB .esd.
+// Deleting that call leaves this test green. It is verified by measurement
+// instead, recorded in RESULTS.md: 77s before, 0.0s after.
+func TestBuiltISOCarriesItsVerdict(t *testing.T) {
+	p := writeISO(t, "pretend this is a mastered ISO")
+
+	// What isoBuildFromESD does after a successful master.
+	isoStoreVerdict(p, isoInfo{IsARM64: true})
+
+	// Unreadable: a real scan would fail, a cache hit will not.
+	if err := os.Chmod(p, 0o000); err != nil {
+		t.Skip("cannot make the file unreadable here")
+	}
+	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+
+	info, err := isoInspect(p)
+	if err != nil {
+		t.Fatalf("a built ISO was re-scanned instead of using the verdict the build recorded: %v", err)
+	}
+	if !info.IsARM64 {
+		t.Error("the recorded verdict was not returned")
+	}
+}

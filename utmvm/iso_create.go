@@ -639,12 +639,23 @@ func isoBuildFromESD(esd, out string, say func(string, ...any)) error {
 		return err
 	}
 	say("          mastering the ISO with xorriso (takes a minute)")
-	return isoBuild(isoRemasterOptions{
+	if err := isoBuild(isoRemasterOptions{
 		Source:   media,
 		Output:   out,
 		Label:    "WINDOWS_ARM64",
 		NoPrompt: true,
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Record what we already know, so nothing re-reads 4.9 GB to learn it.
+	//
+	// This ISO was mastered here from an ARM64 .esd — the architecture is not
+	// in question. Without writing it down the next command scanned the whole
+	// file to rediscover it, which measured at 77 seconds and looked like a
+	// hang every time.
+	isoStoreVerdict(out, isoInfo{IsARM64: true})
+	return nil
 }
 
 // isoWorkDir is scratch space for expanding an ESD, emptied before use. It

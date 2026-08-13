@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} — irgo-windows-vm</title>
+<title>{{if eq .Title "irgo-windows-vm"}}{{.Title}}{{else}}{{.Title}} — irgo-windows-vm{{end}}</title>
 <meta name="description" content="{{.Blurb}}">
 <link rel="stylesheet" href="style.css">
 </head>

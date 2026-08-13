@@ -174,6 +174,20 @@ func runDoctor() error {
 	var rows []row
 	add := func(what, state, where string) { rows = append(rows, row{what, state, where}) }
 
+	// The tool first, because it is the one thing in this table doctor cannot
+	// be wrong about and the first thing a bug report needs. It was the only
+	// thing missing from it: `version` printed the number and nothing else did,
+	// so doctor output pasted into an issue did not say what produced it —
+	// and "dev" versus a tag is the difference between a build somebody made
+	// and one that shipped.
+	//
+	// Built here rather than in utmvm, which cannot see main.version.
+	self, err := os.Executable()
+	if err != nil {
+		self = "(this binary)"
+	}
+	add("irgo-winvm", version, utmvm.Home(self))
+
 	for _, e := range utmvm.Externals() {
 		state := "MISSING"
 		if e.Path != "" {

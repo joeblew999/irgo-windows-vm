@@ -142,7 +142,7 @@ type AppResult struct {
 // file has no quoting ambiguity, and each line is parsed as it executes — which
 // also makes %ERRORLEVEL% read the previous command's code rather than being
 // expanded early, as it is in a single chained line.
-func appExec(vmRef string, argv []string, timeout time.Duration) (AppResult, error) {
+func appExec(vmRef string, argv []string, timeout time.Duration, say func(string, ...any)) (AppResult, error) {
 	var res AppResult
 	if len(argv) == 0 {
 		return res, fmt.Errorf("no command given")
@@ -167,18 +167,9 @@ func appExec(vmRef string, argv []string, timeout time.Duration) (AppResult, err
 
 	// exec returns once the process is launched, so wait for the exit-code file
 	// rather than assuming the work is done.
-	deadline := time.Now().Add(timeout)
-	var rcRaw []byte
-	for {
-		var perr error
-		rcRaw, perr = Pull(vmRef, rcFile)
-		if perr == nil && len(bytes.TrimSpace(rcRaw)) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			return res, fmt.Errorf("guest command did not finish within %s", timeout)
-		}
-		time.Sleep(2 * time.Second)
+	rcRaw, werr := waitForGuest(vmRef, rcFile, timeout, say)
+	if werr != nil {
+		return res, werr
 	}
 
 	// Both checked. Swallowing these meant a failed pull or an unparsable exit

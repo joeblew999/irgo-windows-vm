@@ -49,37 +49,38 @@ description = "examples/glaze-all — the windowed capability report, on the VM"
 # caller wants an exit code and nothing left open, so it says so.
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
-  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/glaze-all.exe -probe",
+  "go run ./cmd/irgo-winvm app-create -gui {{config_root}}/.bin/win/glaze-all.exe -probe",
 ]
 
 [tasks."app:create:glaze-all:hands"]
-description = "examples/glaze-all — the window, on the VM, to drive by hand"
-# No -probe: this is the mode a person wants, left open on the guest's desktop.
-# It does not return until the window is closed, so watch it with vm:screen.
+description = "examples/glaze-all — the window, left up on the VM to drive by hand"
+# No -probe, so it opens the window and waits for a person. -detach because of
+# that: a window nobody closes never exits, so waiting for it can only end in
+# the timeout. Without it this sat silent for ten minutes and read as a hang.
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
-  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/glaze-all.exe",
+  "go run ./cmd/irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
 ]
 
 [tasks."app:create:probe"]
 description = "probe/ — the headless native capabilities, on the VM"
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C probe build -o {{config_root}}/.bin/win/probe.exe .",
-  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/probe.exe",
+  "go run ./cmd/irgo-winvm app-create {{config_root}}/.bin/win/probe.exe",
 ]
 
 [tasks."app:create:verify"]
 description = "glaze-probes/verify — the portless app:// path, on the VM"
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C glaze-probes build -o {{config_root}}/.bin/win/verify.exe ./verify",
-  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/verify.exe",
+  "go run ./cmd/irgo-winvm app-create -gui {{config_root}}/.bin/win/verify.exe",
 ]
 
 [tasks."app:create:verify-events"]
 description = "glaze-probes/verifyevents — the Events bridge, on the VM"
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C glaze-probes build -o {{config_root}}/.bin/win/verify-events.exe ./verifyevents",
-  "go run ./cmd/irgo-winvm app-create -vm ${VM:-irgo-win11} -gui {{config_root}}/.bin/win/verify-events.exe",
+  "go run ./cmd/irgo-winvm app-create -gui {{config_root}}/.bin/win/verify-events.exe",
 ]
 
 [tasks."app:delete"]
@@ -88,36 +89,30 @@ run = "go run ./cmd/irgo-winvm app-delete"
 
 [tasks."app:delete:glaze-all"]
 description = "Take glaze-all off the VM"
-run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/glaze-all.exe"
+run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/glaze-all.exe"
 
 [tasks."app:delete:probe"]
 description = "Take probe off the VM"
-run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/probe.exe"
+run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/probe.exe"
 
 [tasks."app:delete:verify"]
 description = "Take verify off the VM"
-run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/verify.exe"
+run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/verify.exe"
 
 [tasks."app:delete:verify-events"]
 description = "Take verify-events off the VM"
-run = "go run ./cmd/irgo-winvm app-delete -vm ${VM:-irgo-win11} {{config_root}}/.bin/win/verify-events.exe"
+run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/verify-events.exe"
 
 [tasks."app:test"]
 description = "Put a binary on a VM, run it, and remove it"
 run = '''
 set -e
-VM=${VM:-irgo-win11}
-
-# Needs a VM with Windows actually installed and answering: app-create pushes
-# a binary through utmctl, which needs the guest agent. A bundle with no
-# Windows on it cannot run anything.
-# Bounded: utmctl exec against a guest with no agent does not fail, it waits.
-# A precondition that hangs is worse than one that is wrong.
-if ! utmctl ip-address "$VM" >/dev/null 2>&1; then
-  echo "$VM has no guest agent — run: irgo-winvm vm-create -install" >&2
-  exit 1
-fi
-
+# No precondition check here any more. It shelled out to `utmctl ip-address` to
+# decide whether the guest agent was up, which meant this file held both the
+# VM's name and a second opinion about what "ready" means -- and app-create
+# already answers that, recovers a VM that has rebooted, and says what to run
+# if Windows is not installed yet.
+#
 # Through the named tasks, not a hand-rolled build of the same thing. This ran
 # `go build` into a mktemp hello.exe, which tested a path no user takes and
 # would have kept passing after app:create:probe broke.

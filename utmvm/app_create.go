@@ -14,10 +14,33 @@ import (
 // AppOptions configures AppCreate. The zero value is a headless run with the default
 // timeout, which is what almost every caller wants.
 type AppOptions struct {
-	Args    []string
-	GUI     bool // run in the logged-in user's desktop session
-	User    string
+	Args []string
+	GUI  bool // run in the logged-in user's desktop session
+	User string
+
+	// Detach returns as soon as the program is running instead of waiting for
+	// it to exit, and so collects no output or exit code.
+	//
+	// For a program that is not supposed to exit. A window you are meant to
+	// click things in never finishes, so waiting for it can only end in the
+	// timeout — several minutes of a command that has printed nothing, which is
+	// indistinguishable from a hang and was reported as one.
+	Detach bool
+
 	Timeout time.Duration
+
+	// Say receives progress. Without it every one of these commands is silent
+	// from the push until the guest program exits, which for anything slow is a
+	// terminal that looks dead.
+	Say func(string, ...any)
+}
+
+// says returns o.Say or a no-op, so call sites need no nil check.
+func (o AppOptions) says() func(string, ...any) {
+	if o.Say == nil {
+		return func(string, ...any) {}
+	}
+	return o.Say
 }
 
 // AppCreate pushes a binary into the guest and runs it there.
@@ -38,14 +61,47 @@ func AppCreate(vmRef, localPath string, o AppOptions) (AppResult, error) {
 		// Public, not Windows\Temp: the interactive user must be able to execute it.
 		dir = guestPublic
 	}
+	say := o.says()
 	guestPath := dir + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
+	say("pushing %s to %s", path.Base(strings.ReplaceAll(localPath, `\`, "/")), guestPath)
 	if err := Push(vmRef, localPath, guestPath); err != nil {
 		return AppResult{}, err
 	}
 	if o.GUI {
-		return appExecInteractive(vmRef, guestPath, o.Args, o.User, o.Timeout)
+		say("launching in %s's desktop session", o.User)
+		return appExecInteractive(vmRef, guestPath, o.Args, o.User, o.Timeout, o.Detach, say)
 	}
-	return appExec(vmRef, append([]string{guestPath}, o.Args...), o.Timeout)
+	say("running it")
+	return appExec(vmRef, append([]string{guestPath}, o.Args...), o.Timeout, say)
+}
+
+// waitForGuest blocks until the guest command writes its exit-code file.
+//
+// Shared by both paths, and it says so as it waits. Neither said anything: from
+// the launch to the program's exit the command printed nothing, so a run that
+// was working and a run that was wedged looked identical for as long as the
+// timeout allowed — up to ten minutes of dead terminal.
+func waitForGuest(vmRef, rcFile string, timeout time.Duration, say func(string, ...any)) ([]byte, error) {
+	start := time.Now()
+	deadline := start.Add(timeout)
+	// Only every few polls: a line every 3 seconds is its own kind of noise.
+	const announceEvery = 15 * time.Second
+	nextSay := start.Add(announceEvery)
+	for {
+		raw, perr := Pull(vmRef, rcFile)
+		if perr == nil && len(bytes.TrimSpace(raw)) > 0 {
+			return raw, nil
+		}
+		now := time.Now()
+		if now.After(deadline) {
+			return nil, fmt.Errorf("guest command did not finish within %s", timeout)
+		}
+		if now.After(nextSay) {
+			say("still running (%s of %s)", now.Sub(start).Round(time.Second), timeout)
+			nextSay = now.Add(announceEvery)
+		}
+		time.Sleep(3 * time.Second)
+	}
 }
 
 // RunInteractive runs a command in the guest's interactive desktop session.
@@ -60,7 +116,7 @@ func AppCreate(vmRef, localPath string, o AppOptions) (AppResult, error) {
 // A scheduled task with /it runs as the logged-in user in their session, which
 // has a desktop. The auto-login the answer file configures is what guarantees
 // such a session exists.
-func appExecInteractive(vmRef, guestExe string, args []string, user string, timeout time.Duration) (AppResult, error) {
+func appExecInteractive(vmRef, guestExe string, args []string, user string, timeout time.Duration, detach bool, say func(string, ...any)) (AppResult, error) {
 	var res AppResult
 	if timeout == 0 {
 		timeout = 5 * time.Minute
@@ -105,19 +161,17 @@ func appExecInteractive(vmRef, guestExe string, args []string, user string, time
 		return res, fmt.Errorf("launching interactive task: %w", xerr)
 	}
 
-	deadline := time.Now().Add(timeout)
-	var rcRaw []byte
-	for {
-		var perr error
-		rcRaw, perr = Pull(vmRef, rcFile)
-		if perr == nil && len(bytes.TrimSpace(rcRaw)) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
-			return res, fmt.Errorf("interactive command did not finish within %s", timeout)
-		}
-		time.Sleep(3 * time.Second)
+	// Detached: it is up, and that is the whole result. Waiting for a window to
+	// close would mean waiting for a person, and the timeout would fire first.
+	if detach {
+		say("it is running on the guest's desktop; this command is done")
+		return res, nil
+	}
+
+	rcRaw, werr := waitForGuest(vmRef, rcFile, timeout, say)
+	if werr != nil {
+		_, _ = vm.Exec("cmd.exe", "/c", "schtasks /delete /tn "+task+" /f")
+		return res, werr
 	}
 	// Both checked. Swallowing these meant a failed pull or an unparsable exit
 	// code returned AppResult{Stdout: "", ExitCode: 0} with err == nil — a suite

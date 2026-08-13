@@ -105,7 +105,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 
 	if opts.VMName == "" {
-		opts.VMName = "irgo-win11"
+		opts.VMName = DefaultVMName
 	}
 	if opts.Timeout == 0 {
 		opts.Timeout = 60 * time.Minute

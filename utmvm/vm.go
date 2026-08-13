@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+// DefaultVMName is the VM. There is one, deliberately.
+//
+// Declared here because the vm stage owns what a VM is called. It was written
+// out six times — three flag defaults, the library's own fallback, and every
+// app task in mise.toml carrying `${VM:-irgo-win11}` because the app commands
+// were the two that had no default and refused to run without -vm.
+//
+// So the same name meant two different things depending on which command you
+// typed: vm-create with no -vm made irgo-win11, and app-create with no -vm was
+// an error. -vm still overrides, for a disposable VM to test against.
+const DefaultVMName = "irgo-win11"
+
 // The bundle layout, declared once.
 //
 // These four names were spelled out at ten call sites across the package and

@@ -130,7 +130,7 @@ func run(args []string) error {
 func runVMCreate(args []string) error {
 	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	var (
-		name    = fs.String("vm", "irgo-win11", "VM name")
+		name    = fs.String("vm", utmvm.DefaultVMName, "VM name")
 		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	)
@@ -226,7 +226,7 @@ func runDoctor() error {
 
 func runVMDelete(args []string) error {
 	fs := flag.NewFlagSet("vm-delete", flag.ContinueOnError)
-	name := fs.String("vm", "irgo-win11", "VM name")
+	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
 	force := fs.Bool("force", false, "actually delete; without this it only lists")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -273,9 +273,10 @@ func runAppCreate(args []string) error {
 	say := utmvm.Printer("app-create")
 	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
 	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
-	name := fs.String("vm", "", "VM name or UUID (required)")
+	name := fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
 	gui := fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
 	user := fs.String("user", "dev", "guest account for -gui")
+	detach := fs.Bool("detach", false, "leave it running and return, instead of waiting for it to exit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -299,11 +300,18 @@ func runAppCreate(args []string) error {
 	}
 
 	local := fs.Arg(0)
+	say("vm:     %s", e.Name)
+	say("binary: %s", local)
 	res, err := utmvm.AppCreate(e.UUID, local, utmvm.AppOptions{
 		Args:    fs.Args()[1:],
 		GUI:     *gui,
 		User:    *user,
+		Detach:  *detach,
 		Timeout: *timeout,
+		// The printer goes in, so the push, the launch and the wait are all
+		// visible and all logged. Without it the library half was silent and a
+		// run that hung recorded one line, "started", and nothing else.
+		Say: say,
 	})
 	if res.Stdout != "" {
 		// Through the printer: what the guest printed is the result of the
@@ -315,6 +323,14 @@ func runAppCreate(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	// Named here rather than in utmvm, which only ever sees the UUID: every
+	// command resolves the name to one before calling in, so a hint printed
+	// from in there tells you to run `-vm 38791348-ED91-...`.
+	if *detach {
+		say("watch it with:    irgo-winvm vm-screen -vm %s", e.Name)
+		say("take it off with: irgo-winvm app-delete -vm %s %s", e.Name, filepath.Base(local))
+		return nil
 	}
 	if res.ExitCode != 0 {
 		return fmt.Errorf("%s exited %d in the guest", filepath.Base(local), res.ExitCode)
@@ -337,12 +353,13 @@ func bundleOf(e utmvm.Entry) string {
 func runAppDelete(args []string) error {
 	say := utmvm.Printer("app-delete")
 	fs := flag.NewFlagSet("app-delete", flag.ExitOnError)
-	name := fs.String("vm", "", "VM name or UUID (required)")
+	name := fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Only reachable via an explicit `-vm ""`, since the flag defaults now.
 	if *name == "" {
-		return fmt.Errorf("app-delete needs -vm")
+		return fmt.Errorf("app-delete: -vm was given an empty name")
 	}
 	say("vm:     %s", *name)
 	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
@@ -550,7 +567,7 @@ func runISODelete(args []string) error {
 // exactly like a working one from the host.
 func runVMScreen(args []string) error {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
-	name := fs.String("vm", "irgo-win11", "VM name")
+	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
 	out := fs.String("o", "", "where to write the PNG (default: alongside the media)")
 	if err := fs.Parse(args); err != nil {
 		return err

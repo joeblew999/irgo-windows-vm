@@ -23,7 +23,7 @@ import (
 // The bundle layout, declared once.
 //
 // These four names were spelled out at ten call sites across the package and
-// the CLI — filepath.Join(dir, e.Name+".utm") and bundle+"/Data/disk.img" — so
+// the CLI, assembled by hand each time, so
 // UTM's on-disk layout was knowledge every caller had to carry, and one of them
 // used string concatenation rather than filepath.Join.
 const (
@@ -31,10 +31,22 @@ const (
 	// looked for by default.
 	vmStageDirName = "bin"
 
+	// Where UTM itself lives, and what it keeps inside its container. UTM
+	// decides all of this; we only have to spell it correctly, and spelling it
+	// in five places is how one of them ends up wrong.
+	utmAppPath   = "/Applications/UTM.app"
+	utmContainer = "com.utmapp.UTM"
+	utmBinDir    = "Contents/MacOS"
+	utmDocuments = "Documents"
+	utmToolsDir  = "GuestSupportTools"
+	utmToolsISO  = "utm-guest-tools-latest.iso"
+
+	// What goes inside a bundle we generate.
 	bundleExt   = ".utm"
 	bundleData  = "Data"
 	diskImage   = "disk.img"
 	installISO  = "install.iso"
+	guestISO    = "guest-tools.iso"
 	unattendISO = "unattend.iso"
 )
 
@@ -49,7 +61,7 @@ func DefaultVMDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data", "Documents"), nil
+	return filepath.Join(utmContainerDir(home), utmDocuments), nil
 }
 
 // Options controls bundle creation.
@@ -196,12 +208,12 @@ func Create(opts Options) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := linkOrCopy(gt, filepath.Join(data, "guest-tools.iso")); err != nil {
+		if err := linkOrCopy(gt, filepath.Join(data, guestISO)); err != nil {
 			return "", fmt.Errorf("guest tools: %w", err)
 		}
 		id4, _ := newUUID()
 		cfg.Drives = append(cfg.Drives,
-			Drive{ID: id4, ImageName: "guest-tools.iso", Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
+			Drive{ID: id4, ImageName: guestISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
 	}
 
 	plist, err := cfg.Plist()
@@ -495,7 +507,7 @@ func indexXMLIllegal(s string) int {
 }
 
 // utmctl is UTM's CLI, shipped inside the app bundle and not on PATH.
-func utmctlPath() string { return AppPath + "/Contents/MacOS/utmctl" }
+func utmctlPath() string { return filepath.Join(AppPath, utmBinDir, "utmctl") }
 
 // VM identifies a virtual machine by name or UUID. utmctl accepts either, so
 // callers can use whichever they have.
@@ -720,7 +732,7 @@ func firstLine(s string) string {
 func RestartUTM() error {
 	_ = exec.Command("osascript", "-e", `tell application "UTM" to quit`).Run()
 	for i := 0; i < 15; i++ {
-		if err := exec.Command("pgrep", "-f", AppPath+"/Contents/MacOS/UTM").Run(); err != nil {
+		if err := exec.Command("pgrep", "-f", filepath.Join(AppPath, utmBinDir, "UTM")).Run(); err != nil {
 			break // gone
 		}
 		time.Sleep(time.Second)
@@ -1123,7 +1135,7 @@ type Install struct {
 }
 
 // AppPath is where UTM is installed.
-const AppPath = "/Applications/UTM.app"
+const AppPath = utmAppPath
 
 // DetectUTM reports the installed UTM, or ErrUTMNotInstalled.
 func DetectUTM() (Install, error) {
@@ -1250,8 +1262,8 @@ func guestToolsPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Containers", "com.utmapp.UTM", "Data",
-		"Library", "Application Support", "GuestSupportTools", "utm-guest-tools-latest.iso"), nil
+	return filepath.Join(utmContainerDir(home),
+		"Library", "Application Support", utmToolsDir, utmToolsISO), nil
 }
 
 // GuestToolsISO returns UTM's downloaded guest tools image, if present.
@@ -1497,4 +1509,10 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// utmContainerDir is UTM's sandbox container, where it keeps everything it
+// owns: the bundles it boots and the guest tools it downloads.
+func utmContainerDir(home string) string {
+	return filepath.Join(home, "Library", "Containers", utmContainer, "Data")
 }

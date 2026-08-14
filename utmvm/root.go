@@ -82,6 +82,15 @@ func FreeBytes(path string) (int64, error) {
 // appRoot is the one directory this tool owns. vm, iso and run each hang their
 // own locations off it, so there is a single answer to "where does anything
 // go" without any of the three owning the others' paths.
+// Root is where everything this tool keeps lives: media, staged binaries, logs,
+// screenshots and jobs.
+//
+// Exported so package job can put its records under the same root rather than
+// inventing a second place for things to live. One place, fixed, nothing to
+// configure — a second answer to "where does it go" is the drift this project
+// keeps removing.
+func Root() string { return appRoot() }
+
 func appRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

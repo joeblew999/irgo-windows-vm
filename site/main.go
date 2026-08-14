@@ -76,6 +76,12 @@ var pages = []struct {
 	{"AGENTS.md", "agents.html", "Agents", "Agents", "How the code is organised, and every trap that cost hours"},
 	{"CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},
 
+	// The only page that states intent rather than fact, and it says so in its
+	// first line. It lives in docs/ because the check that every command named
+	// in root markdown exists in the binary would fail on a roadmap — naming
+	// what does not exist yet is the point of one.
+	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one thing not yet verified"},
+
 	// Generated, not read from disk. Src is empty and reference.go builds the
 	// markdown by running the binary — see generateReference.
 	{"", "reference.html", "Commands", "Commands", "Every command and every flag, captured from the binary"},

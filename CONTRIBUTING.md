@@ -124,6 +124,12 @@ Screenshots come from `docs/screens/vm/`, and are put there by the tool rather
 than by hand: `mise run vm:shots` copies the newest shot of each stage in under
 its stage name. Do not copy them across yourself.
 
+**CI fails on a screenshot no page mentions.** `vm:shots` publishes whatever
+stages a run happened to produce, and a slow boot produces `booting-3`,
+`booting-4` and so on — the README captions two. So a new shot needs either a
+caption naming its file, or removing: an unexplained picture in documentation is
+not evidence, it is decoration that looks like evidence.
+
 ## A glaze or native bug is fixed at crgimenes, not here
 
 **Non-negotiable, and the reason this project exists.** A failing probe means a

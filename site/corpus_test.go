@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -303,4 +304,77 @@ func TestFooterNamesTheRealSource(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEveryPublishedScreenshotIsExplained closes the class of failure that
+// booting.png was one instance of.
+//
+// docs/screens is copied wholesale into the site, so anything in it is
+// published whether or not a page says what it shows. booting.png was published
+// that way for days, captioned by nothing — and deleting it fixed one file, not
+// the reason it happened.
+//
+// It recurs on its own: `vm:shots` publishes the newest shot of every stage, and
+// the boot wait is photographed every few seconds, so a slower boot produces
+// booting-3, booting-4 and so on. A run during this work produced booting-3
+// immediately. The README captions two.
+//
+// So the rule is that a screenshot in the repository has to be referenced by
+// something the site publishes. An unexplained picture in documentation is not
+// evidence, it is decoration that looks like evidence.
+//
+// Negative control, run by hand: copying any curated shot to
+// docs/screens/vm/unexplained.png fails this and names it.
+func TestEveryPublishedScreenshotIsExplained(t *testing.T) {
+	out := buildToTemp(t)
+
+	// Read what the build published, not the source directory, so this measures
+	// what a reader can actually reach.
+	var shots []string
+	err := filepath.WalkDir(filepath.Join(out, "screens"), func(p string, d fs.DirEntry, wErr error) error {
+		if wErr != nil {
+			return wErr
+		}
+		if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), ".png") {
+			rel, rErr := filepath.Rel(out, p)
+			if rErr != nil {
+				return rErr
+			}
+			shots = append(shots, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the published screenshots: %v", err)
+	}
+	if len(shots) == 0 {
+		t.Fatal("no screenshots were published; this test would pass vacuously")
+	}
+
+	// One haystack: every page, in both renderings.
+	var all strings.Builder
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".html") || strings.HasSuffix(e.Name(), ".md") {
+			all.WriteString(read(t, filepath.Join(out, e.Name())))
+		}
+	}
+	haystack := all.String()
+
+	orphans := 0
+	for _, s := range shots {
+		if !strings.Contains(haystack, s) {
+			t.Errorf("%s is published and no page mentions it — caption it, or take it out of docs/screens", s)
+			orphans++
+		}
+	}
+	// Counted, because the first version of this line said "all referenced"
+	// unconditionally and printed it underneath its own failure.
+	t.Logf("%d published screenshots, %d referenced", len(shots), len(shots)-orphans)
 }

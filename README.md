@@ -31,8 +31,8 @@ macOS on Apple Silicon. It installs UTM itself if you do not have it.
 ## What it is for
 
 This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)** — a
-hypermedia-driven framework for building native iOS, Android and **desktop**
-apps in Go with Datastar, no JavaScript framework involved.
+hypermedia-driven framework for building apps in Go with Datastar that run on
+iOS, Android, **desktop** and the web, with no JavaScript framework involved.
 
 Desktop is the hard word in that sentence. An app that runs on one desktop is
 not a desktop app; it has to work on the platforms you did not write it on. The

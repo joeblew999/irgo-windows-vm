@@ -1,4 +1,4 @@
-# Generated media and disks — rebuild with `irgo-winvm create`
+# Generated media and disks — rebuild with `irgo-winvm iso-create` / `vm-create`
 *.iso
 *.dmg
 *.img
@@ -16,20 +16,41 @@
 # writes one to test against local glaze/native clones and removes it again.
 go.work
 go.work.sum
-.bin/
 
 # Release artefacts, built by mise run go:build.
 /dist/
 
-# Probe binaries built into their own source directory. `go build` with no -o
-# drops one next to main.go, and probe/nativeprobe was committed that way — a
-# 4.5 MB build artefact in a repository whose largest real file is a screenshot.
+# Probe binaries built into their own source directory. Every mise task builds
+# with `-o .bin/`, so these only catch a `go build` run by hand — which is how a
+# 4.5 MB artefact was committed once, in a repository whose largest real file is
+# a screenshot.
+#
+# Two of these used to name the directory instead of the binary inside it:
+#
+#   /glaze-probes/verify        <- ignores the whole source directory
+#   /glaze-probes/verify/verify <- ignores the binary in it
+#
+# The first is what was here. Nothing broke, because git keeps tracking a file
+# it already tracks — but a new .go file added to either probe was ignored, so
+# `git add -A` would have skipped it silently and the push would have been
+# missing a file that builds fine on the machine that wrote it. Verified with
+# `git check-ignore -v glaze-probes/verify/newfile.go`, which named this rule.
+#
+# Every name below was measured by running the build, not worked out. The
+# obvious rule — "the binary is named after its directory" — is wrong here:
+# probe/go.mod says `module nativeprobe`, so building it drops `nativeprobe`,
+# and an entry reading /probe/probe silently guards nothing.
 /probe/nativeprobe
-/glaze-probes/verify
-/glaze-probes/verifyevents
+/glaze-probes/verify/verify
+/glaze-probes/verifyevents/verifyevents
 /examples/glaze-all/glaze-all
 
 # The generated site. Built by `mise run site:build` from the markdown, which is
 # the source of truth; committing the output would be the second copy the
 # generator exists to avoid.
 /site/dist/
+
+# macOS writes these into any directory Finder has opened. Ignored here rather
+# than relying on a global gitignore, because a contributor's machine is not
+# this one.
+.DS_Store

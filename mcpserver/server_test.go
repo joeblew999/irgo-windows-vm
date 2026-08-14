@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -496,5 +498,73 @@ func TestALongCallStartsAJobInsteadOfBlocking(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestTypedFlagsBecomeACommandLine — the schema offers typed flags, so a call
+// using them must produce the command line a person would have typed.
+//
+// Order matters and is the reason this asserts on the whole slice rather than
+// on membership: the flag package stops at the first non-flag argument, so a
+// positional placed before a flag silently swallows every flag after it.
+//
+// Negative control, run by hand: append positionals before flags in argv() and
+// this fails on the order.
+func TestTypedFlagsBecomeACommandLine(t *testing.T) {
+	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
+	fs.String("vm", "irgo-win11", "VM name")
+	fs.Bool("gui", false, "windowed")
+	fs.Duration("timeout", 10*time.Minute, "limit")
+
+	got := argv(map[string]any{
+		"vm":      "other-vm",
+		"gui":     true,
+		"args":    []any{"prog.exe"},
+		"ignored": "not a flag on this command",
+	}, fs)
+
+	want := []string{"-gui=true", "-vm=other-vm", "prog.exe"}
+	if len(got) != len(want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q (full: %q)", i, got[i], want[i], got)
+		}
+	}
+
+	// An unset flag must not appear at all: passing -timeout= with nothing
+	// would override the default with a parse error.
+	for _, a := range got {
+		if strings.HasPrefix(a, "-timeout") {
+			t.Errorf("a flag the caller did not set was passed anyway: %q", got)
+		}
+	}
+}
+
+// TestTheSchemaCarriesTheRealDefaults — the defaults come off the FlagSet, so
+// the schema cannot advertise one the CLI does not have.
+func TestTheSchemaCarriesTheRealDefaults(t *testing.T) {
+	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
+	fs.String("user", "dev", "guest account for -gui")
+	fs.Bool("gui", false, "windowed")
+
+	s := argsSchema("app-create", fs)
+	user, ok := s.Properties["user"]
+	if !ok {
+		t.Fatal("the schema does not describe -user")
+	}
+	if user.Type != "string" {
+		t.Errorf("-user is %q, want string", user.Type)
+	}
+	if !strings.Contains(user.Description, "default dev") {
+		t.Errorf("-user does not carry its real default: %q", user.Description)
+	}
+	gui, ok := s.Properties["gui"]
+	if !ok {
+		t.Fatal("the schema does not describe -gui")
+	}
+	if gui.Type != "boolean" {
+		t.Errorf("-gui is %q, want boolean — a bool asked as a string makes an agent send \"true\"", gui.Type)
 	}
 }

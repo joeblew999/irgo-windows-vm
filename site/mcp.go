@@ -119,22 +119,30 @@ surface that could offer something the CLI cannot do, or drift from it.
 	b.WriteString(`
 ## Arguments
 
-Every tool takes one argument, ` + "`args`" + `: the command line as an array of
-strings, exactly as it would be typed.
+Each tool's flags are typed properties, with their real defaults, plus
+` + "`args`" + ` for anything positional — the path to a ` + "`.exe`" + `, or a directory.
 
 `)
 	for _, t := range tools {
-		if p, ok := t.InputSchema.Properties["args"]; ok && p.Description != "" {
-			b.WriteString(fmt.Sprintf("- `%s` — %s\n", t.Name, p.Description))
+		var names []string
+		for n := range t.InputSchema.Properties {
+			if n != "args" {
+				names = append(names, "`-"+n+"`")
+			}
 		}
+		sort.Strings(names)
+		if len(names) == 0 {
+			b.WriteString(fmt.Sprintf("- `%s` — no flags\n", t.Name))
+			continue
+		}
+		b.WriteString(fmt.Sprintf("- `%s` — %s\n", t.Name, strings.Join(names, ", ")))
 	}
 
 	b.WriteString(`
-One schema for all of them is a deliberate trade. A typed schema per command
-would declare each command's flags a second time — once for the CLI, once for
-MCP — and the two would disagree the first time a default changed. The cost is
-that the schema helps an agent less, and the
-[command reference](reference.html) is where the flags are.
+None of that is transcribed. The schema is generated from the same
+` + "`flag.FlagSet`" + ` the command line parses, so a default shown here cannot differ
+from the one the CLI uses — not because a test compares them, but because there
+is only one registration and both read it.
 
 ## What a failure looks like
 

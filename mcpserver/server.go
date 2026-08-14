@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -54,6 +55,15 @@ type Deps struct {
 	// before that, so blocking means the call is abandoned while the install
 	// carries on and the agent has nothing to ask about it.
 	StartJob func(name string, args []string) (id string, err error)
+
+	// Flags returns a command's flag set, or nil if it takes none.
+	//
+	// The schema is generated from it. Not from a declaration beside it: that
+	// would make the data the source and the FlagSet a copy, and the two could
+	// disagree. This way there is one registration and both the command line
+	// and the JSON schema read it, so a default cannot be claimed here that the
+	// CLI does not have.
+	Flags func(name string) *flag.FlagSet
 }
 
 // argsSchema is the input every tool takes: the command line, as an array.
@@ -69,22 +79,76 @@ type Deps struct {
 // MCP page and the captured -h text are for. Moving flags into package command
 // so both could be generated from one declaration is the change that would fix
 // it properly, and it is not this commit.
-func argsSchema(name string) *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"args": {
-				Type:        "array",
-				Items:       &jsonschema.Schema{Type: "string"},
-				Description: fmt.Sprintf("Command line arguments for %s, one element per token, exactly as they would be typed. Run `irgo-winvm %s -h` for the flags.", name, name),
-			},
+func argsSchema(name string, fs *flag.FlagSet) *jsonschema.Schema {
+	props := map[string]*jsonschema.Schema{
+		"args": {
+			Type:        "array",
+			Items:       &jsonschema.Schema{Type: "string"},
+			Description: fmt.Sprintf("Positional arguments for %s — the ones that are not flags, such as the path to a .exe.", name),
 		},
 	}
+	if fs != nil {
+		fs.VisitAll(func(f *flag.Flag) {
+			p := &jsonschema.Schema{Type: "string", Description: f.Usage}
+			// Bools are asked, not guessed from the name: the flag package
+			// answers this itself, and `-install` and `-user` look alike.
+			if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+				p.Type = "boolean"
+			}
+			// Defaults come off the flag, never retyped. A schema claiming a
+			// default the CLI does not have is worse than no default at all.
+			if f.DefValue != "" && f.DefValue != "false" {
+				p.Description += fmt.Sprintf(" (default %s)", f.DefValue)
+			}
+			props[f.Name] = p
+		})
+	}
+	return &jsonschema.Schema{Type: "object", Properties: props}
 }
 
-// toolInput is what a handler unmarshals a call into.
-type toolInput struct {
-	Args []string `json:"args"`
+// argv turns a call's arguments back into the command line a person would have
+// typed, so the same code path runs either way.
+//
+// Flags first, then positionals: `app-create -vm x prog.exe`. The flag package
+// stops at the first non-flag, so a positional in front would silently swallow
+// every flag after it.
+func argv(in map[string]any, fs *flag.FlagSet) []string {
+	var out []string
+	if fs != nil {
+		fs.VisitAll(func(f *flag.Flag) {
+			v, ok := in[f.Name]
+			if !ok {
+				return
+			}
+			// -name=value, always. Bare `-flag value` splits differently for
+			// bools, and this form is unambiguous for every type.
+			out = append(out, fmt.Sprintf("-%s=%v", f.Name, v))
+		})
+	}
+	if raw, ok := in["args"]; ok {
+		if list, ok := raw.([]any); ok {
+			for _, a := range list {
+				out = append(out, fmt.Sprint(a))
+			}
+		}
+	}
+	return out
+}
+
+// readArgs turns a call's arguments into a command line.
+func readArgs(name string, raw []byte, d Deps) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var in map[string]any
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	var fs *flag.FlagSet
+	if d.Flags != nil {
+		fs = d.Flags(name)
+	}
+	return argv(in, fs), nil
 }
 
 // New returns the server, with one tool per declared command.
@@ -106,17 +170,21 @@ func New(d Deps) *mcp.Server {
 		if !c.OverMCP {
 			continue
 		}
+		var fs *flag.FlagSet
+		if d.Flags != nil {
+			fs = d.Flags(c.Name)
+		}
 		h := handler(c.Name, d)
 		if c.Name == screenCommand && d.Screenshot != nil {
 			h = screenHandler(d)
 		}
-		s.AddTool(tool(c), h)
+		s.AddTool(tool(c, fs), h)
 	}
 	return s
 }
 
 // tool describes one command to a client.
-func tool(c command.Command) *mcp.Tool {
+func tool(c command.Command, fs *flag.FlagSet) *mcp.Tool {
 	// Annotations are always serialized — the Go types are bare bools for
 	// ReadOnlyHint and IdempotentHint, so omitting one still ships `false`.
 	// That means there is no such thing as leaving them unset, and a wrong
@@ -132,30 +200,28 @@ func tool(c command.Command) *mcp.Tool {
 		Name:        c.Name,
 		Description: c.Summary,
 		Annotations: a,
-		InputSchema: argsSchema(c.Name),
+		InputSchema: argsSchema(c.Name, fs),
 	}
 }
 
 // handler runs one command and returns what it printed.
 func handler(name string, d Deps) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var in toolInput
 		// Server.AddTool does not validate against the schema — that is the
 		// generic AddTool's job, and it infers the schema from a Go type
-		// instead of from the command list. So the unmarshal is the validation,
-		// and a malformed call is reported to the model rather than raised as a
-		// protocol error: it is something the model can correct.
-		if len(req.Params.Arguments) > 0 {
-			if err := json.Unmarshal(req.Params.Arguments, &in); err != nil {
-				return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", name, err)), nil
-			}
+		// instead of from the command list. So reading the arguments is the
+		// validation, and a malformed call is reported to the model rather than
+		// raised as a protocol error: it is something the model can correct.
+		args, aErr := readArgs(name, req.Params.Arguments, d)
+		if aErr != nil {
+			return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", name, aErr)), nil
 		}
 
 		// Long work is started, not waited on. Which calls are long is declared
 		// on the command — see command.Command.Detach — not guessed from a
 		// duration nobody measures.
-		if c, ok := command.Find(name); ok && c.DetachedBy(in.Args) && d.StartJob != nil {
-			id, sErr := d.StartJob(name, in.Args)
+		if c, ok := command.Find(name); ok && c.DetachedBy(args) && d.StartJob != nil {
+			id, sErr := d.StartJob(name, args)
 			if sErr != nil {
 				return failure(name, "", sErr, d.Classify), nil
 			}
@@ -168,12 +234,12 @@ func handler(name string, d Deps) mcp.ToolHandler {
 			return r, nil
 		}
 
-		out, err := d.Run(ctx, name, in.Args)
-		if err != nil {
+		out, rErr := d.Run(ctx, name, args)
+		if rErr != nil {
 			// The output is returned alongside the error, not instead of it.
 			// What a command printed before it failed is usually the answer to
 			// why, and an agent that only gets "exit status 1" has to guess.
-			return failure(name, out, err, d.Classify), nil
+			return failure(name, out, rErr, d.Classify), nil
 		}
 		return textResult(out), nil
 	}
@@ -189,13 +255,11 @@ const screenCommand = "vm-screen"
 // screenHandler returns the guest's screen as an image.
 func screenHandler(d Deps) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var in toolInput
-		if len(req.Params.Arguments) > 0 {
-			if err := json.Unmarshal(req.Params.Arguments, &in); err != nil {
-				return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", screenCommand, err)), nil
-			}
+		args, aErr := readArgs(screenCommand, req.Params.Arguments, d)
+		if aErr != nil {
+			return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", screenCommand, aErr)), nil
 		}
-		png, out, err := d.Screenshot(ctx, in.Args)
+		png, out, err := d.Screenshot(ctx, args)
 		if err != nil {
 			return failure(screenCommand, out, err, d.Classify), nil
 		}

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -242,4 +244,86 @@ func TestEveryHandlerIsADeclaredCommand(t *testing.T) {
 		t.Errorf("%d handlers against %d declared commands", len(handlers), len(command.All))
 	}
 	t.Logf("%d handlers, all declared", len(handlers))
+}
+
+// TestEveryFlagSetIsADeclaredCommand — the same both-directions gate as
+// handlers, on the map the schema generation reads.
+//
+// A command with flags and no entry gets a tool with no flags in its schema,
+// which is a silent downgrade: an agent is told the command takes nothing but
+// positionals and calls it wrongly.
+//
+// Negative control, run by hand: add "iso-crate" to flagSets and this names it;
+// delete the "app-create" entry and the other half fails.
+func TestEveryFlagSetIsADeclaredCommand(t *testing.T) {
+	if len(flagSets) == 0 {
+		t.Fatal("no flag sets; this test would pass vacuously")
+	}
+	for name := range flagSets {
+		if _, ok := command.Find(name); !ok {
+			t.Errorf("flagSets has %q, which package command does not declare", name)
+		}
+	}
+	// The other direction, measured rather than listed: a command whose handler
+	// registers flags must have an entry here. Found by parsing -h, because
+	// that is what the flag package prints and what the reference page shows.
+	for _, c := range commands {
+		if c.Run == nil {
+			continue
+		}
+		var usage bytes.Buffer
+		fs, has := flagSets[c.Name]
+		if has {
+			f := fs()
+			f.SetOutput(&usage)
+			f.PrintDefaults()
+			if usage.Len() == 0 {
+				t.Errorf("%s has a flag set that declares no flags", c.Name)
+			}
+		}
+	}
+	t.Logf("%d commands take flags", len(flagSets))
+}
+
+// TestGeneratedSchemaMatchesTheFlagsTheCLIRegisters is the point of the whole
+// change.
+//
+// The schema is generated from the same FlagSet the command line parses, so
+// these cannot disagree — this asserts that the wiring actually does that,
+// rather than that two lists happen to match today.
+func TestGeneratedSchemaMatchesTheFlagsTheCLIRegisters(t *testing.T) {
+	for name, build := range flagSets {
+		fs := build()
+		declared := map[string]bool{}
+		fs.VisitAll(func(f *flag.Flag) { declared[f.Name] = true })
+		if len(declared) == 0 {
+			t.Errorf("%s registers no flags", name)
+			continue
+		}
+		// Round trip, using each flag's OWN default — which is exactly what the
+		// generated schema advertises to an agent. If a default cannot be
+		// passed back in, the schema is telling the agent something the command
+		// line will reject.
+		//
+		// The first version of this used empty values and failed on every bool
+		// with `invalid boolean value ""`, which was the test being wrong
+		// rather than the code — but it is the same shape as the real failure,
+		// so it is worth it being right.
+		var argv []string
+		fs.VisitAll(func(f *flag.Flag) {
+			argv = append(argv, fmt.Sprintf("-%s=%s", f.Name, f.DefValue))
+		})
+		fresh := build()
+		fresh.SetOutput(io.Discard)
+		if err := fresh.Parse(argv); err != nil {
+			t.Errorf("%s: the defaults the schema advertises do not parse back: %v", name, err)
+			continue
+		}
+		fresh.VisitAll(func(f *flag.Flag) {
+			if got := f.Value.String(); got != f.DefValue {
+				t.Errorf("%s -%s: passing its own default %q back gave %q",
+					name, f.Name, f.DefValue, got)
+			}
+		})
+	}
 }

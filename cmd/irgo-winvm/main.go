@@ -291,8 +291,7 @@ func reportJob(say func(string, ...any), s job.State) {
 // write status lines into the middle of the protocol stream. The captured text
 // becomes the tool's result, which is where an agent needs it anyway.
 func runMCP(args []string) error {
-	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	list := fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
+	fs := mcpFlags()
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage of mcp:\n"+
 			"  Serves the commands above to an agent over the Model Context Protocol,\n"+
@@ -302,7 +301,9 @@ func runMCP(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *list {
+	v := values{fs}
+	list := v.Bool("list")
+	if list {
 		// What the documentation is generated from. Printed by the binary so no
 		// tool name, description or annotation is ever transcribed — the same
 		// rule that makes the command reference trustworthy.
@@ -324,6 +325,15 @@ func mcpDeps() mcpserver.Deps {
 		Version:    version,
 		Classify:   exitCode,
 		Screenshot: screenshotForMCP,
+		// A fresh set each call: VisitAll reads defaults, and a set that had
+		// been parsed would report whatever the last call passed as the
+		// default for the next one.
+		Flags: func(name string) *flag.FlagSet {
+			if build, ok := flagSets[name]; ok {
+				return build()
+			}
+			return nil
+		},
 		Run: func(_ context.Context, name string, args []string) (string, error) {
 			c, ok := find(name)
 			if !ok || c.Run == nil {
@@ -436,29 +446,26 @@ func run(args []string) error {
 // run takes seconds — which matters because the two expensive stages are a
 // 4.2 GB download and a 45-minute install.
 func runVMCreate(args []string) error {
-	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
-	var (
-		name    = fs.String("vm", utmvm.DefaultVMName, "VM name")
-		install = fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
-		timeout = fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
-	)
+	fs := vmCreateFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	name, install, timeout := v.String("vm"), v.Bool("install"), v.Duration("timeout")
 	say := utmvm.Printer("vm-create")
 
 	// Same shape as iso-create: name every location first, then narrate each
 	// step before doing it. This is the command that can take 45 minutes, so
 	// silence here is the difference between waiting and wondering.
-	b, _ := utmvm.BundlePath(*name)
-	say("vm:     %s", *name)
+	b, _ := utmvm.BundlePath(name)
+	say("vm:     %s", name)
 	say("bundle: %s", utmvm.Home(b))
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
-		VMName:  *name,
-		Install: *install,
-		Timeout: *timeout,
+		VMName:  name,
+		Install: install,
+		Timeout: timeout,
 	}, func(line string) { say("%s", line) })
 	if err != nil {
 		return err
@@ -567,24 +574,24 @@ func runDoctor([]string) error {
 }
 
 func runVMDelete(args []string) error {
-	fs := flag.NewFlagSet("vm-delete", flag.ContinueOnError)
-	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
-	force := fs.Bool("force", false, "actually delete; without this it only lists")
+	fs := vmDeleteFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	name, force := v.String("vm"), v.Bool("force")
 	say := utmvm.Printer("vm-delete")
 
-	b, _ := utmvm.BundlePath(*name)
+	b, _ := utmvm.BundlePath(name)
 	say("STEP 1/2  the VM")
 	say("          %s", utmvm.Home(b))
 
-	e, fErr := utmvm.Find(*name)
+	e, fErr := utmvm.Find(name)
 	if fErr != nil {
-		say("          UTM knows no VM %q; nothing to delete", *name)
+		say("          UTM knows no VM %q; nothing to delete", name)
 		return nil
 	}
-	r, iErr := utmvm.InspectRemoval(*name)
+	r, iErr := utmvm.InspectRemoval(name)
 	if iErr != nil {
 		return iErr
 	}
@@ -595,14 +602,14 @@ func runVMDelete(args []string) error {
 	if r.Running {
 		say("          it is running and will be stopped first")
 	}
-	if !*force {
+	if !force {
 		return fmt.Errorf("%s of VM, and the Windows on it.\n"+
 			"  Reinstalling takes about 45 minutes. Pass -force to do it (%w)",
 			utmvm.HumanBytes(r.TotalBytes), errRefused)
 	}
 
 	say("STEP 2/2  deleting")
-	out, err := utmvm.Delete(*name, true, func(f string, a ...any) { say("          "+f, a...) })
+	out, err := utmvm.Delete(name, true, func(f string, a ...any) { say("          "+f, a...) })
 	if err != nil {
 		return err
 	}
@@ -613,19 +620,17 @@ func runVMDelete(args []string) error {
 // runAppCreate is the inner loop: build on the Mac, run on Windows, read output back.
 func runAppCreate(args []string) error {
 	say := utmvm.Printer("app-create")
-	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
-	timeout := fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
-	name := fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
-	gui := fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
-	user := fs.String("user", "dev", "guest account for -gui")
-	detach := fs.Bool("detach", false, "leave it running and return, instead of waiting for it to exit")
+	fs := appCreateFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *name == "" || fs.NArg() == 0 {
+	v := values{fs}
+	timeout, name, gui := v.Duration("timeout"), v.String("vm"), v.Bool("gui")
+	user, detach := v.String("user"), v.Bool("detach")
+	if name == "" || fs.NArg() == 0 {
 		return fmt.Errorf("%w: irgo-winvm app-create -vm <name> <local.exe> [args...]", errUsage)
 	}
-	e, err := utmvm.Find(*name)
+	e, err := utmvm.Find(name)
 	if err != nil {
 		return err
 	}
@@ -646,10 +651,10 @@ func runAppCreate(args []string) error {
 	say("binary: %s", local)
 	res, err := utmvm.AppCreate(e.UUID, local, utmvm.AppOptions{
 		Args:    fs.Args()[1:],
-		GUI:     *gui,
-		User:    *user,
-		Detach:  *detach,
-		Timeout: *timeout,
+		GUI:     gui,
+		User:    user,
+		Detach:  detach,
+		Timeout: timeout,
 		// The printer goes in, so the push, the launch and the wait are all
 		// visible and all logged. Without it the library half was silent and a
 		// run that hung recorded one line, "started", and nothing else.
@@ -669,7 +674,7 @@ func runAppCreate(args []string) error {
 	// Named here rather than in utmvm, which only ever sees the UUID: every
 	// command resolves the name to one before calling in, so a hint printed
 	// from in there tells you to run `-vm 38791348-ED91-...`.
-	if *detach {
+	if detach {
 		say("watch it with:    irgo-winvm vm-screen -vm %s", e.Name)
 		say("take it off with: irgo-winvm app-delete -vm %s %s", e.Name, filepath.Base(local))
 		return nil
@@ -694,22 +699,23 @@ func bundleOf(e utmvm.Entry) string {
 // any scratch files a run that did not finish left behind.
 func runAppDelete(args []string) error {
 	say := utmvm.Printer("app-delete")
-	fs := flag.NewFlagSet("app-delete", flag.ContinueOnError)
-	name := fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
+	fs := appDeleteFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	name := v.String("vm")
 	// Only reachable via an explicit `-vm ""`, since the flag defaults now.
-	if *name == "" {
+	if name == "" {
 		return fmt.Errorf("app-delete: -vm was given an empty name")
 	}
-	say("vm:     %s", *name)
+	say("vm:     %s", name)
 	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
-	e, err := utmvm.Find(*name)
+	e, err := utmvm.Find(name)
 	if err != nil {
 		// No VM means nothing was ever put on it. An undo that fails when
 		// there is nothing to undo cannot be run twice.
-		say("UTM knows no VM %q; nothing to delete", *name)
+		say("UTM knows no VM %q; nothing to delete", name)
 		return nil
 	}
 	if err := utmvm.AppDelete(e.UUID, func(f string, a ...any) { say("  "+f, a...) }, fs.Args()...); err != nil {
@@ -722,11 +728,12 @@ func runAppDelete(args []string) error {
 // runISOCreate gets the Windows media, which is the slowest and most rate-limited
 // step in `vm`. Separate so it can be done once and kept.
 func runISOCreate(args []string) error {
-	fs := flag.NewFlagSet("iso-create", flag.ContinueOnError)
-	fetch := fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if nothing local works")
+	fs := isoCreateFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	fetch := v.Bool("fetch")
 	// Elapsed time on every line. A multi-gigabyte download and an ISO build take
 	// minutes, and without this there is no way to tell a slow step from a
 	// stuck one — which is how a 77-second cached-media check went unnoticed.
@@ -752,7 +759,7 @@ func runISOCreate(args []string) error {
 	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
 	// ESD expansion; a hypervisor is not involved, and this used to run the
 	// whole setup chain — so fetching an ISO required UTM to be installed first.
-	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: *fetch}, say)
+	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: fetch}, say)
 	if err != nil {
 		return err
 	}
@@ -767,12 +774,12 @@ func runISOCreate(args []string) error {
 // runISODelete removes the media, which is protected on purpose, so it says so
 // rather than failing with EPERM.
 func runISODelete(args []string) error {
-	fs := flag.NewFlagSet("iso-delete", flag.ContinueOnError)
-	force := fs.Bool("force", false, "actually delete; without this it only lists")
-	all := fs.Bool("all", false, "also delete the .esd, the one thing that cannot be rebuilt")
+	fs := isoDeleteFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	force, all := v.Bool("force"), v.Bool("all")
 	say := utmvm.Printer("iso-delete")
 
 	// Everything that would go, listed as what it is — things about to be
@@ -783,7 +790,7 @@ func runISODelete(args []string) error {
 	var files []string
 	var bytes int64
 	wanted := utmvm.ISODerived()
-	if *all {
+	if all {
 		wanted = utmvm.ISOFiles()
 	}
 	for _, f := range wanted {
@@ -807,7 +814,7 @@ func runISODelete(args []string) error {
 	// The .esd is reported even when it is not being deleted: "what is on this
 	// machine" is the question, and a silent 4.2 GB is the answer nobody
 	// expects.
-	if !*all {
+	if !all {
 		if fi, err := os.Stat(utmvm.ISOSourcePath()); err == nil {
 			say("          %-9s %s  (kept — pass -all to delete it)",
 				utmvm.HumanBytes(fi.Size()), filepath.Base(utmvm.ISOSourcePath()))
@@ -846,7 +853,7 @@ func runISODelete(args []string) error {
 		say("          %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
 	}
 
-	if !*force {
+	if !force {
 		var what []string
 		if len(files) > 0 {
 			// Sidecars are not counted: they are 32 bytes of cache and saying
@@ -864,7 +871,7 @@ func runISODelete(args []string) error {
 		}
 		msg := strings.Join(what, " and ")
 		if len(files) > 0 {
-			if *all {
+			if all {
 				msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
 			} else {
 				// 40s, measured — see RESULTS.md. It said "about three minutes"
@@ -908,25 +915,24 @@ func runISODelete(args []string) error {
 // a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
 // exactly like a working one from the host.
 func runVMScreen(args []string) error {
-	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
-	name := fs.String("vm", utmvm.DefaultVMName, "VM name")
-	out := fs.String("o", "", "where to write the PNG (default: the shots directory)")
-	promote := fs.String("promote", "", "copy the newest shot of each stage into this directory, named for the stage")
+	fs := vmScreenFlags()
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	v := values{fs}
+	name, out, promote := v.String("vm"), v.String("o"), v.String("promote")
 	say := utmvm.Printer("vm-screen")
 
 	// Promoting takes no new picture. It publishes the ones the run already
 	// took, under stable names, because runtime shots are timestamped and
 	// nothing in a README can reference a filename that changes every boot.
-	if *promote != "" {
-		stages, err := utmvm.Promote(*promote)
+	if promote != "" {
+		stages, err := utmvm.Promote(promote)
 		if err != nil {
 			return err
 		}
 		say("from:   %s", utmvm.Home(utmvm.ShotDir()))
-		say("into:   %s", utmvm.Home(*promote))
+		say("into:   %s", utmvm.Home(promote))
 		for _, s := range stages {
 			say("  · %s.png", s)
 		}
@@ -941,10 +947,10 @@ func runVMScreen(args []string) error {
 	// headless identically — "no UTM window titled ..." — and exited 1 where
 	// app-create exits 3 for the same typo. A contract that holds for some
 	// commands is not one.
-	if _, err := utmvm.Find(*name); err != nil {
+	if _, err := utmvm.Find(name); err != nil {
 		return err
 	}
-	say("vm:     %s", *name)
+	say("vm:     %s", name)
 
 	// Into shots/, outside the repository, and timestamped.
 	//
@@ -953,8 +959,8 @@ func runVMScreen(args []string) error {
 	// tree dirty, and taking two in a row silently destroyed the first. Those
 	// two directories are not the same thing — docs/screens is evidence chosen
 	// to be kept, shots/ is every look at a running VM.
-	if *out == "" {
-		p, err := utmvm.Shot(*name, "vm-screen")
+	if out == "" {
+		p, err := utmvm.Shot(name, "vm-screen")
 		if err != nil {
 			return err
 		}
@@ -962,8 +968,8 @@ func runVMScreen(args []string) error {
 		say("written")
 		return nil
 	}
-	say("shot:   %s", utmvm.Home(*out))
-	if err := utmvm.Screenshot(*name, *out); err != nil {
+	say("shot:   %s", utmvm.Home(out))
+	if err := utmvm.Screenshot(name, out); err != nil {
 		return err
 	}
 	say("written")

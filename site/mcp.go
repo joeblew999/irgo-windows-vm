@@ -184,6 +184,17 @@ Starting the same command with the same arguments twice returns the job already
 running rather than beginning a second one — a client that timed out simply asks
 again, and two installs against one VM is the failure that would cause.
 
+## Has this been run for real?
+
+Yes, on 14 August 2026, from a real client against a real VM: nine tools listed,
+` + "`doctor`" + ` returned as a result, ` + "`vm-screen`" + ` returned a 4.4 MB PNG of a live
+Windows desktop, and ` + "`app-create`" + ` pushed a Go binary into Windows on ARM64 and
+brought its output back. The measurements are in [Results](results.html).
+
+One thing is still unproven: a **genuinely long** job. The detached path works
+and survives the client exiting, but the 45-minute ` + "`vm-create -install`" + ` it was
+written for has not been driven over MCP.
+
 ## What it does not do yet
 
 Remote access — the server over HTTP rather than stdin and stdout — is not

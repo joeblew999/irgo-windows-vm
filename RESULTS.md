@@ -1,5 +1,46 @@
 # Probe results
 
+## An agent drove the whole thing over MCP — verified 14 Aug 2026
+
+Everything below was measured by connecting a real MCP client to
+`irgo-winvm mcp` as a spawned subprocess, on this machine, against the VM that
+was already installed. Nothing here is from a test double.
+
+| call | what happened |
+|---|---|
+| connect | 9 tools listed |
+| `doctor` | the full report came back **as the tool result** |
+| `vm-screen` | a **4,447,777-byte PNG**, valid header, a live Windows 11 desktop |
+| `iso-create -fetch` | detached, returned job `iso-create-20260814-151113`, survived the client exiting |
+| `app-create probe.exe` | pushed and ran on **windows/arm64**: 5 capabilities OK, 3 missing, 12.7 s |
+
+The `doctor` row is the one that proves the design. Over stdio, stdout is the
+JSON-RPC channel, and every command in this tool announces its progress by
+printing. That whole report arriving as a *result* is what shows `utmvm.Capture`
+is doing its job — had a single line reached stdout, the client would have
+failed on a parse error instead.
+
+The screenshot was looked at, not just measured: Windows 11 logged in as `dev`,
+Start menu open, `unattend-complete` still in Recommended from the unattended
+install. That is the one thing no test can check, because the test would have to
+supply the pixels it is verifying.
+
+The `app-create` row is the point of the repository, reached from an agent: a Go
+binary cross-compiled on a Mac, pushed into real Windows on ARM64, run, and its
+answers returned. The three missing capabilities are missing upstream —
+`native/notify`, keychain and fswatch are planned, not built — and are not
+failures of this path.
+
+The job survived the client exiting, which is the property jobs exist for. Its
+log shows the real command running and stopping because the media was already
+there, so idempotency holds through the detached path too.
+
+**Not verified: a genuinely long job.** `iso-create -fetch` finished in under a
+second because the ISO was already built, and `vm-create -install` — the
+45-minute case jobs were written for — has not been run over MCP. What is proven
+is the mechanism, not the duration.
+
+
 ## A self-built ISO installs Windows — verified 12 Aug 2026
 
 ![Windows 11 installing from an ISO this repo built](docs/screens/vm/copying.png)

@@ -19,11 +19,23 @@ on:
 permissions:
   contents: read
 
+# A second push supersedes the first rather than queueing behind it.
+#
+# Without this, pushing three times in a minute ran three full checks of which
+# only the last mattered, and the last one started after the other two had
+# finished. Grouped per ref, so a pull request and main do not cancel each
+# other.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     # Both, because the code is macOS-only in what it DOES and cross-platform in
-    # what it must COMPILE to. Only ubuntu would miss a broken darwin build;
-    # only macOS would miss a macOS-only syscall with no counterpart elsewhere,
+    # what it must COMPILE to. macOS is not redundant: it is the only
+    # darwin/arm64 compile coverage, and utmvm/vm_delete_test.go and
+    # utmvm/iso_delete_test.go are `//go:build darwin`, so they run nowhere else.
+    # Only macOS would miss a macOS-only syscall with no counterpart elsewhere,
     # which broke the Linux build once and was invisible from a Mac.
     strategy:
       fail-fast: false
@@ -33,6 +45,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v4.2.4
+
+      # The Go build cache, which is most of the run.
+      #
+      # `go:check` compiles the root module for five GOOS/GOARCH pairs, and with
+      # a cold cache each one rebuilds the standard library and a 245-package
+      # dependency closure from scratch: measured at ~14s each, 60.8s of a 93s
+      # job, 62-65% of the whole thing.
+      #
+      # The proof was already in the logs. On ubuntu the linux/amd64
+      # cross-compile cost 4.08s while the other four cost ~14s — the only
+      # difference being that the host build had already warmed the cache for
+      # that one pair.
+      #
+      # Keyed on every go.sum in the repository; there are five modules, and a
+      # key covering only the root one would serve a stale cache whenever a
+      # sub-module's dependencies moved.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          # A near miss is worth far more than nothing here: the standard
+          # library does not change when a dependency does, so an older cache
+          # still saves most of the work.
+          restore-keys: go-${{ runner.os }}-
+
       - run: mise run go:check
 
   lint:
@@ -40,4 +80,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v4.2.4
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-lint-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-lint-${{ runner.os }}-
       - run: mise run go:lint

@@ -24,7 +24,9 @@ permissions:
   id-token: write
 
 # One deployment at a time, and let a running one finish. Cancelling a
-# half-finished deploy is how a site ends up serving a partial upload.
+# half-finished deploy is how a site ends up serving a partial upload — so this
+# stays false, even though check.yml cancels. The build job below is cheap and
+# the deploy is the part that must not be interrupted.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -38,6 +40,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v4.2.4
+
+      # site:build compiles the site module and, for the command reference, the
+      # CLI itself — both from a cold cache on every push. Same cache as check,
+      # different key prefix so the two do not overwrite each other's entries.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-site-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-site-${{ runner.os }}-
       # No `enablement: true` here, though the failure this workflow first hit
       # recommends it. It cannot work: enabling Pages is a CREATE against the
       # API, and the workflow's GITHUB_TOKEN is not allowed to do it whatever

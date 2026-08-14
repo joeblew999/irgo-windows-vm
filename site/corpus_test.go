@@ -378,3 +378,74 @@ func TestEveryPublishedScreenshotIsExplained(t *testing.T) {
 	// unconditionally and printed it underneath its own failure.
 	t.Logf("%d published screenshots, %d referenced", len(shots), len(shots)-orphans)
 }
+
+// Pictures, in both renderings. HTML is <img src="...">; the markdown the site
+// serves beside it keeps the ![alt](target) form, and the `!` is what separates
+// an image from an ordinary link.
+var (
+	htmlImage = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
+	mdImage   = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+)
+
+// TestEveryPictureOnAPageExists is the other direction, and it was open.
+//
+// TestEveryPublishedScreenshotIsExplained stops a picture being published with
+// nothing to explain it. Nothing stopped the reverse: a caption naming a file
+// that is not there. Deleting a screenshot leaves a broken image on the page and
+// every check green — the site's link check greps `href="..."` and an image is
+// `src="..."`, so no image on this site has ever been verified to resolve, in
+// either rendering.
+//
+// That is not hypothetical for this repository. Screenshots are published by
+// `mise run vm:shots`, which copies the newest shot of each stage; a stage that
+// stops happening keeps its last picture, but a stage renamed in the Go code
+// lands under the new name and the README goes on pointing at the old one.
+//
+// Checked against the published tree rather than docs/screens, so it measures
+// what a reader's browser would request, and it covers the markdown rendering
+// too — those pages are served, and a broken image is just as broken in them.
+//
+// Negative control, run by hand: `rm docs/screens/vm/ready.png` fails this and
+// names screens/vm/ready.png, in both index.html and index.md.
+func TestEveryPictureOnAPageExists(t *testing.T) {
+	out := buildToTemp(t)
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		var re *regexp.Regexp
+		switch {
+		case strings.HasSuffix(e.Name(), ".html"):
+			re = htmlImage
+		case strings.HasSuffix(e.Name(), ".md"):
+			re = mdImage
+		default:
+			continue
+		}
+		body := read(t, filepath.Join(out, e.Name()))
+		for _, m := range re.FindAllStringSubmatch(body, -1) {
+			ref := m[1]
+			// Anything the site does not serve itself is somebody else's to
+			// keep working; this is about files that should be in the output.
+			if strings.Contains(ref, "://") || strings.HasPrefix(ref, "//") ||
+				strings.HasPrefix(ref, "data:") {
+				continue
+			}
+			ref, _, _ = strings.Cut(ref, "#")
+			checked++
+			if _, sErr := os.Stat(filepath.Join(out, filepath.FromSlash(ref))); sErr != nil {
+				t.Errorf("%s shows an image at %s and the build published no such file", e.Name(), ref)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no local images were found on any page; this test would pass vacuously")
+	}
+	t.Logf("%d image references checked across both renderings", checked)
+}

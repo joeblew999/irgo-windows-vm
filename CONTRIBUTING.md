@@ -172,6 +172,13 @@ The checksums are reproducible: `mise run go:build` on the same tag produces
 byte-identical binaries, which is why `-buildvcs=false` is there. If you change
 the build, check that is still true rather than assuming it.
 
+It takes the version from the tag your checkout is on, because the version is
+compiled into the binary and so is part of those bytes. That sentence was false
+until v0.2.1 — CI passed `VERSION` and a maintainer running the same command by
+hand did not, so the local build said `dev` and hashed differently. A tree with
+uncommitted changes builds `<tag>-dirty`, since whatever you have not committed
+is not what was released.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE). A contribution is offered under it.

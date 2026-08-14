@@ -139,7 +139,22 @@ run = "go run ./cmd/irgo-winvm doctor"
 description = "Build irgo-winvm for every Mac a user could have"
 run = '''
 set -e
-V=${VERSION:-dev}
+# The version, from the tag this commit is, when nothing passed one.
+#
+# CI sets VERSION from the tag it is building. A maintainer checking what will
+# be published runs the same task by hand, got `dev`, and so got different bytes
+# — the version string is compiled in. Everything published said the checksums
+# were reproducible with this command; they were reproducible with
+# `VERSION=v0.2.0 mise run go:build`, which nothing said.
+#
+# --exact-match, so only a commit that *is* a release claims to be one. A commit
+# after the tag falls through to `dev` rather than claiming the tag below it.
+# --dirty is not available with it, which is why the tree check is separate:
+# uncommitted changes are not the release, whatever the tag says.
+V=${VERSION:-$(git describe --tags --exact-match HEAD 2>/dev/null || echo dev)}
+if [ "$V" != "dev" ] && [ -n "$(git status --porcelain)" ]; then
+  V="$V-dirty"
+fi
 OUT=${OUT:-dist}
 rm -rf "$OUT" && mkdir -p "$OUT"
 

@@ -160,6 +160,21 @@ VMs go where UTM keeps them, because UTM reads nowhere else. Committed
 screenshots — evidence chosen for documentation — are `docs/screens/`, kept
 apart from `shots/` so the record does not drown in the noise.
 
+In the tree, one rule decides the packages:
+
+| package | holds |
+|---|---|
+| `utmvm` | all three stages and everything they touch. **Do not split it** — iso, vm and app are coupled, and separating them means one reaching into another's paths |
+| `command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
+| `mcpserver` | the MCP surface, and **no behaviour of its own** |
+| `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
+
+`mcpserver` depends on `utmvm` and `command`; neither depends on it.
+Behaviour that exists only when driven over MCP is a second answer to a question
+already answered, and it is the one nobody tests — the cycle tests drive the
+CLI and so does a developer. If a tool needs logic, the logic goes in `utmvm`
+where both callers get it.
+
 It needs macOS on Apple Silicon, and UTM, which `vm-create` installs from its
 signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `iso-create` and removed by `iso-delete`, only when building media from scratch.

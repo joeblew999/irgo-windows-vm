@@ -154,6 +154,7 @@ One place, fixed, nothing to configure:
   bin/      binaries staged into a VM
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
+  jobs/     long-running work, so a 45-minute install survives a disconnect
 ```
 
 VMs go where UTM keeps them, because UTM reads nowhere else. Committed
@@ -167,6 +168,7 @@ In the tree, one rule decides the packages:
 | `utmvm` | all three stages and everything they touch. **Do not split it** — iso, vm and app are coupled, and separating them means one reaching into another's paths |
 | `command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `mcpserver` | the MCP surface, and **no behaviour of its own** |
+| `job` | work that outlives the caller that started it — a 45-minute install an MCP client cannot wait on. Not in `utmvm` because all three stages start such work, and whoever owns it must be able to report a **dead** process |
 | `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
 
 `mcpserver` depends on `utmvm` and `command`; neither depends on it.

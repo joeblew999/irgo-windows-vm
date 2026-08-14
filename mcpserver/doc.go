@@ -27,4 +27,25 @@
 // with them: the server depends on utmvm and on package command, and neither
 // depends on it. Dependencies run one way, as they already do for vm and app
 // over the ISO API.
+//
+// # The constraint that shapes the implementation
+//
+// Over stdio, **stdout is the protocol channel**. Every command in this tool
+// reports progress by printing — `utmvm.Printer` does `fmt.Printf` to stdout on
+// every step, which is the repository's own rule that a command saying nothing
+// for fifty seconds is indistinguishable from one that has hung. Run a command
+// in-process from a tool handler and that progress lands in the middle of the
+// JSON-RPC stream, and the client sees a parse error rather than a VM.
+//
+// This is why the server cannot simply call the CLI's handlers, and why it is
+// worth knowing before any of it is written rather than after the first
+// `vm-create` corrupts a session.
+//
+// The fix belongs in one place, not in the handlers: `utmvm.Printer` is the
+// single funnel — 65 call sites in package main all reach stdout through it —
+// so it grows a destination that defaults to os.Stdout, and a tool handler
+// points it at a buffer for the duration of the call. The buffer becomes the
+// tool's text result. The log append inside Printer is untouched, which is what
+// keeps an MCP-driven run in the same logs/ as a CLI run instead of starting a
+// second history.
 package mcpserver

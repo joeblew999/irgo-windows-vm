@@ -3,8 +3,11 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
 
 // TestHelpIsNotAnError covers the whole point of swallowing flag.ErrHelp: -h
@@ -123,5 +126,65 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		if _, ok := find(c.Undo); !ok {
 			t.Errorf("%s names %q as its undo, which is not a command", c.Name, c.Undo)
 		}
+	}
+}
+
+// TestExitCode covers the classification, one case per code.
+//
+// Every failure used to exit 1, so a script could not tell "the program I asked
+// you to run failed" from "that VM does not exist" from "the agent is busy" —
+// and the last is the one worth retrying. It matters here more than in most
+// tools because utmctl itself exits 0 on failure, so this CLI is the only
+// honest signal a caller gets.
+//
+// Wrapped errors, not bare sentinels, because that is what the call sites
+// produce and errors.Is has to see through fmt.Errorf's %w.
+//
+// Negative control, run by hand: reordering the switch so the ErrNoVM case sits
+// after the default fails the no-VM case; deleting the ErrNoAgent case makes it
+// return 1 and fails that one.
+func TestExitCode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil is success", nil, exitOK},
+		{"help is not a failure", fmt.Errorf("parsing: %w", flag.ErrHelp), exitOK},
+		{"an unclassified error is the guest's", errors.New("boom"), exitFailed},
+		{"the guest program failed", fmt.Errorf("probe.exe exited 3 in the guest"), exitFailed},
+		{"called wrongly", fmt.Errorf("%w: needs a binary", errUsage), exitUsage},
+		{"no such VM", fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"), exitNoVM},
+		{"agent not answering", fmt.Errorf("%w: busy", utmvm.ErrNoAgent), exitNoAgent},
+		{"refused without -force", fmt.Errorf("would delete things (%w)", errRefused), exitNeedForce},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := exitCode(tc.err); got != tc.want {
+				t.Errorf("exitCode(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExitCodesAreDistinct is the property that makes the contract worth
+// having: two different failures must not share a code, or a caller still
+// cannot tell them apart.
+func TestExitCodesAreDistinct(t *testing.T) {
+	seen := map[int]string{}
+	for _, c := range []struct {
+		name string
+		code int
+	}{
+		{"exitOK", exitOK},
+		{"exitFailed", exitFailed},
+		{"exitUsage", exitUsage},
+		{"exitNoVM", exitNoVM},
+		{"exitNoAgent", exitNoAgent},
+		{"exitNeedForce", exitNeedForce},
+	} {
+		if prev, dup := seen[c.code]; dup {
+			t.Errorf("%s and %s both exit %d", prev, c.name, c.code)
+		}
+		seen[c.code] = c.name
 	}
 }

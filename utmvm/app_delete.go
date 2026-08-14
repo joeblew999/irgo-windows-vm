@@ -39,8 +39,8 @@ func AppDelete(vmRef string, say func(string, ...any), binaries ...string) error
 	// del silently failed against a VM with no agent and the command said it
 	// had worked.
 	if !vm.AgentReady() {
-		return fmt.Errorf("utmvm: %s is not answering, so nothing on it can be removed\n"+
-			"  Start it, or run `irgo-winvm vm-create -install` if Windows is not on it yet", vmRef)
+		return fmt.Errorf("%w: %s, so nothing on it can be removed\n"+
+			"  Start it, or run `irgo-winvm vm-create -install` if Windows is not on it yet", ErrNoAgent, vmRef)
 	}
 	// Both prefixes, both directories. execPrefix files are normally removed by
 	// the call that made them; these globs catch the ones an interrupted run

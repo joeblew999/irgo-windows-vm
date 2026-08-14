@@ -21,10 +21,72 @@ import (
 // version is set at build time by go:build. 'dev' when built by hand.
 var version = "dev"
 
+// What this process exits with, and why each one is worth telling apart.
+//
+// Everything used to exit 1. So a script could not distinguish "the program I
+// asked you to run failed" from "that VM does not exist" from "the guest agent
+// is busy" — and the last of those is the one worth retrying, since Windows
+// Update takes the agent away for minutes at a time.
+//
+// It matters more here than in most tools because `utmctl` itself exits 0 on
+// failure, documented in AGENTS.md. This CLI is the only honest signal a caller
+// gets, so it had better say something.
+const (
+	exitOK = 0
+
+	// exitFailed is the guest program's own failure, and the default for
+	// anything not classified below. Its exit code is named in the message —
+	// it is not this process's status, because a guest exiting 3 and the VM
+	// being absent must not look the same.
+	exitFailed = 1
+
+	// exitUsage matches what the flag package uses for a malformed flag.
+	exitUsage = 2
+
+	exitNoVM      = 3
+	exitNoAgent   = 4
+	exitNeedForce = 5
+)
+
+// errRefused is a destructive command declining to act without -force.
+//
+// Not a failure of the machine — the tool did exactly what it should — but a
+// caller scripting a teardown needs to tell it from one, and both -force
+// refusals are raised here in the CLI rather than in utmvm.
+var errRefused = errors.New("refused without -force")
+
+// exitCode classifies an error for the shell.
+//
+// Sentinels, not string matching: these messages are written for people and get
+// reworded, and a classification that breaks silently when a sentence changes
+// is worse than none.
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, flag.ErrHelp):
+		return exitOK
+	case errors.Is(err, errRefused):
+		return exitNeedForce
+	case errors.Is(err, utmvm.ErrNoVM):
+		return exitNoVM
+	case errors.Is(err, utmvm.ErrNoAgent):
+		return exitNoAgent
+	case errors.Is(err, errUsage):
+		return exitUsage
+	default:
+		return exitFailed
+	}
+}
+
+// errUsage is the command being called wrongly — a missing argument, rather
+// than a malformed flag, which the flag package catches itself.
+var errUsage = errors.New("usage")
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -348,8 +410,8 @@ func runVMDelete(args []string) error {
 	}
 	if !*force {
 		return fmt.Errorf("%s of VM, and the Windows on it.\n"+
-			"  Reinstalling takes about 45 minutes. Pass -force to do it",
-			utmvm.HumanBytes(r.TotalBytes))
+			"  Reinstalling takes about 45 minutes. Pass -force to do it (%w)",
+			utmvm.HumanBytes(r.TotalBytes), errRefused)
 	}
 
 	say("STEP 2/2  deleting")
@@ -374,7 +436,7 @@ func runAppCreate(args []string) error {
 		return err
 	}
 	if *name == "" || fs.NArg() == 0 {
-		return fmt.Errorf("usage: irgo-winvm app-create -vm <name> <local.exe> [args...]")
+		return fmt.Errorf("%w: irgo-winvm app-create -vm <name> <local.exe> [args...]", errUsage)
 	}
 	e, err := utmvm.Find(*name)
 	if err != nil {
@@ -624,7 +686,7 @@ func runISODelete(args []string) error {
 					"  no network. Add -all to delete that too."
 			}
 		}
-		return fmt.Errorf("%s\n  Pass -force to do it", msg)
+		return fmt.Errorf("%s\n  Pass -force to do it (%w)", msg, errRefused)
 	}
 
 	say("STEP 3/3  deleting")
@@ -685,6 +747,16 @@ func runVMScreen(args []string) error {
 		return nil
 	}
 
+	// Resolved before photographing, only so a name that does not exist reports
+	// the same way here as everywhere else.
+	//
+	// Without it this named a VM that is absent and a VM that is running
+	// headless identically — "no UTM window titled ..." — and exited 1 where
+	// app-create exits 3 for the same typo. A contract that holds for some
+	// commands is not one.
+	if _, err := utmvm.Find(*name); err != nil {
+		return err
+	}
 	say("vm:     %s", *name)
 
 	// Into shots/, outside the repository, and timestamped.

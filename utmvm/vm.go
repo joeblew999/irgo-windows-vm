@@ -3,6 +3,7 @@ package utmvm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,24 @@ import (
 // typed: vm-create with no -vm made irgo-win11, and app-create with no -vm was
 // an error. -vm still overrides, for a disposable VM to test against.
 const DefaultVMName = "irgo-win11"
+
+// The two failures a caller can do something different about.
+//
+// Every failure used to reach the user as exit 1, so a script could not tell
+// "my program failed" from "the VM is not there" from "the agent is busy" —
+// and utmctl itself exits 0 on failure, which makes this CLI the only honest
+// signal there is. They are sentinels rather than string matches because the
+// messages are written for people and get reworded.
+var (
+	// ErrNoVM means UTM has no such VM. Usually a typo, or a bundle written
+	// while UTM was running: it only rescans at launch.
+	ErrNoVM = errors.New("no such VM")
+
+	// ErrNoAgent means the VM exists but its guest agent is not answering.
+	// Recoverable by waiting — Windows Update takes it away for minutes at a
+	// time — which is why it is worth telling apart from a VM that is absent.
+	ErrNoAgent = errors.New("guest agent not answering")
+)
 
 // The bundle layout, declared once.
 //
@@ -298,8 +317,8 @@ func (v VM) waitForAgentTicking(timeout, interval time.Duration, tick func()) er
 		}
 		time.Sleep(interval)
 	}
-	return fmt.Errorf("guest agent did not respond within %s — "+
-		"if the VM was created without guest tools it never will", timeout)
+	return fmt.Errorf("%w: did not respond within %s — "+
+		"if the VM was created without guest tools it never will", ErrNoAgent, timeout)
 }
 
 // Entry is one row of utmctl list.
@@ -341,7 +360,7 @@ func Find(ref string) (Entry, error) {
 			return e, nil
 		}
 	}
-	return Entry{}, fmt.Errorf("no VM named %q (restart UTM if it was just generated)", ref)
+	return Entry{}, fmt.Errorf("%w: %q (restart UTM if it was just generated)", ErrNoVM, ref)
 }
 
 // firstLine keeps error messages to one line; utmctl can be verbose.
@@ -562,11 +581,11 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 	// after 10m0s" while failing in under a second — that is the configured
 	// timeout, not a measurement, and it reads as though the tool had waited
 	// ten minutes and given up when it had asked once and returned.
-	return fmt.Errorf("%s is already running and its guest agent is not answering.\n"+
+	return fmt.Errorf("%w: %s is already running.\n"+
 		"  Not typing at it: a running VM may be a working desktop whose agent\n"+
 		"  is busy, and keystrokes meant for a boot prompt land in whatever has\n"+
 		"  focus. Look at the screenshot above, or run vm-screen.\n"+
-		"  The agent usually returns a minute or two after the desktop appears", vmRef)
+		"  The agent usually returns a minute or two after the desktop appears", ErrNoAgent, vmRef)
 }
 
 // utmContainerDir is UTM's sandbox container, where it keeps everything it

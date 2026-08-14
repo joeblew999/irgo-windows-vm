@@ -8,6 +8,7 @@ package mcpserver
 // seen UTM.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -318,5 +319,107 @@ func TestExactlyOneOutcomeIsRetryable(t *testing.T) {
 	if len(retryable) != 1 || retryable[0] != "no-agent" {
 		t.Errorf("retryable outcomes are %v; only no-agent should be, because it is the "+
 			"only one where waiting changes the answer", retryable)
+	}
+}
+
+// pngHeader is the first bytes of a real PNG, so the test asserts on something
+// a decoder would accept rather than on any old bytes.
+var pngHeader = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+// TestVMScreenReturnsThePicture is the tool that justifies the server.
+//
+// From the host a stuck boot and a working one look identical — that is why
+// vm-screen exists — and an agent cannot open a file path. A result that says
+// "written to ~/Library/.../shot.png" is useless to the caller that most needs
+// it, and over a remote transport the path is on a machine it cannot reach.
+//
+// Negative control, run by hand: return the path as text instead of the bytes
+// and this fails on the missing ImageContent.
+func TestVMScreenReturnsThePicture(t *testing.T) {
+	ctx := context.Background()
+	want := append(append([]byte{}, pngHeader...), []byte("pretend pixels")...)
+
+	server := New(Deps{
+		Version: "test",
+		Run:     func(context.Context, string, []string) (string, error) { return "", nil },
+		Screenshot: func(_ context.Context, args []string) ([]byte, string, error) {
+			return want, "shot: /tmp/x.png\n", nil
+		},
+	})
+	ct, st := mcp.NewInMemoryTransports()
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx, st) }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "t"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close(); <-done }()
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "vm-screen", Arguments: map[string]any{"args": []string{}}})
+	if err != nil {
+		t.Fatalf("calling vm-screen: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("vm-screen reported an error: %s", text(res))
+	}
+
+	var img *mcp.ImageContent
+	for _, c := range res.Content {
+		if ic, ok := c.(*mcp.ImageContent); ok {
+			img = ic
+		}
+	}
+	if img == nil {
+		t.Fatalf("no image in the result; the agent got %q and nothing to look at", text(res))
+	}
+	if img.MIMEType != "image/png" {
+		t.Errorf("mime type is %q", img.MIMEType)
+	}
+	// Compared after a round trip through the wire, where the SDK base64-encodes
+	// and decodes it — the encoding is exactly where an image gets corrupted.
+	if !bytes.Equal(img.Data, want) {
+		t.Errorf("the image came back as %d bytes, sent %d", len(img.Data), len(want))
+	}
+	if !bytes.HasPrefix(img.Data, pngHeader) {
+		t.Error("what arrived is not a PNG")
+	}
+	if !strings.Contains(text(res), "shot:") {
+		t.Error("the command's own output was dropped; it names where the file went on the host")
+	}
+}
+
+// TestPromoteReturnsNoPicture — -promote publishes shots already taken and
+// photographs nothing. A result claiming to show the screen when it shows a
+// copy operation is a lie the caller cannot detect.
+func TestPromoteReturnsNoPicture(t *testing.T) {
+	ctx := context.Background()
+	server := New(Deps{
+		Version: "test",
+		Run:     func(context.Context, string, []string) (string, error) { return "", nil },
+		Screenshot: func(_ context.Context, args []string) ([]byte, string, error) {
+			return nil, "2 stage(s) published\n", nil
+		},
+	})
+	ct, st := mcp.NewInMemoryTransports()
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx, st) }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "t"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close(); <-done }()
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "vm-screen", Arguments: map[string]any{"args": []string{"-promote", "docs/screens/vm"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range res.Content {
+		if _, ok := c.(*mcp.ImageContent); ok {
+			t.Error("-promote returned an image; it takes no picture")
+		}
+	}
+	if !strings.Contains(text(res), "published") {
+		t.Errorf("the output was lost: %q", text(res))
 	}
 }

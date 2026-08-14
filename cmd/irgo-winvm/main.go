@@ -159,6 +159,67 @@ func usageText() string { return command.UsageText() }
 
 func runVersion([]string) error { fmt.Println(version); return nil }
 
+// screenshotForMCP runs vm-screen and hands back the PNG itself.
+//
+// It runs the same handler the CLI runs — same flags, same VM resolution, same
+// errors — rather than reimplementing it, which is the rule mcpserver is built
+// on. What it adds is knowing where the file went, because the CLI only says so
+// in prose and prose is not an interface.
+//
+// The file is read and removed. An agent cannot open a path, and over a remote
+// transport the path is on a machine it has no access to; the bytes are the
+// answer. A caller that passes its own -o keeps the file, because then it asked
+// for one on purpose.
+func screenshotForMCP(_ context.Context, args []string) ([]byte, string, error) {
+	// -promote publishes shots already taken and photographs nothing, so there
+	// is no image to return and pretending otherwise would be a lie.
+	for _, a := range args {
+		if a == "-promote" || strings.HasPrefix(a, "-promote=") {
+			out, err := utmvm.Capture(func() error { return runVMScreen(args) })
+			return nil, out, err
+		}
+	}
+
+	dst, keep := explicitOutput(args)
+	if dst == "" {
+		f, err := os.CreateTemp("", "irgo-mcp-shot-*.png")
+		if err != nil {
+			return nil, "", err
+		}
+		dst = f.Name()
+		_ = f.Close()
+		args = append(append([]string{}, args...), "-o", dst)
+	}
+	if !keep {
+		defer func() { _ = os.Remove(dst) }()
+	}
+
+	out, err := utmvm.Capture(func() error { return runVMScreen(args) })
+	if err != nil {
+		return nil, out, err
+	}
+	png, err := os.ReadFile(dst)
+	if err != nil {
+		// The command reported success and produced no file. Saying so is the
+		// whole point of this repository's rule about checking.
+		return nil, out, fmt.Errorf("vm-screen reported success but wrote no readable PNG at %s: %w", dst, err)
+	}
+	return png, out, nil
+}
+
+// explicitOutput reports the -o the caller passed, if any.
+func explicitOutput(args []string) (path string, given bool) {
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "-o="); ok {
+			return v, true
+		}
+		if a == "-o" && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
 // runMCP serves the commands to an agent.
 //
 // The handler each tool calls is the same function this program dispatches to,
@@ -182,8 +243,9 @@ func runMCP(args []string) error {
 		return err
 	}
 	return mcpserver.Serve(context.Background(), mcpserver.Deps{
-		Version:  version,
-		Classify: exitCode,
+		Version:    version,
+		Classify:   exitCode,
+		Screenshot: screenshotForMCP,
 		Run: func(_ context.Context, name string, args []string) (string, error) {
 			c, ok := find(name)
 			if !ok || c.Run == nil {

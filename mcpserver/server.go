@@ -35,6 +35,18 @@ type Deps struct {
 	// with. Injected for the same reason as Run: the error sentinels live with
 	// the code that raises them.
 	Classify func(error) command.Code
+
+	// Screenshot runs vm-screen and returns the PNG itself.
+	//
+	// The CLI writes a file and prints where it went, which is the right
+	// answer for a person sitting at the machine and useless to an agent: it
+	// cannot open a path, and over a remote transport the path is on someone
+	// else's disk. So the bytes come back and go into the result as an image.
+	//
+	// This is the most valuable thing the server offers. From the host a stuck
+	// boot and a working one are identical — that is why vm-screen exists at
+	// all — and doubly so for a caller that cannot look at a screen.
+	Screenshot func(ctx context.Context, args []string) (png []byte, output string, err error)
 }
 
 // argsSchema is the input every tool takes: the command line, as an array.
@@ -87,7 +99,11 @@ func New(d Deps) *mcp.Server {
 		if !c.OverMCP {
 			continue
 		}
-		s.AddTool(tool(c), handler(c.Name, d))
+		h := handler(c.Name, d)
+		if c.Name == screenCommand && d.Screenshot != nil {
+			h = screenHandler(d)
+		}
+		s.AddTool(tool(c), h)
 	}
 	return s
 }
@@ -136,6 +152,39 @@ func handler(name string, d Deps) mcp.ToolHandler {
 			return failure(name, out, err, d.Classify), nil
 		}
 		return textResult(out), nil
+	}
+}
+
+// screenCommand is the one command whose result is a picture.
+//
+// Named rather than inferred: there is no property of a command that says "this
+// produces an image", and inventing one for a single case would be a field
+// every other command carries to say `false`.
+const screenCommand = "vm-screen"
+
+// screenHandler returns the guest's screen as an image.
+func screenHandler(d Deps) mcp.ToolHandler {
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in toolInput
+		if len(req.Params.Arguments) > 0 {
+			if err := json.Unmarshal(req.Params.Arguments, &in); err != nil {
+				return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", screenCommand, err)), nil
+			}
+		}
+		png, out, err := d.Screenshot(ctx, in.Args)
+		if err != nil {
+			return failure(screenCommand, out, err, d.Classify), nil
+		}
+		if len(png) == 0 {
+			// -promote publishes shots already taken and photographs nothing.
+			// Reporting "here is the screen" with no screen would be a lie the
+			// caller cannot detect.
+			return textResult(out), nil
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{
+			&mcp.TextContent{Text: out},
+			&mcp.ImageContent{Data: png, MIMEType: "image/png"},
+		}}, nil
 	}
 }
 

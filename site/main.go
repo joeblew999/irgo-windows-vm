@@ -64,7 +64,7 @@ var pages = []struct {
 	{"README.md", "index.html", "irgo-windows-vm", "What it is and what it is for"},
 	{"RESULTS.md", "results.html", "Results", "What has been measured, dated"},
 	{"UPSTREAM.md", "upstream.html", "Upstream", "What was found, and where it was fixed"},
-	{"AGENTS.md", "agents.html", "Working on it", "How the code is organised, and every trap that cost hours"},
+	{"AGENTS.md", "agents.html", "Agents", "How the code is organised, and every trap that cost hours"},
 	{"CONTRIBUTING.md", "contributing.html", "Contributing", "Setup, what to run, how to land a change"},
 
 	// Generated, not read from disk. Src is empty and reference.go builds the

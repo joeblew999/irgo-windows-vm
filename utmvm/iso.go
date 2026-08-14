@@ -830,7 +830,7 @@ func ISOFiles() []string {
 }
 
 // ISODerived is what `iso-create` can rebuild without the network: the mastered
-// ISO and its scan sidecar. About three minutes from the .esd.
+// ISO and its scan sidecar. About 40 seconds from the .esd, measured.
 func ISODerived() []string {
 	var out []string
 	for _, f := range []string{isoPath(), isoBuiltPath()} {
@@ -846,7 +846,7 @@ func ISOSourcePath() string { return isoESDPath() }
 // ISOSource is what cannot be rebuilt: the .esd Microsoft served.
 //
 // Kept apart from the derived files because losing it means 4.2 GB from a
-// source that rate-limits, while losing the ISO means three minutes of local
+// source that rate-limits, while losing the ISO means about 40 seconds of local
 // work. Deleting both on one flag priced them the same.
 func ISOSource() []string {
 	// No sidecar: an .esd is never scanned for architecture, so listing one

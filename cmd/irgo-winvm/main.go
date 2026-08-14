@@ -197,12 +197,16 @@ func runCommands([]string) error {
 // story — and putting the story in front of the first group buries the list
 // they were looking for.
 func runHelp([]string) error {
-	fmt.Print(`irgo-winvm — build a Go program on your Mac, run it on real Windows.
+	// The download size is asked for, not typed in. It is a constant in utmvm
+	// that iso-create's own -fetch usage already reports, and this text carried
+	// a second hand-written copy of it — the same number in two places, which is
+	// how one of them ends up stale.
+	fmt.Printf(`irgo-winvm — build a Go program on your Mac, run it on real Windows.
 
 Three steps, in this order. Each one is cheap to repeat: if it is already
 done, it says so and stops.
 
-  1  iso-create   get the Windows installer (4.2 GB from Microsoft, or
+  1  iso-create   get the Windows installer (%s from Microsoft, or
                   built locally from an .esd you already have)
   2  vm-create    make a VM and install Windows on it (about 45 minutes,
                   unattended — you do not click anything)
@@ -226,7 +230,7 @@ in probe/ and glaze-probes/ are examples of that, and what this repository
 uses to find out what breaks in glaze and native on Windows.
 
 Every command takes -h for its flags.
-`)
+`, utmvm.ISODownloadSize())
 	return nil
 }
 
@@ -261,7 +265,7 @@ func run(args []string) error {
 	return nil
 }
 
-// runSetup is the one command a new developer runs.
+// runVMCreate is the one command a new developer runs.
 //
 // Everything it does was already possible as eight separate calls in an order
 // you had to know, with a UTM restart in the middle that nobody discovers
@@ -423,7 +427,7 @@ func runVMDelete(args []string) error {
 	return nil
 }
 
-// runRun is the inner loop: build on the Mac, run on Windows, read output back.
+// runAppCreate is the inner loop: build on the Mac, run on Windows, read output back.
 func runAppCreate(args []string) error {
 	say := utmvm.Printer("app-create")
 	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
@@ -503,7 +507,7 @@ func bundleOf(e utmvm.Entry) string {
 	return p
 }
 
-// runRunDelete removes what `run` put on the guest: the binaries it pushed and
+// runAppDelete removes what `app-create` put on the guest: the binaries it pushed and
 // any scratch files a run that did not finish left behind.
 func runAppDelete(args []string) error {
 	say := utmvm.Printer("app-delete")
@@ -532,7 +536,7 @@ func runAppDelete(args []string) error {
 	return nil
 }
 
-// runISO gets the Windows media, which is the slowest and most rate-limited
+// runISOCreate gets the Windows media, which is the slowest and most rate-limited
 // step in `vm`. Separate so it can be done once and kept.
 func runISOCreate(args []string) error {
 	fs := flag.NewFlagSet("iso-create", flag.ContinueOnError)

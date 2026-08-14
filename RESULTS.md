@@ -4,7 +4,7 @@
 
 ![Windows 11 installing from an ISO this repo built](docs/screens/vm/copying.png)
 
-That is UTM, booted from an ISO mastered by `irgo-winvm build-iso`, installing
+That is UTM, booted from an ISO mastered by `irgo-winvm iso-create`, installing
 unattended. It settles every open question about replacing CrystalFetch:
 
 | question | answer |
@@ -49,7 +49,7 @@ rather than quietly restarting. A cold boot for comparison was **59 seconds**,
 and additionally has to be driven through the UEFI shell with eight keypresses —
 which needs an unlocked Mac and a visible display window.
 
-`irgo-winvm setup` resumes a suspended VM rather than rebooting it, so the
+`irgo-winvm vm-create` resumes a suspended VM rather than rebooting it, so the
 idempotent path is the fast one.
 
 **The state is in memory** and does not survive quitting UTM. The durable
@@ -106,7 +106,7 @@ zero sockets, this is a genuine SSE substitute for a desktop app — relevant
 because glaze's `SchemeResponse` is a buffered `[]byte` on the UI thread and so
 cannot stream SSE itself.
 
-## Windows ARM64 — MEASURED (native capabilities)
+## Windows ARM64 — MEASURED (native capabilities), 12 Aug 2026
 
 Host: Apple M2 Pro / UTM 4.7.5, guest Windows 11 ARM64 build 26100, run headless
 through the QEMU guest agent — no GUI, no keystrokes, no screen.
@@ -123,8 +123,11 @@ args: [alpha beta]
 `GOOS=windows GOARCH=arm64` and **no toolchain at all** — which is what cgo-free
 buys, and what irgo cannot currently do because mingw pins it to amd64.
 
-Exit codes propagate: a binary exiting 3 fails the command rather than passing
-silently.
+A failing guest binary fails the command. The host does **not** exit with the
+guest's code — a binary exiting 3 exits `app-create` **1**, with "exited 3 in
+the guest" in the message. The two must not look alike, because a missing VM
+exits 3 and a busy guest agent exits 4; see the contract in
+[README.md](README.md).
 
 ### Native capabilities — windows/arm64, native
 
@@ -168,7 +171,7 @@ This is the first time the whole native surface has been run together on
 Windows — not in this repo, not in glaze's examples, and not in
 `crgimenes/native`, all of which test one capability per binary.
 
-### glaze probes — MEASURED
+### glaze probes — MEASURED, 12 Aug 2026
 
 Both ran on Windows 11 ARM64 via `irgo-winvm app-create -gui`. This closes the
 project's stated goal: everything glaze does is now measured on both platforms.
@@ -206,19 +209,9 @@ This is exactly the class of bug the project was built to find: invisible from a
 Mac, invisible in glaze's own CI (`windows-latest` is x64 and has no ARM64
 desktop), and silent when it happens.
 
-### The earlier blocker, for the record
+### Two constraints learned getting there
 
-`verify` and `verifyevents` — the `app://` scheme and the Events bridge — have
-still not been run on Windows. Both open a WebView2 window, and that is where
-this originally stopped: the VM rebooted itself mid-session (Windows Update,
-disk grew 14 → 27 GB), dropping the agent with `Port is not connected`.
-
-The blocker itself is gone. `glaze-all` above opens a WebView2 window in the
-VM and drives a native file dialog through it, so WebView2 works on ARM64 and
-`-gui` reaches the interactive session. What remains is to run the two probes
-and record what they print — `irgo-winvm app-create -gui` does the last.
-
-Two constraints learned in the attempt, both now understood rather than guessed:
+Both were guessed at first, then understood:
 
 - **The guest agent runs without a desktop session.** A GUI app started through
   it has no window station, so the glaze probes need launching into the
@@ -228,16 +221,11 @@ Two constraints learned in the attempt, both now understood rather than guessed:
   strongest argument for suspend/resume: resuming restores RAM and never reaches
   the firmware, so it needs no keystrokes and works locked.
 
-## Windows ARM64 — the claims still unverified
+## The unattended install — verified 11 Aug 2026
 
-An unattended install completed on 11 Aug 2026: Windows 11 ARM64 (build 26100)
-reached a logged-in desktop as `dev` with no interaction after the boot command.
-That proves the answer file, the disk layout, the display device and the boot
-path. The probes themselves have not produced a report yet — the host locked
-before the run finished, and driving the guest needs the screen unlocked while
-the VM has no guest agent.
-
-### What the install proved
+Windows 11 ARM64 (build 26100) reached a logged-in desktop as `dev` with no
+interaction after the boot command. That proves the answer file, the disk
+layout, the display device and the boot path:
 
 | claim | status |
 |---|---|
@@ -245,29 +233,29 @@ the VM has no guest agent.
 | answer file is read and applied | **yes** — GPT layout matched `DiskConfiguration` exactly |
 | `virtio-ramfb-gl` display works | **yes** — Setup and desktop both render |
 | NVMe system disk is visible to Setup | **yes** |
-| glaze runs on Windows | **not yet measured** |
+| glaze runs on Windows | **yes** — measured 12 Aug, above |
 
-## Windows ARM64 — outstanding
+## Still to measure: x64 under emulation
 
-Pending a working VM. These are the claims that **cannot** be checked on a Mac
-and are the whole reason for the VM:
+One claim from the original list is genuinely unanswered. Every Windows result
+in this file is ARM64-native; nothing here has been run as an amd64 build under
+emulation.
 
-- **The undocumented WebView2 export.** glaze calls
-  `CreateWebViewEnvironmentWithOptionsInternal` directly to avoid shipping
-  `WebView2Loader.dll`. Microsoft documents that it may change or be removed.
-  Both glaze probes exercise it on first `New()`.
-- **The hand-written ARM64 ABI code.** `putbounds_arm64.go` passes a 16-byte
-  RECT in two registers per AAPCS64, versus by hidden reference on amd64.
-  glaze's CI runs `windows-latest`, which is x64 — so this code is compiled but
-  never executed anywhere.
-- **Native capabilities on their best-covered platform.** Windows has
-  implementations for 7 of 8 packages, more than macOS or Linux.
 - **x64-under-emulation behaviour.** Whether an amd64 build behaves identically
-  on ARM Windows decides if Mac-local testing has any fidelity at all, or
+  on ARM Windows decides whether Mac-local testing has any fidelity at all, or
   whether x64 testing must live on x86 hardware.
 
-Run with `probe/run-all.cmd` from the payload image; it writes one report to the
-Desktop covering ARM64-native and x64-emulated for every probe.
+The tooling for it exists — `probe/run-probe.cmd` runs the ARM64-native and the
+x64-emulated build in turn — so what is missing is the run and the record of it,
+not the means. Last evidence gathered 13 Aug 2026, all of it ARM64.
+
+One further item is **exercised but not recorded**. glaze's hand-written ARM64
+ABI code (`putbounds_arm64.go`, a 16-byte RECT passed in two registers per
+AAPCS64 rather than by hidden reference as on amd64) is necessarily executed by
+every `-gui` run above, since a window cannot be positioned without it. No run
+has been made that reports on it specifically, so this file does not claim one
+way or the other.
+
 
 ## Still open
 
@@ -277,7 +265,7 @@ Everything the plan files tracked is done and measured above. What is left:
   not survive quitting UTM. The blocker is the emulated NVMe device, and NVMe is
   not optional — Windows ARM64 Setup has no inbox VirtIO storage driver. Getting
   past it means switching the system disk to VirtIO and injecting the driver
-  into `boot.wim`, which is now reachable because `build-iso` already drives
+  into `boot.wim`, which is now reachable because `iso-create` already drives
   wimlib over the media.
 - **`Delete` safety.** It removes files 30 seconds after asking QEMU to stop,
   whether or not it actually did. (`Prune` was the worse half of this and is

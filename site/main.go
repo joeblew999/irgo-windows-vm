@@ -82,6 +82,11 @@ var pages = []struct {
 	// what does not exist yet is the point of one.
 	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one thing not yet verified"},
 
+	// Written before the HTTP transport exists. In docs/ for the same reason as
+	// the roadmap: it names commands in the context of what an attacker could
+	// call, which is not the same as telling a reader to run them.
+	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "Threat model", "What someone who reaches the HTTP port can do"},
+
 	// Generated, not read from disk. Src is empty and reference.go builds the
 	// markdown by running the binary — see generateReference.
 	{"", "reference.html", "Commands", "Commands", "Every command and every flag, captured from the binary"},

@@ -137,11 +137,12 @@ ship one.
    Concurrent mutation is refused with a result that says so — never serialised
    silently, never interleaved. A lock whose state cannot be read refuses by
    default, because "cannot tell" is not "safe".
-5. **The threat model, written down.** One paragraph: what someone who reaches
-   this port can do. It is short and unpleasant, which is the point. Prefer no
-   inbound listener at all — Cloudflare Tunnel or Tailscale puts identity at the
-   edge and lets the server keep binding loopback; document that as the
-   recommendation and the open port as the fallback.
+5. **The threat model** — **written, before the port exists**:
+   [Threat model](threat-model.html). It names what an authenticated caller
+   gets, what is defended and how, and what is deliberately not defended. The
+   recommendation is no inbound listener at all: Cloudflare Tunnel or Tailscale
+   puts identity at the edge and keeps the server on loopback. The open port is
+   the fallback, not the plan.
 
 ---
 

@@ -238,3 +238,55 @@ func TestEveryAnchorResolves(t *testing.T) {
 	}
 	t.Logf("%d fragment links checked across %d pages", checked, len(htmlFiles))
 }
+
+// collapse turns rendered HTML into one line of text, so an assertion about a
+// sentence does not depend on where the template happened to wrap it.
+func collapse(html string) string {
+	text := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(html, " ")
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// TestFooterNamesTheRealSource is the check that would have caught the footer
+// telling five pages the truth and one page a lie.
+//
+// Every page used to carry "Generated from the markdown in the repository — if
+// this page is wrong, the markdown is wrong". On the command reference that is
+// false: it has no source file, it is captured from the binary, and the same
+// page's own body says so a few paragraphs above the footer. A reader who found
+// a wrong default was being sent to edit a file that does not exist.
+//
+// Nothing caught it because the page rendered, the sentence read well, and it
+// was wrong on exactly one page out of six.
+//
+// Negative control, run by hand: removing the {{if .Source}} branch so every
+// page gets the file-backed sentence fails this on reference.html; making every
+// page get the binary sentence fails it on the other five.
+func TestFooterNamesTheRealSource(t *testing.T) {
+	out := buildToTemp(t)
+	const capturedClaim = "Captured from the compiled binary at build time"
+
+	for _, p := range pages {
+		t.Run(p.Out, func(t *testing.T) {
+			footer := collapse(read(t, filepath.Join(out, p.Out)))
+
+			if p.Src == "" {
+				if !strings.Contains(footer, capturedClaim) {
+					t.Errorf("%s has no source file, but its footer does not say it was captured from the binary", p.Out)
+				}
+				// The specific lie: telling a reader of a generated page that
+				// markdown is what to fix.
+				if strings.Contains(footer, "Generated from") {
+					t.Errorf("%s is generated from the binary, but its footer claims it came from a markdown file", p.Out)
+				}
+				return
+			}
+
+			if !strings.Contains(footer, "Generated from "+p.Src) {
+				t.Errorf("%s comes from %s, and its footer does not name it", p.Out, p.Src)
+			}
+			if strings.Contains(footer, capturedClaim) {
+				t.Errorf("%s comes from %s, but its footer claims it was captured from the binary", p.Out, p.Src)
+			}
+		})
+	}
+}

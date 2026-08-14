@@ -449,3 +449,65 @@ func TestEveryPictureOnAPageExists(t *testing.T) {
 	}
 	t.Logf("%d image references checked across both renderings", checked)
 }
+
+var headerBlock = regexp.MustCompile(`(?s)<header\b.*?</header>`)
+
+// link captures destination and text together, which is the pair that matters.
+var headerLink = regexp.MustCompile(`<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
+
+// TestHeaderHasNoDuplicateLinks closes the class the doubled wordmark was in.
+//
+// The header showed "irgo-windows-vm" twice on every page — the wordmark, then
+// the nav entry generated from the index page — both pointing at index.html.
+// Two links, same accessible name, same destination, adjacent. It survived
+// because the wordmark is written in the template and the nav is generated in
+// Go, so neither half looks wrong where it is written; you only see it in the
+// rendered output, and nothing rendered the header and read it.
+//
+// The rule is the general one rather than a check for that string: no two links
+// in a header may agree on both destination and text. A page added later with a
+// nav label matching the wordmark fails the same way.
+//
+// Destination and text together, not either alone. Two links to the same file
+// under different names are ordinary and useful — "Commands" in the nav and a
+// "command reference" link in the prose. Two links with the same name to
+// different files are also fine. It is the pair that is a mistake.
+//
+// Negative control, run by hand: giving README.md's row a nav label again fails
+// this on all six pages, naming index.html and the repeated text.
+func TestHeaderHasNoDuplicateLinks(t *testing.T) {
+	out := buildToTemp(t)
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pagesChecked, linksChecked := 0, 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		header := headerBlock.FindString(read(t, filepath.Join(out, e.Name())))
+		if header == "" {
+			t.Errorf("%s has no <header>; every page is supposed to carry one", e.Name())
+			continue
+		}
+		pagesChecked++
+
+		seen := map[string]bool{}
+		for _, m := range headerLink.FindAllStringSubmatch(header, -1) {
+			href, text := m[1], strings.TrimSpace(m[2])
+			linksChecked++
+			key := href + "\x00" + text
+			if seen[key] {
+				t.Errorf("%s: the header links to %s as %q twice — one of them is redundant",
+					e.Name(), href, text)
+			}
+			seen[key] = true
+		}
+	}
+	if pagesChecked == 0 || linksChecked == 0 {
+		t.Fatal("no header links were found; this test would pass vacuously")
+	}
+	t.Logf("%d links across %d headers, none duplicated", linksChecked, pagesChecked)
+}

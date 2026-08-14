@@ -21,6 +21,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"strings"
 )
@@ -35,6 +36,8 @@ type corpusEntry struct {
 const (
 	corpusIndex = "llms.txt"
 	corpusFull  = "llms-full.txt"
+	sitemapFile = "sitemap.xml"
+	robotsFile  = "robots.txt"
 )
 
 // indexPage is the corpus entry for the site's front page.
@@ -145,4 +148,68 @@ func summaryFrom(readme []byte) string {
 		return s
 	}
 	return ""
+}
+
+// renderSitemap lists every published URL, from the same entries as everything
+// else.
+//
+// This is the standard machine-readable manifest and crawlers already look for
+// it — the alternative considered was a bespoke JSON schema, which would have
+// been a fourth rendering of one list that nothing consumes.
+//
+// The corpus files are listed alongside the pages deliberately. A crawler that
+// reads a sitemap and does not know the llms.txt convention still finds them.
+//
+// No <lastmod>. It is optional, and the only source available here is the file
+// mtime — which a fresh CI checkout sets to clone time, so every page would
+// claim to have changed on every build. A field that is always wrong is worse
+// than one that is absent.
+func renderSitemap(entries []corpusEntry, base string) []byte {
+	var b bytes.Buffer
+	b.WriteString(xml.Header)
+	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "  <url><loc>%s</loc></url>\n", escapeXML(base+e.Out))
+	}
+	for _, f := range []string{corpusIndex, corpusFull} {
+		fmt.Fprintf(&b, "  <url><loc>%s</loc></url>\n", escapeXML(base+f))
+	}
+	b.WriteString("</urlset>\n")
+	return b.Bytes()
+}
+
+// renderRobots allows everything and says where the rest is.
+//
+// The comment naming the corpus is the point of the file as much as the
+// Sitemap line is: asked how to read these docs, a capable model recommended
+// scraping raw markdown from GitHub, because nothing published here told it
+// there was a better route. robots.txt is one of the two places anything
+// looking for that route will check.
+func renderRobots(base string) []byte {
+	var b bytes.Buffer
+	b.WriteString("# Documentation for irgo-windows-vm. Everything here is public.\n")
+	b.WriteString("#\n")
+	b.WriteString("# Reading this with a machine? Two files are meant for you:\n")
+	fmt.Fprintf(&b, "#   %s%s\n", base, corpusIndex)
+	fmt.Fprintf(&b, "#     an index of every page, one line each\n")
+	fmt.Fprintf(&b, "#   %s%s\n", base, corpusFull)
+	fmt.Fprintf(&b, "#     the whole documentation in one request\n")
+	b.WriteString("#\n")
+	b.WriteString("# Prefer those over fetching the markdown from the repository: the command\n")
+	b.WriteString("# reference is captured from the binary at build time and has no source file,\n")
+	b.WriteString("# so the raw-markdown route silently omits it.\n\n")
+	b.WriteString("User-agent: *\n")
+	b.WriteString("Allow: /\n\n")
+	fmt.Fprintf(&b, "Sitemap: %s%s\n", base, sitemapFile)
+	return b.Bytes()
+}
+
+// escapeXML is the small subset a <loc> needs. The URLs here are built from a
+// flag and a set of filenames we choose, so this is belt and braces rather than
+// untrusted input — but a & in a base URL would otherwise produce a sitemap
+// that no parser accepts.
+func escapeXML(s string) string {
+	var b bytes.Buffer
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }

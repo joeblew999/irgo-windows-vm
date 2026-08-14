@@ -259,8 +259,16 @@ func build(root, out, repo, siteURL string) error {
 	if err := os.WriteFile(filepath.Join(out, corpusIndex), renderCorpusIndex(corpus, base, summary), 0o644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(out, sitemapFile), renderSitemap(corpus, base), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(out, robotsFile), renderRobots(base), 0o644); err != nil {
+		return err
+	}
 	fmt.Printf("  %-18s <- %d pages, one file\n", corpusFull, len(corpus))
-	fmt.Printf("  %-18s <- the same list\n", corpusIndex)
+	for _, f := range []string{corpusIndex, sitemapFile, robotsFile} {
+		fmt.Printf("  %-18s <- the same list\n", f)
+	}
 
 	// Tells GitHub Pages not to run Jekyll over the output. Without it, Pages
 	// ignores any file or directory whose name starts with an underscore, which

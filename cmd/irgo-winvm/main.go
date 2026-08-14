@@ -528,6 +528,26 @@ func runDoctor([]string) error {
 		add(r.Name, state, utmvm.Home(r.Path))
 	}
 
+	// Jobs are reported here rather than in utmvm.Records, because package job
+	// imports utmvm and the reverse would be a cycle. Reported at all because
+	// the directory grows on its own — one record and one log per detached run
+	// — and a directory that grows should be visible before it is a problem.
+	// The size is what is kept after pruning, not what was ever written.
+	jobState := "none yet"
+	if n, err := job.All(); err == nil && len(n) > 0 {
+		running := 0
+		for _, j := range n {
+			if j.Alive {
+				running++
+			}
+		}
+		jobState = utmvm.HumanBytes(job.Size())
+		if running > 0 {
+			jobState = fmt.Sprintf("%d running", running)
+		}
+	}
+	add("jobs", jobState, utmvm.Home(job.Dir()))
+
 	out("%-22s %-10s %s", "WHAT", "STATE", "WHERE")
 	var missing int
 	for _, r := range rows {

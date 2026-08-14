@@ -194,3 +194,95 @@ func TestStatusOfAnUnknownJobFails(t *testing.T) {
 		t.Error("Status of an unknown job returned no error; an empty state reads as a finished job")
 	}
 }
+
+// TestFinishedJobsArePruned — jobs/ grew a JSON and a log per run, forever, and
+// a 45-minute install's log is not small. Nothing removed either.
+//
+// Negative control, run by hand: remove the pruneFinished call from Start and
+// this fails with 25 records where 20 were expected.
+func TestFinishedJobsArePruned(t *testing.T) {
+	withTempDir(t)
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Well past the limit, all finished: pid 1 is init, which this process
+	// cannot signal, so alive() reports false without inventing a fake.
+	for i := 0; i < keepFinished+5; i++ {
+		id := "old-" + string(rune('a'+i))
+		if err := write(State{ID: id, Command: "vm-create", PID: 1,
+			Started: time.Now().Add(-time.Duration(i) * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(Dir(), id+".log"), []byte("output"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	withSleep(t)
+	if _, err := Start("30", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := 0
+	for _, s := range all {
+		if !s.Alive {
+			finished++
+		}
+	}
+	if finished > keepFinished {
+		t.Errorf("%d finished jobs kept, limit is %d", finished, keepFinished)
+	}
+
+	// The logs must go with the records, or the pruning frees nothing worth
+	// freeing — the log is the big half.
+	logs, _ := filepath.Glob(filepath.Join(Dir(), "*.log"))
+	if len(logs) > keepFinished+1 {
+		t.Errorf("%d logs left for %d kept jobs; the records were pruned and the logs were not",
+			len(logs), keepFinished)
+	}
+	t.Logf("%d finished kept, %d logs, %d bytes", finished, len(logs), Size())
+}
+
+// TestRunningJobsAreNeverPruned — forgetting work that is still going is worse
+// than any amount of disk.
+func TestRunningJobsAreNeverPruned(t *testing.T) {
+	withTempDir(t)
+	withSleep(t)
+
+	// The live jobs are made to look OLD, which is the whole point. Started
+	// normally they are the newest records and would survive pruning whether or
+	// not the guard exists — the first version of this test did exactly that
+	// and passed against a build with the guard removed.
+	var live []string
+	for i := 0; i < 3; i++ {
+		s, err := Start("30", []string{string(rune('a' + i))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Same real pid, backdated: still alive, now the oldest thing here.
+		s.Started = time.Now().Add(-time.Duration(100+i) * time.Hour)
+		if err := write(s); err != nil {
+			t.Fatal(err)
+		}
+		live = append(live, s.ID)
+	}
+	// Enough finished ones to push past the limit.
+	for i := 0; i < keepFinished+5; i++ {
+		_ = write(State{ID: "done-" + string(rune('a'+i)), Command: "vm-create", PID: 1,
+			Started: time.Now().Add(-time.Duration(i) * time.Hour)})
+	}
+	if _, err := Start("30", []string{"trigger"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range live {
+		if _, err := Status(id); err != nil {
+			t.Errorf("running job %s was pruned: %v", id, err)
+		}
+	}
+}

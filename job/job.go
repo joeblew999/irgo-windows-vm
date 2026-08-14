@@ -14,8 +14,20 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
 
-// dirName is where job records live, under the one application-support root.
-const dirName = "jobs"
+const (
+	// dirName is where job records live, under the one application-support root.
+	dirName = "jobs"
+
+	// keepFinished is how many completed jobs are kept.
+	//
+	// Records are small; the logs beside them are not — a 45-minute install
+	// writes a few hundred lines, and nothing was ever removing either. A tool
+	// that already asks for 33 GB should not also leak a file per run forever.
+	//
+	// Running jobs are never pruned however many there are: forgetting a job
+	// that is still going is worse than any amount of disk.
+	keepFinished = 20
+)
 
 // Dir is where job records are written.
 func Dir() string { return filepath.Join(utmvm.Root(), dirName) }
@@ -92,6 +104,10 @@ func Start(command string, args []string) (State, error) {
 	if err := cmd.Start(); err != nil {
 		return State{}, fmt.Errorf("starting %s: %w", command, err)
 	}
+
+	// Pruned on the way in, not on a timer: this is the only moment the tool is
+	// certainly running and certainly about to add one.
+	pruneFinished()
 
 	s := State{ID: id, Command: command, Args: args, PID: cmd.Process.Pid, Started: started}
 	if err := write(s); err != nil {
@@ -175,6 +191,50 @@ func All() ([]State, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Started.After(out[j].Started) })
 	return out, nil
+}
+
+// pruneFinished removes all but the most recent keepFinished completed jobs,
+// and the log beside each.
+//
+// Errors are ignored throughout, deliberately. Failing to tidy is not a reason
+// to refuse to start a 45-minute install, and there is nowhere useful to report
+// it to — the same judgement the logger already makes about its own file.
+func pruneFinished() {
+	all, err := All()
+	if err != nil {
+		return
+	}
+	// All is newest first, so counting forward keeps the newest.
+	seen := 0
+	for _, s := range all {
+		if s.Alive {
+			continue // never prune work that is still going
+		}
+		seen++
+		if seen <= keepFinished {
+			continue
+		}
+		_ = os.Remove(path(s.ID))
+		_ = os.Remove(filepath.Join(Dir(), s.ID+".log"))
+	}
+}
+
+// Size is how much disk the job records and their logs take.
+//
+// Reported by doctor, because a directory that grows on its own should be
+// visible somewhere before it is a problem.
+func Size() int64 {
+	entries, err := os.ReadDir(Dir())
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if fi, err := e.Info(); err == nil {
+			total += fi.Size()
+		}
+	}
+	return total
 }
 
 // findRunning returns a live job for the same command and arguments.

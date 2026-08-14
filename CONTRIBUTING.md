@@ -83,9 +83,21 @@ mise run site:build    # just build, into site/dist (gitignored)
 prevents is silent — a leftover server keeps answering and the page in front of
 you is the *old* build.
 
-CI fails on any local link that names a file the site does not publish, and on
-an absolute URL that has been rewritten as a repository path. Both have
-happened; neither is visible from looking at a page that renders.
+CI fails on any local link that names a file the site does not publish, on an
+absolute URL that has been rewritten as a repository path, and on a fragment
+link naming a heading that does not exist. All three have happened; none is
+visible from looking at a page that renders.
+
+The site also publishes **`llms.txt`** and **`llms-full.txt`** — the whole
+documentation as one file, for anything that would rather make one request than
+six. They are not written by hand and they are not a second copy: the corpus
+entry is appended inside the same loop that renders each HTML page, from the
+same markdown, so both come from one pass over the one list in `site/main.go`.
+
+**CI fails if a page reaches one rendering and not the other**, in both
+directions. That invariant is the reason the corpus can be trusted, and it is
+exactly the kind of thing that is invisible when you look at output that renders
+correctly — a corpus quietly missing a page still looks complete.
 
 `README.md`, `RESULTS.md`, `UPSTREAM.md`, `AGENTS.md` and this file each become
 a page. Adding another means one line in `site/main.go` — nothing is discovered

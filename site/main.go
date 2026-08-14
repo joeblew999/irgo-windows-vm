@@ -89,11 +89,12 @@ func main() {
 	root := flag.String("root", "..", "repository root to read markdown from")
 	out := flag.String("out", "dist", "directory to write the site into")
 	repo := flag.String("repo", "https://github.com/joeblew999/irgo-windows-vm", "repository URL")
+	base := flag.String("base", "https://joeblew999.github.io/irgo-windows-vm/", "where the site is published; llms.txt links are absolute because whatever reads them has no page to resolve against")
 	serve := flag.Bool("serve", false, "after building, serve it for checking locally")
 	port := flag.Int("port", 8127, "port for -serve")
 	flag.Parse()
 
-	if err := build(*root, *out, *repo); err != nil {
+	if err := build(*root, *out, *repo, *base); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -154,7 +155,7 @@ func freePort(port int) {
 	time.Sleep(300 * time.Millisecond)
 }
 
-func build(root, out, repo string) error {
+func build(root, out, repo, siteURL string) error {
 	// Rebuilt from scratch every time. Leaving the previous run's files in
 	// place means a page that has been deleted stays published, which is the
 	// same class of problem as a stale copy: the site says something the
@@ -182,6 +183,7 @@ func build(root, out, repo string) error {
 		goldmark.WithRendererOptions(ghtml.WithUnsafe()),
 	)
 
+	var corpus []corpusEntry
 	for _, p := range pages {
 		var raw []byte
 		if p.Src == "" {
@@ -205,10 +207,17 @@ func build(root, out, repo string) error {
 			raw = r
 		}
 
+		// The rewritten markdown, named rather than passed inline, because the
+		// corpus is built from exactly what the HTML is built from. Two
+		// traversals of `pages` would be two chances to skip a page; this is
+		// one pass producing both renderings.
+		body := rewriteLinks(raw, repo)
+
 		var buf bytes.Buffer
-		if cErr := md.Convert(rewriteLinks(raw, repo), &buf); cErr != nil {
+		if cErr := md.Convert(body, &buf); cErr != nil {
 			return fmt.Errorf("converting %s: %w", p.Src, cErr)
 		}
+		corpus = append(corpus, corpusEntry{Title: p.Title, Out: p.Out, Blurb: p.Blurb, Markdown: body})
 
 		var navs []nav
 		for _, q := range pages {
@@ -236,6 +245,22 @@ func build(root, out, repo string) error {
 	if err := os.WriteFile(filepath.Join(out, "style.css"), styleCSS, 0o644); err != nil {
 		return err
 	}
+
+	// The same pages again, as one file and as an index of themselves.
+	//
+	// base has a trailing slash so the links below concatenate cleanly, and is
+	// absolute because llms.txt is read by things that did not fetch it from a
+	// browser and have no document to resolve against.
+	base := strings.TrimSuffix(siteURL, "/") + "/"
+	summary := summaryFrom(indexPage(corpus).Markdown)
+	if err := os.WriteFile(filepath.Join(out, corpusFull), renderCorpusFull(corpus, base), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(out, corpusIndex), renderCorpusIndex(corpus, base, summary), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  %-18s <- %d pages, one file\n", corpusFull, len(corpus))
+	fmt.Printf("  %-18s <- the same list\n", corpusIndex)
 
 	// Tells GitHub Pages not to run Jekyll over the output. Without it, Pages
 	// ignores any file or directory whose name starts with an underscore, which

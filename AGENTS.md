@@ -163,6 +163,48 @@ this may control UTM. `vm-create` checks that before doing anything expensive,
 because without it a boot cannot be driven and the failure arrives forty minutes
 into an install as a timeout that mentions nothing about permissions.
 
+## What the VM is, and who you are inside it
+
+Fixed, and not settable by a flag. Changing one means editing `setDefaults` in
+`utmvm/vm_create.go` — there is deliberately no way to ask for a different
+shape, because a VM that differs between two machines is a result that cannot
+be compared.
+
+| | value | |
+|---|---|---|
+| name | `irgo-win11` | `utmvm.DefaultVMName`; `-vm` overrides, for a disposable VM |
+| disk | **64 GiB, sparse** | costs kilobytes until the guest writes; a finished install is ~30 GiB |
+| RAM | **8192 MiB** | |
+| CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
+
+The guest logs itself in as **`dev`**, an administrator, with the password
+**`dev`** in plaintext in `utmvm/assets/autounattend.xml`, auto-logon enabled
+for 999 logons, and RDP switched on.
+
+That password is not a leaked credential and is not to be "fixed". Setup needs
+it in plaintext to create the account and log in with nobody typing, which is
+the entire point of an unattended install. It guards a throwaway VM with no
+inbound route from anywhere but this Mac, and it is deliberately obvious so
+nobody mistakes it for a secret that matters. **Do not copy that answer file to
+anything reachable from a network you do not control.**
+
+### Why `-gui` exists
+
+The QEMU guest agent runs as `NT AUTHORITY\SYSTEM` in **session 0**, which has
+no window station. Anything that opens a window fails there — and fails
+confusingly: glaze reports it as `webview2: environment/controller creation
+failed`, which reads like a missing WebView2 runtime and is not. The runtime was
+present and healthy (151.0.4129.78) while that failure persisted.
+
+`-gui` routes through a scheduled task with `/it`, which runs as the logged-in
+user in their session, which has a desktop. The auto-logon above is what
+guarantees such a session exists. It also stages the binary in `C:\Users\Public`
+rather than `C:\Windows\Temp`, because the interactive user must be able to
+execute it.
+
+So: headless work needs no flag, anything with a window needs `-gui`, and that
+split is enforced by the operating system rather than chosen here.
+
 ## The four programs it runs
 
 Split by what a capability *needs*, with exactly one owner each. A capability

@@ -35,8 +35,8 @@ hypermedia-driven framework for building native iOS, Android and **desktop**
 apps in Go with Datastar, no JavaScript framework involved.
 
 Desktop is the hard word in that sentence. An app that runs on one desktop is
-not a desktop app; it has to work on Windows and Linux as well as on the Mac it
-was written on. The desktop half rests on
+not a desktop app; it has to work on the platforms you did not write it on. The
+desktop half rests on
 [glaze](https://github.com/crgimenes/glaze) and
 [native](https://github.com/crgimenes/native) — cgo-free Go libraries for a
 webview and the OS integration around it — and *"it works on my Mac"* is not
@@ -74,8 +74,62 @@ Two more, for when something is wrong: **`vm-screen`** photographs the VM, and
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
 
-Every command explains itself with `-h`, and `irgo-winvm help` explains the
-sequence. This file does not list flags and so cannot go stale about them.
+Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
+explains the sequence. This file lists no flags and so cannot go stale about
+them — the **[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
+on the site is captured from the binary at build time.
+
+## What it exits with
+
+`utmctl` exits 0 when it fails, which this repository has been bitten by more
+than once. So this tool is the only honest signal a caller gets, and it says
+something specific:
+
+| code | meaning |
+|---|---|
+| **0** | it worked — including `-h`, and an undo that found nothing to undo |
+| **1** | your program ran and failed |
+| **2** | the command was called wrongly |
+| **3** | that VM does not exist |
+| **4** | the VM is there, the guest agent is not answering |
+| **5** | refused — a destructive command without `-force` |
+
+**1 is your program, not this tool.** The guest's own exit code is *not* passed
+through: a binary exiting 3 exits `app-create` **1**, and names its real code in
+the message. That is deliberate — a failing program and a missing VM must not
+look the same to a script.
+
+**4 is the one worth retrying.** Windows Update takes the agent away for minutes
+at a time; the VM is fine and will answer again. `app-create` already waits and
+tries to recover before giving up, which is why it can take several minutes to
+reach that code.
+
+`-detach` exits 0 once the program is running, since it is for windows nobody
+intends to close.
+
+## What it costs
+
+| | size | |
+|---|---|---|
+| the `.esd` from Microsoft | **4.2 GB** | downloaded once, from a source that rate-limits |
+| scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
+| the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
+| the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
+
+About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
+`-all`, because rebuilding the ISO from it takes ~40 seconds with no network,
+while losing it means downloading 4.2 GB again.
+
+## Linux
+
+Out of scope here. This repository is the Windows VM system: Windows is the
+platform whose behaviour cannot be checked by reading the code from a Mac, and
+everything in it — the answer file, the ISO mastering, the guest agent, the
+session model — is Windows-specific.
+
+Linux would need its own guest image and its own path, and it is not built
+here. The `linux` builds in CI exist only so the tool compiles for a developer
+on another OS, not because it can drive a Linux guest.
 
 ## What it looks like
 

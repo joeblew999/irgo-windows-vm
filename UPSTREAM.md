@@ -1,25 +1,58 @@
-# What this repo has found in glaze and native
+# What this repo has found upstream
 
-Every bug here belongs to [crgimenes/glaze](https://github.com/crgimenes/glaze)
-or [crgimenes/native](https://github.com/crgimenes/native) and is fixed **there**,
-not worked around here. The README states the rule; this file is the ledger.
+Three projects, all open source, all fixed **there** rather than worked around
+here:
 
-Each entry has to answer one question before it is listed: *does a correct
-consumer, reading only the public documentation, hit this?* If the answer is no
-— we called the API wrongly — it is our bug and it is fixed in this repo. Those
-are at the bottom, so the distinction stays visible rather than being quietly
+- **[crgimenes/glaze](https://github.com/crgimenes/glaze)** — the webview
+- **[crgimenes/native](https://github.com/crgimenes/native)** — the OS integration
+- **[utmapp/UTM](https://github.com/utmapp/UTM)** — the hypervisor this drives
+
+The README states the rule; this file is the ledger. It is published so a
+developer — or an agent — can see what is known without reading the code.
+
+Each entry answers one question before it is listed: *does a correct consumer,
+reading only the public documentation, hit this?* If the answer is no — we
+called the API wrongly — it is our bug and it is fixed in this repo. Those are
+at the bottom, so the distinction stays visible rather than being quietly
 rewritten later.
 
-Fixes are prepared in local clones at
-`~/workspace/go/src/github.com/crgimenes/{glaze,native}`, which
-`the upstream clones` creates and `the upstream clones` makes every
-module in this repo build against. **Nothing has been pushed or proposed
-upstream yet** — that is a separate, deliberate act.
+## Status
 
-A fix is not listed as verified here until it has been *run*: their tests, our
-tests, and the probe binary built from the edit executing on Windows 11 ARM64
-in the VM. `the upstream clones` does the first three, `irgo-winvm app-create`
-the last.
+| | finding | severity | status |
+|---|---|---|---|
+| **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) | high | `PATCHED LOCALLY` · reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
+| **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `FOUND HERE` — not reported |
+| **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — not reported |
+| **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported |
+| **UTM** | [`utmctl` reports failure and exits 0](#utm) | high | `FOUND HERE` — not reported |
+| **UTM** | [`utmctl exec` never returns the guest's output](#utm) | high | `FOUND HERE` — not reported |
+| **UTM** | [`suspend --save-state` power-cuts the guest](#utm) | high | `FOUND HERE` — not reported |
+| **UTM** | [`ip-address` hangs rather than failing](#utm) | medium | `FOUND HERE` — not reported |
+| **UTM** | [a rejected config names no field](#utm) | medium | `FOUND HERE` — not reported |
+| **UTM** | [the guest agent stops answering](#the-guest-agent-stops-answering) | — | `OPEN` — cause not isolated |
+
+What the words mean, and they are chosen so none of them can flatter:
+
+- `FOUND HERE` — diagnosed and written up. **Upstream does not know.**
+- `PATCHED LOCALLY` — a fix exists, as **uncommitted edits in a clone on one
+  machine**. Not committed, not pushed, not proposed.
+- `FILED` — reported upstream, with the link.
+- `FIXED UPSTREAM` — landed in a release, with the version.
+- `OPEN` — observed, cause not established, not yet filable.
+
+**Nothing in this file has been reported upstream by this project.** That is
+worth stating plainly rather than leaving to be inferred: glaze#31 is the same
+defect as §1, and it was filed on 12 Aug 2026 by **@nako-ruru** — a stranger who
+hit it independently, twelve days after it was diagnosed here. Finding bugs and
+not reporting them is how that happens.
+
+Patches live in clones at `~/workspace/go/src/github.com/crgimenes/{glaze,native}`
+as **working-tree changes** — 4 modified files in glaze, 15 in native, none
+committed. A `git checkout` in either would destroy them.
+
+A fix is not listed as verified until it has been *run*: their tests, our tests,
+and the probe binary built from the edit executing on Windows 11 ARM64 in the
+VM. `irgo-winvm app-create` does the last.
 
 ---
 
@@ -75,6 +108,15 @@ against the same clone with only this change stashed and restored:
 
 macOS-only code, so the Windows VM has nothing to say about it; `go test ./...`
 passes in glaze.
+
+**Reported by somebody else.** [glaze#31](https://github.com/crgimenes/glaze/issues/31),
+*"[macOS] glaze.New(true) blocks indefinitely when initialized inside tray
+OnClick callback"*, was opened on 12 Aug 2026 by **@nako-ruru** — the same
+defect, reached by the same route (a tray callback), reported independently
+twelve days after it was diagnosed here and while the fix above sat uncommitted
+in a local clone.
+
+Their report is the one upstream will act on. This entry is not a claim on it.
 
 ---
 
@@ -137,7 +179,8 @@ why it is written up rather than patched here.
 It works on both platforms. `glaze-probes/verifyevents` was changed to do
 exactly that, and with it the Events bridge passes completely on Windows.
 
-**Status**: diagnosed and reproducible, **not fixed**. The probe now
+**Status**: `FOUND HERE` — diagnosed and reproducible, **not fixed**, not
+reported. The probe now
 distinguishes the two cases, so this cannot silently regress into a bare
 "timed out" again.
 
@@ -173,7 +216,9 @@ the package sentinel still matches.
 var ErrUnsupported = fmt.Errorf("clipboard: not supported on this platform: %w", errors.ErrUnsupported)
 ```
 
-**Status**: fixed in all nine packages, and **verified on Windows 11 ARM64**.
+**Status**: `PATCHED LOCALLY` — fixed in all nine packages and **verified on
+Windows 11 ARM64**, but the change is an uncommitted edit in a clone and has not
+been proposed upstream.
 Each native package gained an `unsupported_test.go` asserting the wrapping, and
 glaze an `appicon_unsupported_test.go` covering both of its sentinels, so a
 package added later cannot reintroduce it. `go test ./...` passes in both
@@ -198,7 +243,12 @@ a run in which nothing was wrong.
 
 ## 3. native/tray — no way to have a tray *and* a window
 
-**Severity: low. Reported as a limitation, not a bug — not yet filed.**
+**Severity: low.** A limitation rather than a defect — the documented behaviour
+of each package is correct on its own.
+
+**Status**: `FOUND HERE` — not reported. Nothing upstream knows this has been
+hit, and the workaround below is undocumented, so it is luck rather than
+contract.
 
 `tray.Run` blocks driving the OS event loop and its doc requires the main
 goroutine locked to the main OS thread. A `glaze.WebView` wants exactly the
@@ -213,6 +263,103 @@ undocumented, so it is luck rather than contract.
 An honest fix is an API that attaches a tray to a run loop somebody else owns.
 
 ---
+
+## UTM
+
+[utmapp/UTM](https://github.com/utmapp/UTM), Apache-2.0. The version this repo
+verifies its config schema against is **4.7.5**, recorded as
+`utmvm.VerifiedVersion` — and 4.7.5 is the current release, so everything below
+is a live defect rather than an artefact of running something old.
+
+These have been treated as local traps to work around, which is the opposite of
+the rule applied to glaze and native. They are listed here so that stops being
+invisible. None has been reported.
+
+### `utmctl` reports failure and exits 0
+
+**Severity: high.** The exit status cannot be used to tell whether a command
+worked, which makes every script built on `utmctl` unable to detect its own
+failures.
+
+- **`utmctl delete`** on a VM whose bundle is gone prints *"couldn't be
+  removed"* and exits **0**. This repo checks whether the bundle still exists
+  afterwards rather than trusting the status.
+- **`utmctl ip-address`** with no guest agent prints its complaint as ordinary
+  stdout and exits **0**. Every line has to be validated as an address, or a
+  human-readable error is mistaken for one — which made a status check
+  cheerfully report a working agent on a VM that had none.
+
+It is also why this tool's own exit codes exist and are documented: it is the
+only honest signal a caller gets.
+
+### `utmctl exec` never returns the guest's output
+
+**Severity: high.** It does not stream the process's output back and exits 0
+whatever the guest command did, so a suite that ran nothing is indistinguishable
+from a suite that passed.
+
+Everything here that needs output writes a batch file which redirects to a file
+in the guest, runs that by path, and pulls the file back. That machinery exists
+solely because of this.
+
+Two related quirks, same call:
+
+- A complex command line does not survive it. `cmd.exe /c "prog" > "out" 2>&1`
+  produces neither file: cmd applies its own quote-stripping to a string that
+  already contains quotes, and the line silently does nothing.
+- A whole command line passed as **one argument** makes the agent look for a
+  file by that entire name and answer *"No such file or directory"* — which is
+  indistinguishable from a dead agent, and cost a wrong diagnosis here.
+
+### `utmctl suspend --save-state` reports success and power-cuts the guest
+
+**Severity: high.** Exit 0, no state file written, VM left `stopped`, and the
+guest's next boot goes through *"Diagnosing your PC"* — the signature of an
+unclean shutdown.
+
+It either refuses (naming GPU acceleration, then NVMe) or does the above. Plain
+`suspend` works and is what this repo uses; `--save-state` must never be called.
+
+### `utmctl ip-address` hangs rather than failing
+
+**Severity: medium.** Against a guest with no agent it does not fail — it waits,
+indefinitely. A VM with no Windows installed hung this CLI for ten minutes with
+no output, because everything that asks "is this VM usable" is built on it.
+
+Every `utmctl` call here is wrapped in a deadline for this reason.
+
+### A rejected config names no field
+
+**Severity: medium.** UTM decodes `config.plist` with Swift `Codable` and
+non-optional fields, so any schema mismatch surfaces as a single generic
+*"cannot import this VM"* with no indication of which field is wrong. Six
+distinct config mistakes were found by bisection because of it, each costing an
+import cycle to identify.
+
+### The guest agent stops answering
+
+**Status: `OPEN` — cause not isolated. Not filable as a UTM bug yet.**
+
+**Observed.** `utmctl ip-address` answers one call and times out the next with
+`Error from event: The operation couldn't be completed. (OSStatus error -2700.)`
+/ `Timed out waiting for RPC`. The tool's own log records
+`VM not answering; recovering` seven times in one session. The guest's desktop
+was up and healthy throughout — confirmed by screenshot.
+
+**Not established.** Whether the guest agent service has actually stopped
+responding, or whether it is alive and the host cannot reach it. Those are two
+different bugs in two different projects, and this repo currently attributes the
+symptom to Windows Update keeping the agent busy — a guest-side explanation that
+has never been checked.
+
+**What would isolate it.** Query the `qemu-ga` service inside the guest, over
+RDP or the console rather than through `utmctl`, at the moment a host call is
+timing out. If the service is running and responsive while the host call fails,
+it belongs to UTM. If it is not, it belongs to the guest and this entry should
+be deleted.
+
+Until that is done, filing it would waste a maintainer's time on a report that
+cannot be acted on.
 
 ## Not bugs
 

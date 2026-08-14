@@ -275,7 +275,10 @@ Everything the plan files tracked is done and measured above. What is left:
   `SchemaConfigurationVersion`, `IfaceVirtIO` and `GuestToolsInstallCommand` are
   unreferenced; the last still carries a `start`-wildcard bug already fixed in
   the answer file.
-- **Two upstream fixes are prepared and unpushed** — see [UPSTREAM.md](UPSTREAM.md).
+- **Nothing found upstream has been reported upstream.** Patches for two of
+  them exist only as uncommitted edits in local clones. The status of every
+  finding is the table at the top of [UPSTREAM.md](UPSTREAM.md) — a count kept
+  here would be a second copy, and this one was already wrong.
 
 **No irgo integration until this works standalone with glaze.** Integrating a
 tool that does not yet work makes the framework absorb its failures.

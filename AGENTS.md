@@ -228,6 +228,12 @@ Each of these fails silently. UTM rejects a bad config with one generic *"cannot
 import this VM"* that names no field; a wrong boot command produces a prompt
 nobody sees; a truncated ISO produces a VM that will not boot.
 
+One line each, deliberately. The rows about `utmctl` are **defects in UTM**, not
+facts of life, and they are written up properly in
+[UPSTREAM.md](UPSTREAM.md#utm) — severity, reproduction and status. Keep the
+detail there and the reminder here; two full copies is the drift this file warns
+about three sections above.
+
 | trap | what happens |
 |---|---|
 | `virtio-gpu-pci` display | no framebuffer on aarch64, no legacy VGA — guest boots **invisibly** and looks hung |

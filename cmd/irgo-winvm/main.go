@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -180,7 +181,22 @@ func run(args []string) error {
 		usage()
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
-	return c.Run(args[1:])
+
+	// -h is a request, not a failure.
+	//
+	// The flag package returns ErrHelp from Parse when it has already printed
+	// the usage, and every command here passed that straight out as an error.
+	// So asking for help printed the flags and then `error: flag: help
+	// requested`, and exited 1 — on vm-create, vm-delete, app-create and
+	// vm-screen, which used ContinueOnError, while the other three used
+	// ExitOnError and exited 0. Two error modes, no principle, and the same
+	// question answered two ways depending on which command you asked.
+	//
+	// One mode everywhere now, and ErrHelp stops here.
+	if err := c.Run(args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return nil
 }
 
 // runSetup is the one command a new developer runs.
@@ -429,7 +445,7 @@ func bundleOf(e utmvm.Entry) string {
 // any scratch files a run that did not finish left behind.
 func runAppDelete(args []string) error {
 	say := utmvm.Printer("app-delete")
-	fs := flag.NewFlagSet("app-delete", flag.ExitOnError)
+	fs := flag.NewFlagSet("app-delete", flag.ContinueOnError)
 	name := fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -457,7 +473,7 @@ func runAppDelete(args []string) error {
 // runISO gets the Windows media, which is the slowest and most rate-limited
 // step in `vm`. Separate so it can be done once and kept.
 func runISOCreate(args []string) error {
-	fs := flag.NewFlagSet("iso-create", flag.ExitOnError)
+	fs := flag.NewFlagSet("iso-create", flag.ContinueOnError)
 	fetch := fs.Bool("fetch", false, "download from Microsoft ("+utmvm.ISODownloadSize()+") if nothing local works")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -502,7 +518,7 @@ func runISOCreate(args []string) error {
 // runISODelete removes the media, which is protected on purpose, so it says so
 // rather than failing with EPERM.
 func runISODelete(args []string) error {
-	fs := flag.NewFlagSet("iso-delete", flag.ExitOnError)
+	fs := flag.NewFlagSet("iso-delete", flag.ContinueOnError)
 	force := fs.Bool("force", false, "actually delete; without this it only lists")
 	all := fs.Bool("all", false, "also delete the .esd, the one thing that cannot be rebuilt")
 	if err := fs.Parse(args); err != nil {

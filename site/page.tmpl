@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if eq .Title "irgo-windows-vm"}}{{.Title}}{{else}}{{.Title}} — irgo-windows-vm{{end}}</title>
+<title>{{if .Home}}{{.Site}}{{else}}{{.Title}} — {{.Site}}{{end}}</title>
 <meta name="description" content="{{.Blurb}}">
 <link rel="stylesheet" href="style.css">
 <!--
@@ -19,7 +19,7 @@
 <body>
 
 <header class="top">
-  <a class="wordmark{{if .Home}} current{{end}}" href="index.html"{{if .Home}} aria-current="page"{{end}}>irgo-windows-vm</a>
+  <a class="wordmark{{if .Home}} current{{end}}" href="index.html"{{if .Home}} aria-current="page"{{end}}>{{.Site}}</a>
   <nav>
     {{range .Nav}}<a href="{{.Href}}"{{if .Current}} class="current" aria-current="page"{{end}}>{{.Title}}</a>{{end}}
     <a class="gh" href="{{$.Repo}}">GitHub</a>

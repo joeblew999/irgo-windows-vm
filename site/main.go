@@ -81,6 +81,26 @@ var pages = []struct {
 	{"", "reference.html", "Commands", "Commands", "Every command and every flag, captured from the binary"},
 }
 
+// siteName is the project's name: the wordmark, and the tail of every page's
+// <title>.
+//
+// Taken from the home page's title rather than written again. It was written
+// again — the template carried the literal twice, once as the wordmark and once
+// in a comparison deciding whether to append it to the title. That comparison
+// had to agree with a string in pages to work, and nothing made it: changing the
+// index's title would have produced "New name — irgo-windows-vm" on the front
+// page and nobody would have been told.
+func siteName() string {
+	for _, p := range pages {
+		if p.Nav == "" {
+			return p.Title
+		}
+	}
+	// No home page is a broken site, but a panic here would break the build over
+	// a page title. The divergence gate is what fails when a page goes missing.
+	return pages[0].Title
+}
+
 type nav struct {
 	Title, Href, Blurb string
 	Current            bool
@@ -100,6 +120,10 @@ type page struct {
 	// Home marks the page the wordmark links to, so it can carry the
 	// current-page cue the nav gives every other page.
 	Home bool
+
+	// Site is the project name, from siteName. The template used to hold it as
+	// a literal, in two places.
+	Site string
 
 	// Source is the markdown file this page was rendered from, empty for the
 	// one page captured from the binary.
@@ -261,7 +285,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == ""}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName()}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}

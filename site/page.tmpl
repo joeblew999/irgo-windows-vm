@@ -6,6 +6,15 @@
 <title>{{if eq .Title "irgo-windows-vm"}}{{.Title}}{{else}}{{.Title}} — irgo-windows-vm{{end}}</title>
 <meta name="description" content="{{.Blurb}}">
 <link rel="stylesheet" href="style.css">
+<!--
+  Anything that fetched this page can find the whole corpus from here, without
+  knowing the llms.txt convention and without having rendered the footer. Asked
+  how to read these docs, a capable model recommended scraping the repository's
+  raw markdown instead — which silently omits the command reference, because
+  that page is captured from the binary and has no source file.
+-->
+<link rel="alternate" type="text/plain" href="llms-full.txt" title="All documentation as one file">
+<link rel="alternate" type="text/plain" href="llms.txt" title="Documentation index for machines">
 </head>
 <body>
 

@@ -24,6 +24,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -58,6 +59,17 @@ func indexPage(entries []corpusEntry) corpusEntry {
 		return entries[0]
 	}
 	return corpusEntry{Title: "documentation"}
+}
+
+// markdownName is a page's plain-text form: the same name with the extension
+// swapped.
+//
+// A rule rather than a list, so no page is a special case and nothing new has
+// to be declared when one is added. It also means the command reference gets a
+// reference.md — the page that cannot be fetched from the repository at all,
+// since it has no source file, is the one most worth serving as plain text.
+func markdownName(out string) string {
+	return strings.TrimSuffix(out, filepath.Ext(out)) + ".md"
 }
 
 // renderCorpusFull concatenates every page in order.

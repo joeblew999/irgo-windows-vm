@@ -269,6 +269,18 @@ func build(root, out, repo, siteURL, sha string) error {
 		return err
 	}
 
+	// The same pages again as plain markdown, one file each.
+	//
+	// A fetcher that fails on a rendered page usually succeeds on plain text,
+	// and the markdown is already in hand here — this is a write, not a second
+	// read, and it comes from the same entries as everything else.
+	for _, e := range corpus {
+		if err := os.WriteFile(filepath.Join(out, markdownName(e.Out)), e.Markdown, 0o644); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("  %-18s <- %d pages, plain markdown\n", "*.md", len(corpus))
+
 	// The same pages again, as one file and as an index of themselves.
 	//
 	// base has a trailing slash so the links below concatenate cleanly, and is

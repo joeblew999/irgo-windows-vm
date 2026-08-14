@@ -83,6 +83,16 @@ func TestEveryPageReachesBothRenderings(t *testing.T) {
 			if !strings.Contains(sitemap, "<loc>https://example.test/docs/"+p.Out+"</loc>") {
 				t.Errorf("%s is in pages but %s does not list it", p.Out, sitemapFile)
 			}
+			// The plain-text form, for fetchers that fail on rendered pages.
+			md := filepath.Join(out, markdownName(p.Out))
+			fi, err := os.Stat(md)
+			if err != nil {
+				t.Errorf("%s is in pages but %s was not written: %v", p.Out, markdownName(p.Out), err)
+				return
+			}
+			if fi.Size() == 0 {
+				t.Errorf("%s is empty; an empty page is worse than a missing one because it still serves", markdownName(p.Out))
+			}
 		})
 	}
 }

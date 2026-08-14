@@ -180,6 +180,7 @@ func New(d Deps) *mcp.Server {
 		}
 		s.AddTool(tool(c, fs), h)
 	}
+	addResources(s, d)
 	return s
 }
 

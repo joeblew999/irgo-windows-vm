@@ -568,3 +568,75 @@ func TestTheSchemaCarriesTheRealDefaults(t *testing.T) {
 		t.Errorf("-gui is %q, want boolean — a bool asked as a string makes an agent send \"true\"", gui.Type)
 	}
 }
+
+// TestTheReferenceResourceIsServedAndGenerated.
+//
+// The documentation an agent can read without a network. It is generated from
+// the binary's own flag definitions rather than embedded, because embedding
+// llms-full.txt cannot work: go:embed needs the file at compile time and it is
+// generated into a gitignored directory, so a fresh clone would not build.
+//
+// Negative control, run by hand: drop the addResources call and this fails on
+// the empty listing; hardcode a default in reference() and the check below that
+// it matches the FlagSet fails.
+func TestTheReferenceResourceIsServedAndGenerated(t *testing.T) {
+	ctx := context.Background()
+	server := New(Deps{
+		Version: "test-version",
+		Run:     func(context.Context, string, []string) (string, error) { return "", nil },
+		Flags: func(name string) *flag.FlagSet {
+			if name != "app-create" {
+				return nil
+			}
+			fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
+			fs.String("user", "dev", "guest account for -gui")
+			return fs
+		},
+	})
+	ct, st := mcp.NewInMemoryTransports()
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx, st) }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "t"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close(); <-done }()
+
+	list, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatalf("listing resources: %v", err)
+	}
+	if len(list.Resources) == 0 {
+		t.Fatal("the server offers no resources; an agent has nothing to read")
+	}
+
+	res, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: referenceURI})
+	if err != nil {
+		t.Fatalf("reading %s: %v", referenceURI, err)
+	}
+	if len(res.Contents) == 0 {
+		t.Fatal("the reference is empty")
+	}
+	got := res.Contents[0].Text
+
+	// Generated, so it must carry things that only the running binary knows.
+	for _, want := range []string{
+		"test-version", // the version it was built as
+		"app-create",   // a command
+		"`-user`",      // a flag, from the FlagSet
+		"dev",          // that flag's real default, not retyped
+		"no-agent",     // the outcome table
+		"**yes**",      // ...including which one is retryable
+		corpusURL,      // and a pointer to what it does not carry
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the reference does not contain %q", want)
+		}
+	}
+	// A command with no flags must say so rather than silently omitting the
+	// section, which reads as "not documented yet".
+	if !strings.Contains(got, "No flags.") {
+		t.Error("a command with no flags is not described as having none")
+	}
+	t.Logf("%d bytes of generated reference", len(got))
+}

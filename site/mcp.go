@@ -192,6 +192,23 @@ Starting the same command with the same arguments twice returns the job already
 running rather than beginning a second one — a client that timed out simply asks
 again, and two installs against one VM is the failure that would cause.
 
+## Reading the documentation without a network
+
+The server offers one resource, ` + "`irgo-winvm://reference`" + `: every command, every
+flag and every default, generated from the running binary's own flag
+definitions. An agent can read it before guessing at arguments.
+
+It is generated rather than embedded, and that was a decision rather than an
+oversight. Embedding the whole documentation would mean committing a generated
+file — ` + "`go:embed`" + ` needs it present at compile time and it is produced into a
+directory git ignores, so a fresh clone would not build. Committing it makes a
+second copy that goes stale; a placeholder overwritten at release means a
+development build serves an empty document and says nothing about it.
+
+So the binary serves what it genuinely knows and links to
+[llms-full.txt](llms-full.txt) for the prose it does not carry. A stale answer
+is worse than a link.
+
 ## Has this been run for real?
 
 Yes, on 14 August 2026, from a real client against a real VM: nine tools listed,

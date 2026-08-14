@@ -149,16 +149,16 @@ func TestExitCode(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
-		want int
+		want command.Code
 	}{
-		{"nil is success", nil, exitOK},
-		{"help is not a failure", fmt.Errorf("parsing: %w", flag.ErrHelp), exitOK},
-		{"an unclassified error is the guest's", errors.New("boom"), exitFailed},
-		{"the guest program failed", fmt.Errorf("probe.exe exited 3 in the guest"), exitFailed},
-		{"called wrongly", fmt.Errorf("%w: needs a binary", errUsage), exitUsage},
-		{"no such VM", fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"), exitNoVM},
-		{"agent not answering", fmt.Errorf("%w: busy", utmvm.ErrNoAgent), exitNoAgent},
-		{"refused without -force", fmt.Errorf("would delete things (%w)", errRefused), exitNeedForce},
+		{"nil is success", nil, command.CodeOK},
+		{"help is not a failure", fmt.Errorf("parsing: %w", flag.ErrHelp), command.CodeOK},
+		{"an unclassified error is the guest's", errors.New("boom"), command.CodeFailed},
+		{"the guest program failed", fmt.Errorf("probe.exe exited 3 in the guest"), command.CodeFailed},
+		{"called wrongly", fmt.Errorf("%w: needs a binary", errUsage), command.CodeUsage},
+		{"no such VM", fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"), command.CodeNoVM},
+		{"agent not answering", fmt.Errorf("%w: busy", utmvm.ErrNoAgent), command.CodeNoAgent},
+		{"refused without -force", fmt.Errorf("would delete things (%w)", errRefused), command.CodeNeedForce},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := exitCode(tc.err); got != tc.want {
@@ -171,23 +171,45 @@ func TestExitCode(t *testing.T) {
 // TestExitCodesAreDistinct is the property that makes the contract worth
 // having: two different failures must not share a code, or a caller still
 // cannot tell them apart.
+//
+// It walks command.Outcomes rather than listing the codes here. The list used
+// to be written out in this test, which meant a seventh code could be added and
+// this would go on checking the six it knew about — a test that cannot fail for
+// the case it was written to catch.
 func TestExitCodesAreDistinct(t *testing.T) {
-	seen := map[int]string{}
-	for _, c := range []struct {
-		name string
-		code int
-	}{
-		{"exitOK", exitOK},
-		{"exitFailed", exitFailed},
-		{"exitUsage", exitUsage},
-		{"exitNoVM", exitNoVM},
-		{"exitNoAgent", exitNoAgent},
-		{"exitNeedForce", exitNeedForce},
-	} {
-		if prev, dup := seen[c.code]; dup {
-			t.Errorf("%s and %s both exit %d", prev, c.name, c.code)
+	if len(command.Outcomes) == 0 {
+		t.Fatal("no outcomes declared; this test would pass vacuously")
+	}
+	seen := map[command.Code]string{}
+	for _, o := range command.Outcomes {
+		if prev, dup := seen[o.Code]; dup {
+			t.Errorf("%s and %s both exit %d", prev, o.Name, o.Code)
 		}
-		seen[c.code] = c.name
+		seen[o.Code] = o.Name
+	}
+	t.Logf("%d distinct outcomes", len(seen))
+}
+
+// TestEveryCodeExitCodeReturnsIsDeclared closes the gap the move opened.
+//
+// exitCode maps this program's errors to codes; command.Outcomes describes what
+// each code means to an agent. A code returned here but not declared there
+// reaches an MCP client as "unknown", which is worse than the old situation,
+// where at least the number was the whole contract.
+func TestEveryCodeExitCodeReturnsIsDeclared(t *testing.T) {
+	for _, err := range []error{
+		nil,
+		fmt.Errorf("parsing: %w", flag.ErrHelp),
+		errors.New("boom"),
+		fmt.Errorf("%w: needs a binary", errUsage),
+		fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"),
+		fmt.Errorf("%w: busy", utmvm.ErrNoAgent),
+		fmt.Errorf("would delete things (%w)", errRefused),
+	} {
+		code := exitCode(err)
+		if _, ok := command.Classify(code); !ok {
+			t.Errorf("exitCode(%v) returned %d, which package command does not declare", err, code)
+		}
 	}
 }
 

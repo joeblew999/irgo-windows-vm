@@ -1,9 +1,11 @@
 package main
 
 import (
+	"github.com/joeblew999/irgo-windows-vm/command"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -115,6 +117,51 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 		}
 		if !documented {
 			t.Errorf("%s is a command and no markdown file mentions it", c.Name)
+		}
+	}
+}
+
+// exitRow matches a row of the exit-code table in the markdown: | **4** | ... |
+var exitRow = regexp.MustCompile(`\|\s*\*\*(\d)\*\*\s*\|`)
+
+// TestDocsNameEveryExitCode is the same rule as the command check, applied to
+// the other contract this tool publishes.
+//
+// The codes are declared in package command, the CLI exits with them, the MCP
+// server reports them to an agent, and README explains them to a person. Three
+// renderings of one list — and the markdown is the one that cannot be checked
+// by compiling, so it is the one that goes stale.
+//
+// It is not hypothetical for this repository: RESULTS.md once told readers to
+// run two commands this binary has never had, on a site that rendered perfectly
+// and a build that stayed green.
+//
+// Negative control, run by hand: adding a seventh code to command.Outcomes
+// fails this until README documents it; deleting the **4** row fails it too.
+func TestDocsNameEveryExitCode(t *testing.T) {
+	readme, ok := markdownFiles(t)["README.md"]
+	if !ok {
+		t.Fatal("README.md not found")
+	}
+	documented := map[string]bool{}
+	for _, m := range exitRow.FindAllStringSubmatch(readme, -1) {
+		documented[m[1]] = true
+	}
+	if len(documented) == 0 {
+		t.Fatal("README documents no exit codes; this test would pass vacuously")
+	}
+
+	declared := map[string]bool{}
+	for _, o := range command.Outcomes {
+		declared[strconv.Itoa(int(o.Code))] = true
+		if !documented[strconv.Itoa(int(o.Code))] {
+			t.Errorf("exit code %d (%s) is declared but README does not document it — "+
+				"a caller cannot act on a code nothing explains", o.Code, o.Name)
+		}
+	}
+	for code := range documented {
+		if !declared[code] {
+			t.Errorf("README documents exit code %s, which package command does not declare", code)
 		}
 	}
 }

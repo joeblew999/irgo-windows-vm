@@ -26,6 +26,12 @@ var version = "dev"
 
 // What this process exits with, and why each one is worth telling apart.
 //
+// The numbers and their meanings are declared in package command, because the
+// MCP server reports the same classification to an agent and the two must not
+// disagree about which one is worth retrying. What stays here is the mapping
+// from *this program's errors* to those codes, which is where the sentinels
+// live.
+//
 // Everything used to exit 1. So a script could not distinguish "the program I
 // asked you to run failed" from "that VM does not exist" from "the guest agent
 // is busy" — and the last of those is the one worth retrying, since Windows
@@ -34,22 +40,6 @@ var version = "dev"
 // It matters more here than in most tools because `utmctl` itself exits 0 on
 // failure, documented in AGENTS.md. This CLI is the only honest signal a caller
 // gets, so it had better say something.
-const (
-	exitOK = 0
-
-	// exitFailed is the guest program's own failure, and the default for
-	// anything not classified below. Its exit code is named in the message —
-	// it is not this process's status, because a guest exiting 3 and the VM
-	// being absent must not look the same.
-	exitFailed = 1
-
-	// exitUsage matches what the flag package uses for a malformed flag.
-	exitUsage = 2
-
-	exitNoVM      = 3
-	exitNoAgent   = 4
-	exitNeedForce = 5
-)
 
 // errRefused is a destructive command declining to act without -force.
 //
@@ -63,22 +53,22 @@ var errRefused = errors.New("refused without -force")
 // Sentinels, not string matching: these messages are written for people and get
 // reworded, and a classification that breaks silently when a sentence changes
 // is worse than none.
-func exitCode(err error) int {
+func exitCode(err error) command.Code {
 	switch {
 	case err == nil:
-		return exitOK
+		return command.CodeOK
 	case errors.Is(err, flag.ErrHelp):
-		return exitOK
+		return command.CodeOK
 	case errors.Is(err, errRefused):
-		return exitNeedForce
+		return command.CodeNeedForce
 	case errors.Is(err, utmvm.ErrNoVM):
-		return exitNoVM
+		return command.CodeNoVM
 	case errors.Is(err, utmvm.ErrNoAgent):
-		return exitNoAgent
+		return command.CodeNoAgent
 	case errors.Is(err, errUsage):
-		return exitUsage
+		return command.CodeUsage
 	default:
-		return exitFailed
+		return command.CodeFailed
 	}
 }
 
@@ -89,7 +79,7 @@ var errUsage = errors.New("usage")
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(exitCode(err))
+		os.Exit(int(exitCode(err)))
 	}
 }
 
@@ -192,7 +182,8 @@ func runMCP(args []string) error {
 		return err
 	}
 	return mcpserver.Serve(context.Background(), mcpserver.Deps{
-		Version: version,
+		Version:  version,
+		Classify: exitCode,
 		Run: func(_ context.Context, name string, args []string) (string, error) {
 			c, ok := find(name)
 			if !ok || c.Run == nil {

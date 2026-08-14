@@ -9,6 +9,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -224,4 +225,98 @@ func text(r *mcp.CallToolResult) string {
 		}
 	}
 	return b.String()
+}
+
+// TestTheFailureIsMachineReadable is the difference between a tool an agent can
+// act on and one it has to guess about.
+//
+// The wording of "the VM is there, the guest agent is not answering" will be
+// reworded one day. `"code": 4, "retryable": true` will not. An agent matching
+// on the sentence breaks silently; one matching on the field does not.
+//
+// Negative control, run by hand: return CodeFailed for every error and the
+// no-agent case below reports retryable:false, which is the mistake that costs
+// a 45-minute install.
+func TestTheFailureIsMachineReadable(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		code          command.Code
+		wantStatus    string
+		wantRetryable bool
+	}{
+		{"no such VM", command.CodeNoVM, "no-vm", false},
+		{"agent busy", command.CodeNoAgent, "no-agent", true},
+		{"the guest program failed", command.CodeFailed, "failed", false},
+		{"refused without -force", command.CodeNeedForce, "need-force", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			server := New(Deps{
+				Version:  "test",
+				Run:      func(context.Context, string, []string) (string, error) { return "", errors.New("it went wrong") },
+				Classify: func(error) command.Code { return tc.code },
+			})
+			ct, st := mcp.NewInMemoryTransports()
+			done := make(chan error, 1)
+			go func() { done <- server.Run(ctx, st) }()
+			cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "t"}, nil).Connect(ctx, ct, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cs.Close(); <-done }()
+
+			res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "vm-screen", Arguments: map[string]any{"args": []string{}}})
+			if err != nil {
+				t.Fatalf("became a protocol error: %v", err)
+			}
+			if !res.IsError {
+				t.Fatal("a failure was not marked IsError")
+			}
+
+			// Read it back the way a client would: off the wire, not out of a
+			// Go value the server still holds.
+			raw, mErr := json.Marshal(res.StructuredContent)
+			if mErr != nil {
+				t.Fatalf("structured content did not marshal: %v", mErr)
+			}
+			var got outcome
+			if uErr := json.Unmarshal(raw, &got); uErr != nil {
+				t.Fatalf("structured content is not the documented shape: %v (%s)", uErr, raw)
+			}
+			if got.Status != tc.wantStatus {
+				t.Errorf("status = %q, want %q", got.Status, tc.wantStatus)
+			}
+			if got.Code != int(tc.code) {
+				t.Errorf("code = %d, want %d", got.Code, tc.code)
+			}
+			if got.Retryable != tc.wantRetryable {
+				t.Errorf("retryable = %v, want %v — this is the field that decides "+
+					"whether an agent waits or gives up", got.Retryable, tc.wantRetryable)
+			}
+			if got.Command != "vm-screen" {
+				t.Errorf("command = %q", got.Command)
+			}
+			if tc.wantRetryable && !strings.Contains(text(res), "worth retrying") {
+				t.Error("the retryable case does not say so in the text a model reads")
+			}
+		})
+	}
+}
+
+// TestExactlyOneOutcomeIsRetryable.
+//
+// Retryable is advice an agent acts on: it will wait and call again. Marking a
+// second code retryable — "no such VM", say — would have it retry forever
+// against a VM that will never exist.
+func TestExactlyOneOutcomeIsRetryable(t *testing.T) {
+	var retryable []string
+	for _, o := range command.Outcomes {
+		if o.Retryable {
+			retryable = append(retryable, o.Name)
+		}
+	}
+	if len(retryable) != 1 || retryable[0] != "no-agent" {
+		t.Errorf("retryable outcomes are %v; only no-agent should be, because it is the "+
+			"only one where waiting changes the answer", retryable)
+	}
 }

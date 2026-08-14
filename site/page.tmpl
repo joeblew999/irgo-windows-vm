@@ -59,6 +59,7 @@
   {{- if .Source}}Generated from <a href="{{.Repo}}/blob/main/{{.Source}}">{{.Source}}</a> in the repository — if this page is wrong, that file is wrong.
   {{- else}}Captured from the compiled binary at build time, so no flag or default is ever transcribed — if this page is wrong, the Go code is wrong and no markdown will fix it.
   {{- end}}
+  {{if .Build}}<br><span class="stamp">{{.Build}}</span>{{end}}
   Reading with a machine?
   <a href="llms.txt">llms.txt</a> ·
   <a href="llms-full.txt">the whole thing in one file</a><br>

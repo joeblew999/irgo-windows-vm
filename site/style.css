@@ -206,3 +206,11 @@ footer a { color: var(--accent); }
   .top nav a { padding: 0.15rem 0; }
   .prose table { -webkit-overflow-scrolling: touch; }
 }
+
+/* The build stamp. Quiet, because it is only wanted when somebody suspects
+   they are holding a stale page — which is exactly when they will go looking
+   for it. */
+.stamp {
+  font: 0.8em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}

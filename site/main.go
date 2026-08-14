@@ -86,6 +86,11 @@ type page struct {
 	Repo         string
 	Screens      []string
 
+	// Build is the commit and time this page was generated, so a cached copy
+	// can be told from a current one. Two agents were served a page from a
+	// build several commits old and had no way to know.
+	Build string
+
 	// Source is the markdown file this page was rendered from, empty for the
 	// one page captured from the binary.
 	//
@@ -102,11 +107,12 @@ func main() {
 	out := flag.String("out", "dist", "directory to write the site into")
 	repo := flag.String("repo", "https://github.com/joeblew999/irgo-windows-vm", "repository URL")
 	base := flag.String("base", "https://joeblew999.github.io/irgo-windows-vm/", "where the site is published; llms.txt links are absolute because whatever reads them has no page to resolve against")
+	sha := flag.String("sha", "", "commit this was built from; read from git when empty")
 	serve := flag.Bool("serve", false, "after building, serve it for checking locally")
 	port := flag.Int("port", 8127, "port for -serve")
 	flag.Parse()
 
-	if err := build(*root, *out, *repo, *base); err != nil {
+	if err := build(*root, *out, *repo, *base, *sha); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -167,7 +173,12 @@ func freePort(port int) {
 	time.Sleep(300 * time.Millisecond)
 }
 
-func build(root, out, repo, siteURL string) error {
+func build(root, out, repo, siteURL, sha string) error {
+	if sha == "" {
+		sha = commitSHA(root)
+	}
+	stamp := buildStamp{SHA: sha, Time: time.Now().UTC().Format(time.RFC3339)}
+
 	// Rebuilt from scratch every time. Leaving the previous run's files in
 	// place means a page that has been deleted stays published, which is the
 	// same class of problem as a stale copy: the site says something the
@@ -237,7 +248,7 @@ func build(root, out, repo, siteURL string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line()}
 		if p.Out == "index.html" {
 			data.Screens = screens
 		}
@@ -265,10 +276,10 @@ func build(root, out, repo, siteURL string) error {
 	// browser and have no document to resolve against.
 	base := strings.TrimSuffix(siteURL, "/") + "/"
 	summary := summaryFrom(indexPage(corpus).Markdown)
-	if err := os.WriteFile(filepath.Join(out, corpusFull), renderCorpusFull(corpus, base), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(out, corpusFull), renderCorpusFull(corpus, base, stamp), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(out, corpusIndex), renderCorpusIndex(corpus, base, summary), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(out, corpusIndex), renderCorpusIndex(corpus, base, summary, stamp), 0o644); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(out, sitemapFile), renderSitemap(corpus, base), 0o644); err != nil {

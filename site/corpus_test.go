@@ -25,7 +25,7 @@ import (
 func buildToTemp(t *testing.T) string {
 	t.Helper()
 	out := t.TempDir()
-	if err := build("..", out, "https://github.com/joeblew999/irgo-windows-vm", "https://example.test/docs/"); err != nil {
+	if err := build("..", out, "https://github.com/joeblew999/irgo-windows-vm", "https://example.test/docs/", "testsha"); err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	return out

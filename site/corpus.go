@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -72,10 +73,13 @@ func indexPage(entries []corpusEntry) corpusEntry {
 // deliberate: this file is served from the site root, so those relative links
 // resolve against its own URL. The raw markdown would carry `.md` targets that
 // point at nothing from a published text file.
-func renderCorpusFull(entries []corpusEntry, base string) []byte {
+func renderCorpusFull(entries []corpusEntry, base string, stamp buildStamp) []byte {
 	var b bytes.Buffer
 
 	fmt.Fprintf(&b, "# %s — complete documentation\n\n", indexPage(entries).Title)
+	if l := stamp.line(); l != "" {
+		fmt.Fprintf(&b, "%s\n\n", l)
+	}
 	fmt.Fprintf(&b, "Every page of %s, concatenated in reading order.\n", base)
 	b.WriteString("Generated from the same source as the site. Five of these pages come from\n")
 	b.WriteString("markdown in the repository; the command reference has no source file and is\n")
@@ -102,10 +106,13 @@ func renderCorpusFull(entries []corpusEntry, base string) []byte {
 //
 // The shape is the llms.txt convention — an H1, a blockquote summary, then
 // sections of `- [Name](url): description`.
-func renderCorpusIndex(entries []corpusEntry, base, summary string) []byte {
+func renderCorpusIndex(entries []corpusEntry, base, summary string, stamp buildStamp) []byte {
 	var b bytes.Buffer
 
 	fmt.Fprintf(&b, "# %s\n\n", indexPage(entries).Title)
+	if l := stamp.line(); l != "" {
+		fmt.Fprintf(&b, "%s\n\n", l)
+	}
 	if summary != "" {
 		fmt.Fprintf(&b, "> %s\n\n", summary)
 	}
@@ -232,4 +239,51 @@ func escapeXML(s string) string {
 	var b bytes.Buffer
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
+}
+
+// buildStamp identifies what produced this output.
+//
+// The reason is an observed failure, not tidiness. Two agents were served a
+// results.html from a build several commits old — one still carrying the
+// `build-iso` command name and contradictions removed days earlier — and
+// nothing on the page said which build it was, so a stale copy and a current
+// one were indistinguishable from outside.
+//
+// This is the same answer the VM stages already use: a boot that hangs is
+// invisible from the host until something photographs it.
+type buildStamp struct {
+	SHA  string
+	Time string
+}
+
+// line is the one-line form, used at the top of both corpus files and in
+// every page footer.
+func (b buildStamp) line() string {
+	switch {
+	case b.SHA == "" && b.Time == "":
+		return ""
+	case b.SHA == "":
+		return "Built " + b.Time
+	case b.Time == "":
+		return "Built from " + b.SHA
+	}
+	return "Built from " + b.SHA + " at " + b.Time
+}
+
+// commitSHA reads the commit being built, or returns empty.
+//
+// git rather than a flag defaulted somewhere else: the SHA identifies the
+// source this output was made from, and the tree is the source. A value passed
+// in can be passed in wrong; `git rev-parse` cannot disagree with the checkout
+// it is run in. It needs no network, and CI's checkout leaves a git directory.
+//
+// Empty rather than fatal when git is unavailable — a stamp is worth having and
+// not worth refusing to build over.
+func commitSHA(root string) string {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--short", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

@@ -171,6 +171,19 @@ In the tree, one rule decides the packages:
 | `job` | work that outlives the caller that started it — a 45-minute install an MCP client cannot wait on. Not in `utmvm` because all three stages start such work, and whoever owns it must be able to report a **dead** process |
 | `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
 
+Five Go modules, and the split is load-bearing rather than organisational:
+
+| module | why it is its own |
+|---|---|
+| root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
+| `probe`, `glaze-probes`, `examples` | they build against **glaze and native**, which are the things under test and must never reach the shipped binary |
+| `site` | needs a markdown parser the tool has no business carrying |
+
+Check it with `go list -deps`, not by reading imports. The site module requires
+goldmark and nothing else, which is why the generated MCP page is captured from
+the binary rather than produced by importing the server — importing it would
+drag the protocol SDK's dependency graph into the documentation generator.
+
 `mcpserver` depends on `utmvm` and `command`; neither depends on it.
 Behaviour that exists only when driven over MCP is a second answer to a question
 already answered, and it is the one nobody tests — the cycle tests drive the

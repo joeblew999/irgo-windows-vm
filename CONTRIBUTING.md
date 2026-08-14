@@ -36,10 +36,17 @@ exits non-zero if anything failed. Use it rather than a `sleep` loop: `gh run
 list --commit` matches the full 40-character SHA only, and returns an empty list
 for a short one — which looks exactly like a run that has not started.
 
-`go:check` covers four separate Go modules and cross-compiles for Linux and
-Windows as well as macOS. That is not ceremony: deleting a function from
+`go:check` covers **five** separate Go modules — the root, `probe`,
+`glaze-probes`, `examples` and `site` — and cross-compiles for Linux and Windows
+as well as macOS. That is not ceremony: deleting a function from
 `sysfile_other.go` once passed every check being run, because they were all
 darwin.
+
+The split is load-bearing, not organisational. `glaze` and `native` are what
+this repository exists to test, and they must not reach the binary a user
+downloads: `go list -deps ./cmd/irgo-winvm` names eleven third-party modules and
+neither of them is there. `site` is separate for the same reason in the other
+direction — it needs a markdown parser that the tool has no business shipping.
 
 ## The three cycle tests
 

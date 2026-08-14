@@ -131,6 +131,59 @@ echo
 echo "app create and delete cycle complete"
 '''
 
+[tasks."ci:watch"]
+description = "Wait for GitHub Actions on a commit and report; SHA= to pick one"
+# The one way to wait for CI. Hand-rolled `gh run list` loops were used five
+# times before this existed and two of them were wrong, so this is here to stop
+# there being a second implementation nobody can fix.
+#
+# The trap it removes: `gh run list --commit` matches on the full 40-character
+# SHA only. Given an abbreviated one it returns an empty list -- not an error --
+# which reads exactly like "the run has not started yet". A loop waiting on that
+# waits forever for a run that already passed. Measured: `--commit 7c96e78`
+# returned 0 rows while `--commit 7c96e78d16f...` returned two, both green.
+#
+# The waiting itself is `gh run watch`, which polls at 3s and returns when the
+# run ends. Loops here slept 20-30s a tick, so a 63s check was reported up to
+# half a minute late. Nothing below re-implements waiting.
+run = '''
+set -e
+# Always resolved, never taken abbreviated -- see above.
+SHA=$(git rev-parse "${SHA:-HEAD}")
+
+# A run takes a few seconds to appear after a push. This is the ONE case where
+# an empty list really does mean "not yet", which is why it is bounded and
+# separate from everything else.
+n=0
+until [ "$(gh run list --commit "$SHA" --json databaseId --jq 'length')" != "0" ]; do
+  n=$((n + 1))
+  if [ "$n" -gt 20 ]; then
+    echo "no run for $SHA after 60s"
+    # Nearly always the real reason, and invisible from the empty list.
+    if ! git branch -r --contains "$SHA" 2>/dev/null | grep -q .; then
+      echo "  that commit is not on any remote branch -- push it first"
+    fi
+    exit 1
+  fi
+  sleep 3
+done
+
+# Every workflow, not just check: a push starts check AND pages, and watching
+# one of them and declaring success is how a broken deploy gets missed. A run
+# that has already finished returns immediately, so this is not serial waiting.
+failed=0
+for id in $(gh run list --commit "$SHA" --json databaseId --jq '.[].databaseId'); do
+  gh run watch "$id" --exit-status --compact >/dev/null 2>&1 || failed=1
+done
+
+gh run list --commit "$SHA" --json workflowName,conclusion,url \
+  --jq '.[] | "  \(.workflowName): \(.conclusion)  \(.url)"'
+
+# Non-zero on failure. A wait-for-CI that exits 0 when CI failed is a check that
+# cannot fail, which is the one thing AGENTS.md says a check must never be.
+exit $failed
+'''
+
 [tasks."doctor"]
 description = "irgo-winvm doctor"
 run = "go run ./cmd/irgo-winvm doctor"

@@ -178,6 +178,7 @@ run = [
   "go build ./...",
   "go vet ./...",
   "go test ./utmvm/...",
+  "go test ./cmd/...",
 
   # The other three are separate modules and would be skipped by ./... above.
   # -o a directory because they are all main packages: a bare `go build` drops

@@ -91,6 +91,20 @@ happened; neither is visible from looking at a page that renders.
 a page. Adding another means one line in `site/main.go` — nothing is discovered
 by scanning a directory, so nothing gets published by accident.
 
+The command reference is the exception: it has no source file. It is generated
+by building the CLI and capturing `irgo-winvm help` and `-h` for every command,
+so no flag, default or usage string is ever transcribed. `iso-create -fetch`
+computes its own usage text from a constant, which is only correct on the site
+because it is captured rather than copied.
+
+Two commands exist for tooling rather than for people:
+
+- **`irgo-winvm commands`** prints one command name per line. It is what the
+  reference generator and the documentation check both read, so neither has to
+  scrape the usage text and neither can drift from what the binary accepts.
+- **`irgo-winvm version`** prints the version stamped in at build time, or
+  `dev` when built by hand. `doctor` reports the same thing in its first row.
+
 Screenshots come from `docs/screens/vm/`, and are put there by the tool rather
 than by hand: `mise run vm:shots` copies the newest shot of each stage in under
 its stage name. Do not copy them across yourself.

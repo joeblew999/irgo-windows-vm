@@ -1,6 +1,7 @@
 package utmvm
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -76,6 +77,85 @@ func rotateLog() {
 	_ = os.Rename(LogPath(), LogPath()+".1")
 }
 
+// Where a command's output goes.
+//
+// It went straight to os.Stdout, which is right for a terminal and wrong for
+// every other caller. Over MCP, stdout *is* the JSON-RPC channel: a command
+// announcing its progress — which this repository insists on, because fifty
+// silent seconds and a hang look identical — lands in the middle of the
+// protocol stream, and the client gets a parse error instead of a VM.
+//
+// So there is one destination, and it can be pointed somewhere else. Note what
+// is deliberately *not* redirected: the log file. Printer and Reporter go on
+// writing to logs/ whatever the destination is, so a run driven over MCP lands
+// in the same log as a run driven from a terminal. Two histories and the log
+// stops being the record.
+var (
+	outMu sync.Mutex
+	out   io.Writer = os.Stdout
+)
+
+// Out is where command output goes. Write to it instead of os.Stdout.
+//
+// It resolves the destination on every write rather than capturing it, so a
+// long-lived value — vm_create's install Log, held for 45 minutes — follows a
+// redirect that happens after it was taken.
+var Out io.Writer = redirectable{}
+
+type redirectable struct{}
+
+func (redirectable) Write(p []byte) (int, error) {
+	outMu.Lock()
+	defer outMu.Unlock()
+	return out.Write(p)
+}
+
+// printf writes a line of command output to the current destination.
+//
+// The error is discarded, deliberately and exactly as fmt.Printf's always was —
+// errcheck excludes Printf and not Fprintf, so switching destinations made four
+// long-standing unchecked writes visible rather than creating them.
+//
+// Discarding is right here for the same reason the file already gives for the
+// log: a terminal that has gone away is not a reason for iso-create to fail
+// after forty minutes, and there is nowhere left to report it to.
+func printf(format string, a ...any) { _, _ = fmt.Fprintf(Out, format, a...) }
+
+// captureMu serializes captures. Two at once would have the second restore the
+// first's buffer as "the previous destination", quietly sending the rest of one
+// command's output into another command's result.
+var captureMu sync.Mutex
+
+// Capture runs fn with command output collected instead of printed, and returns
+// what it printed.
+//
+// This is how an MCP tool handler gets a command's progress into its result:
+// the text an operator would have read on the terminal is exactly what the
+// agent needs, and it must not reach stdout.
+//
+// The log file is unaffected — see Out.
+func Capture(fn func() error) (string, error) {
+	captureMu.Lock()
+	defer captureMu.Unlock()
+
+	var buf bytes.Buffer
+	outMu.Lock()
+	prev := out
+	out = &buf
+	outMu.Unlock()
+
+	// Restored even if fn panics. A panic in a tool handler that left the
+	// destination pointing at a dead buffer would silence every later command.
+	defer func() {
+		outMu.Lock()
+		out = prev
+		outMu.Unlock()
+	}()
+
+	err := fn()
+	return buf.String(), err
+}
+
 // Printer returns the line printer every command uses.
 //
 // It writes to the terminal with seconds elapsed since the command started, and
@@ -87,7 +167,7 @@ func Printer(command string) func(string, ...any) {
 	log.Info("started")
 	return func(format string, a ...any) {
 		msg := fmt.Sprintf(format, a...)
-		fmt.Printf("[%6.1fs] %s\n", time.Since(start).Seconds(), msg)
+		printf("[%6.1fs] %s\n", time.Since(start).Seconds(), msg)
 		log.Info(msg, "elapsed", time.Since(start).Round(time.Millisecond).String())
 	}
 }
@@ -102,7 +182,7 @@ func Reporter(command string) func(string, ...any) {
 	log.Info("started")
 	return func(format string, a ...any) {
 		msg := fmt.Sprintf(format, a...)
-		fmt.Println(msg)
+		printf("%s\n", msg)
 		log.Info(msg)
 	}
 }

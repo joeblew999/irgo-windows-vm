@@ -286,7 +286,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		VMRef:      e.UUID,
 		BundlePath: bundle,
 		Timeout:    opts.Timeout,
-		Log:        os.Stdout,
+		Log:        Out,
 	}); iErr != nil {
 		return res, stage("install Windows", false, "", iErr)
 	}

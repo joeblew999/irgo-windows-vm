@@ -586,11 +586,11 @@ func isoBuild(opts isoRemasterOptions) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s (%s) with %s\n", opts.Output, HumanBytes(fi.Size()), tool.Name)
+	printf("wrote %s (%s) with %s\n", opts.Output, HumanBytes(fi.Size()), tool.Name)
 	if noPrompt {
-		fmt.Printf("  boot image: %s — no \"Press any key to boot from CD\"\n", boot)
+		printf("  boot image: %s — no \"Press any key to boot from CD\"\n", boot)
 	} else {
-		fmt.Printf("  boot image: %s — this disc WILL stop at \"Press any key to boot from CD\"\n", boot)
+		printf("  boot image: %s — this disc WILL stop at \"Press any key to boot from CD\"\n", boot)
 	}
 	return nil
 }

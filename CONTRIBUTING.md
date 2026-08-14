@@ -72,7 +72,9 @@ host a stuck boot and a working one look identical.
 
 <https://joeblew999.github.io/irgo-windows-vm/> is **generated from the markdown
 in this repository** and published by `pages.yml` on every push to `main`. There
-is no separate copy to edit: if a page is wrong, the markdown is wrong.
+is no separate copy to edit: if a page is wrong, the markdown is wrong — with
+one exception, the command reference, which has no source file at all. See
+below.
 
 ```sh
 mise run site:serve    # build it and open http://localhost:8127
@@ -152,8 +154,11 @@ CI publishes them; you tag them.
 git tag -a v0.1.2 -m "..." && git push origin v0.1.2
 ```
 
-`release.yml` runs the same gate as `check.yml`, then `go:build`, then publishes
-the binaries and `SHA256SUMS`. The version comes from the tag and from nowhere
+`release.yml` does **not** re-run the gate — a tag names a commit `check` has
+already passed on both a Mac and ubuntu, and re-running it was 124s of a 171s
+release. It asks GitHub whether that commit has a green `check` run and refuses
+to publish if it does not, then runs `go:build` and publishes the binaries and
+`SHA256SUMS`. The version comes from the tag and from nowhere
 else, so nothing in the tree needs editing first.
 
 The checksums are reproducible: `mise run go:build` on the same tag produces

@@ -9,7 +9,9 @@
 // repository did exactly that, naming four tasks that no longer existed and a
 // command renamed two commits earlier.
 //
-// So if the site is wrong, the markdown is wrong. Fix it there.
+// So if the site is wrong, the markdown is wrong. Fix it there — with the one
+// exception this file also builds: the command reference has no source file and
+// is captured from the binary, so a wrong flag on that page is a bug in Go.
 //
 // That claim was not true when it was first made. The template carried a
 // paragraph describing what the screenshots showed, which appeared in no

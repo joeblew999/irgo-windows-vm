@@ -77,7 +77,10 @@ func renderCorpusFull(entries []corpusEntry, base string) []byte {
 
 	fmt.Fprintf(&b, "# %s — complete documentation\n\n", indexPage(entries).Title)
 	fmt.Fprintf(&b, "Every page of %s, concatenated in reading order.\n", base)
-	b.WriteString("Generated from the same source as the site; if this is wrong, the markdown is wrong.\n\n")
+	b.WriteString("Generated from the same source as the site. Five of these pages come from\n")
+	b.WriteString("markdown in the repository; the command reference has no source file and is\n")
+	b.WriteString("captured from the compiled binary, so a wrong flag there is a bug in Go, not\n")
+	b.WriteString("in any markdown.\n\n")
 	b.WriteString("Pages, in order:\n\n")
 	for _, e := range entries {
 		fmt.Fprintf(&b, "- %s — %s\n", e.Title, e.Blurb)

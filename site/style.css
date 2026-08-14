@@ -66,7 +66,7 @@ body {
 /* --- content ------------------------------------------------------------ */
 
 main { padding: 0 1.5rem 4rem; }
-.prose, .evidence { max-width: var(--max); margin: 0 auto; }
+.prose { max-width: var(--max); margin: 0 auto; }
 
 .prose h1 { font-size: 2rem; letter-spacing: -0.02em; margin: 2.5rem 0 0.5rem; }
 .prose h2 { font-size: 1.35rem; margin: 2.5rem 0 0.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
@@ -121,33 +121,6 @@ main { padding: 0 1.5rem 4rem; }
 .prose img { max-width: 100%; height: auto; border-radius: 6px; }
 .prose hr { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
 
-/* --- evidence ----------------------------------------------------------- */
-
-.evidence { margin-top: 3rem; }
-.evidence h2 { font-size: 1.35rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
-.evidence > p { color: var(--muted); }
-
-.shots {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
-  gap: 1.25rem;
-  margin-top: 1.5rem;
-}
-.shots figure { margin: 0; }
-.shots img {
-  width: 100%;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  display: block;
-  background: var(--code-bg);
-}
-.shots figcaption {
-  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted);
-  margin-top: 0.4rem;
-  word-break: break-all;
-}
-
 /* --- footer ------------------------------------------------------------- */
 
 footer {
@@ -192,10 +165,6 @@ footer a { color: var(--accent); }
   .prose pre { padding: 0.8rem; font-size: 0.85rem; }
   .prose table { font-size: 0.85rem; }
   .prose th, .prose td { padding: 0.45rem 0.5rem; }
-
-  /* One per row. A two-column grid of screenshots on a phone is two unreadable
-     thumbnails rather than one legible picture. */
-  .shots { grid-template-columns: 1fr; gap: 1rem; }
 
   footer { padding: 1.25rem 1rem; }
 }

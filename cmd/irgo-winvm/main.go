@@ -27,30 +27,113 @@ func main() {
 	}
 }
 
+// command is one thing this tool does.
+//
+// The table below is the only place a command is declared. Dispatch reads it,
+// the usage text is generated from it, `irgo-winvm commands` prints it, and CI
+// checks the documentation against that output.
+//
+// It was a switch and a hand-typed usage block — two copies of the same list,
+// already disagreeing about whether `-h` worked on every command. A flag
+// reference page and a CI check would have made four copies. One list is the
+// only way this stays true: a command that is not here does not exist, and one
+// that is here cannot be missing from the usage or the docs.
+type command struct {
+	Name    string
+	Summary string
+	// Undo names the command that reverses this one, so the usage can pair
+	// them. Every make has one; that is the repository's rule, not a detail.
+	Undo string
+	// IsUndo keeps a reversing command out of the first column, since it is
+	// already printed beside the command it undoes.
+	IsUndo bool
+	Run    func(args []string) error
+}
+
+// Assigned in init, not at declaration: `commands` contains runCommands, which
+// reads `commands`, and Go rejects that as an initialization cycle.
+var commands []command
+
+func init() {
+	commands = []command{
+		{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Run: runISOCreate},
+		{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Run: runVMCreate},
+		{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Run: runAppCreate},
+
+		{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Run: runISODelete},
+		{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Run: runVMDelete},
+		{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Run: runAppDelete},
+
+		{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", Run: runVMScreen},
+		{Name: "doctor", Summary: "what is here, and where the log and screenshots are", Run: runDoctor},
+		{Name: "help", Summary: "the three steps explained, and what your .exe has to be", Run: runHelp},
+		{Name: "version", Summary: "what this binary is", Run: runVersion},
+		{Name: "commands", Summary: "one command name per line, for tooling", Run: runCommands},
+	}
+}
+
+// find returns the command by name. Aliases for help are accepted here rather
+// than in the table, because they are spellings of one command, not commands.
+func find(name string) (command, bool) {
+	if name == "-h" || name == "--help" {
+		name = "help"
+	}
+	for _, c := range commands {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return command{}, false
+}
+
 // usage goes to stderr, for the case where the user got it wrong. The same
 // text on stdout is what a bare `irgo-winvm` prints.
-func usage() { fmt.Fprint(os.Stderr, usageText) }
+func usage() { fmt.Fprint(os.Stderr, usageText()) }
 
-const usageText = `irgo-winvm — build a Go program on your Mac, run it on real Windows.
+// usageText is generated from the table, so it cannot list a command that does
+// not exist or omit one that does.
+func usageText() string {
+	var b strings.Builder
+	b.WriteString("irgo-winvm — build a Go program on your Mac, run it on real Windows.\n\n")
+	b.WriteString("  MAKE                                                 UNDO\n")
+	for _, c := range commands {
+		if c.Undo == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-12s %-39s %s\n", c.Name, c.Summary, c.Undo)
+	}
+	b.WriteString("\n")
+	for _, c := range commands {
+		if c.Undo != "" || c.IsUndo {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-12s %s\n", c.Name, c.Summary)
+	}
+	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
+	return b.String()
+}
 
-  MAKE                                                 UNDO
-  iso-create   the Windows installer                   iso-delete
-  vm-create    a VM with Windows on it, from that      vm-delete
-  app-create   your .exe pushed to that VM and run     app-delete
+func runVersion([]string) error { fmt.Println(version); return nil }
 
-  vm-screen    photograph the VM, for when it is stuck
-  doctor       what is here, and where the log and screenshots are
-  help         the three steps explained, and what your .exe has to be
-  version
-
-Run them in the order above. Each takes -h for its flags.
-`
+// runCommands prints one name per line.
+//
+// This is the interface the site's flag reference and the CI documentation
+// check both read. They could have scraped the usage text instead, and that is
+// exactly the fragility worth avoiding: a layout change would silently drop a
+// command from the reference, which is the failure this whole exercise is
+// about.
+func runCommands([]string) error {
+	for _, c := range commands {
+		fmt.Println(c.Name)
+	}
+	return nil
+}
 
 // runHelp is the explanation. Separate from usage because a person who typed
 // the command wrong wants the list, and a person who typed `help` wants the
 // story — and putting the story in front of the first group buries the list
 // they were looking for.
-func runHelp() error {
+func runHelp([]string) error {
 	fmt.Print(`irgo-winvm — build a Go program on your Mac, run it on real Windows.
 
 Three steps, in this order. Each one is cheap to repeat: if it is already
@@ -89,35 +172,15 @@ func run(args []string) error {
 	// list on stdout and exits 0, so `irgo-winvm | head` works and a shell
 	// script does not see a failure for asking.
 	if len(args) == 0 {
-		fmt.Print(usageText)
+		fmt.Print(usageText())
 		return nil
 	}
-	switch args[0] {
-	case "vm-create":
-		return runVMCreate(args[1:])
-	case "vm-delete":
-		return runVMDelete(args[1:])
-	case "app-create":
-		return runAppCreate(args[1:])
-	case "app-delete":
-		return runAppDelete(args[1:])
-	case "iso-create":
-		return runISOCreate(args[1:])
-	case "iso-delete":
-		return runISODelete(args[1:])
-	case "vm-screen":
-		return runVMScreen(args[1:])
-	case "help", "-h", "--help":
-		return runHelp()
-	case "version":
-		fmt.Println(version)
-		return nil
-	case "doctor":
-		return runDoctor()
-	default:
+	c, ok := find(args[0])
+	if !ok {
 		usage()
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
+	return c.Run(args[1:])
 }
 
 // runSetup is the one command a new developer runs.
@@ -163,7 +226,7 @@ func runVMCreate(args []string) error {
 	return nil
 }
 
-func runDoctor() error {
+func runDoctor([]string) error {
 	out := utmvm.Reporter("doctor")
 
 	// One table. It was five formats -- prose, a table, another prose block, a

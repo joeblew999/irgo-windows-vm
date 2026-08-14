@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,6 +59,7 @@ func TestEveryPageReachesBothRenderings(t *testing.T) {
 	out := buildToTemp(t)
 	corpus := read(t, filepath.Join(out, corpusFull))
 	index := read(t, filepath.Join(out, corpusIndex))
+	sitemap := read(t, filepath.Join(out, sitemapFile))
 
 	if len(pages) == 0 {
 		t.Fatal("no pages declared; this test would pass vacuously")
@@ -76,7 +78,51 @@ func TestEveryPageReachesBothRenderings(t *testing.T) {
 			if !strings.Contains(index, p.Out) {
 				t.Errorf("%s is in pages but %s does not link it", p.Out, corpusIndex)
 			}
+			// A published page missing from the sitemap is invisible to
+			// anything that discovers a site the standard way.
+			if !strings.Contains(sitemap, "<loc>https://example.test/docs/"+p.Out+"</loc>") {
+				t.Errorf("%s is in pages but %s does not list it", p.Out, sitemapFile)
+			}
 		})
+	}
+}
+
+// TestSitemapListsTheCorpusToo covers the two files that are not pages.
+//
+// They are the reason the sitemap is worth generating at all: a crawler that
+// reads a sitemap and has never heard of the llms.txt convention still finds
+// them. Left out, the sitemap would list only what was already discoverable by
+// following links.
+func TestSitemapListsTheCorpusToo(t *testing.T) {
+	sitemap := read(t, filepath.Join(buildToTemp(t), sitemapFile))
+	for _, f := range []string{corpusIndex, corpusFull} {
+		if !strings.Contains(sitemap, "<loc>https://example.test/docs/"+f+"</loc>") {
+			t.Errorf("%s does not list %s", sitemapFile, f)
+		}
+	}
+}
+
+// TestSitemapIsValidXML — a sitemap no parser accepts is worse than none, and
+// the failure is invisible from reading it.
+func TestSitemapIsValidXML(t *testing.T) {
+	raw := read(t, filepath.Join(buildToTemp(t), sitemapFile))
+	var doc struct {
+		XMLName xml.Name `xml:"urlset"`
+		URLs    []struct {
+			Loc string `xml:"loc"`
+		} `xml:"url"`
+	}
+	if err := xml.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("sitemap does not parse: %v", err)
+	}
+	if len(doc.URLs) != len(pages)+2 {
+		t.Errorf("sitemap has %d urls, want %d (every page plus the two corpus files)",
+			len(doc.URLs), len(pages)+2)
+	}
+	for _, u := range doc.URLs {
+		if !strings.HasPrefix(u.Loc, "https://") {
+			t.Errorf("sitemap url is not absolute: %q", u.Loc)
+		}
 	}
 }
 

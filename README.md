@@ -95,6 +95,13 @@ Two more, for when something is wrong: **`vm-screen`** photographs the VM, and
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
 
+The guest logs itself in as **`dev`**, password `dev`, and stays logged in. That
+is not an oversight: an unattended install needs a plaintext credential to
+create the account and log in with nobody typing, and it guards a throwaway
+local VM with no route in from anywhere but your Mac. It is also what makes
+`-gui` possible — anything that opens a window needs a desktop session to open
+it in. [AGENTS.md](AGENTS.md) has the detail.
+
 Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
 explains the sequence. This file lists no flags and so cannot go stale about
 them — the **[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
@@ -136,6 +143,12 @@ intends to close.
 | scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
 | the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
 | the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
+
+The VM itself is **4 CPUs and 8192 MiB**, on that 64 GiB sparse disk. All three
+are fixed and none is settable by a flag — changing one means editing
+`setDefaults` in `utmvm/vm_create.go`, deliberately, because a VM whose shape
+differs between two machines produces results that cannot be compared. Nothing
+in the tree records *why* those particular numbers, only that they are fixed.
 
 About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
 `-all`, because rebuilding the ISO from it takes ~40 seconds with no network,
@@ -219,6 +232,10 @@ starts from nothing.
   organised, and every trap that cost hours.
 - **[RESULTS.md](RESULTS.md)** — what has been measured, dated.
 - **[UPSTREAM.md](UPSTREAM.md)** — what was found and where it was fixed.
+- **[Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
+  — every command and every flag. It has no file in this repository: it is
+  captured from the compiled binary at build time, so no default is ever
+  transcribed.
 
 ## Reading this with a machine
 
@@ -229,7 +246,11 @@ The whole documentation is published as one file:
 - **[llms.txt](https://joeblew999.github.io/irgo-windows-vm/llms.txt)** — the
   index, if you would rather choose first.
 
-Prefer those over fetching the `.md` files from this repository. Five of the six
+Every page is also served as plain markdown beside its HTML — swap the
+extension, so `results.html` has `results.md`. That includes `reference.md`,
+which exists nowhere else.
+
+Prefer any of those over fetching the `.md` files from this repository. Five of the six
 pages are here as markdown; the sixth, the command reference, **has no source
 file** — it is captured from the compiled binary at build time so that no flag
 or default is ever transcribed. Fetching the raw markdown gets you documentation

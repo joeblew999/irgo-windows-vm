@@ -90,9 +90,10 @@ absolute URL that has been rewritten as a repository path, and on a fragment
 link naming a heading that does not exist. All three have happened; none is
 visible from looking at a page that renders.
 
-The site also publishes **`llms.txt`** and **`llms-full.txt`** — the whole
-documentation as one file, for anything that would rather make one request than
-six. They are not written by hand and they are not a second copy: the corpus
+The site also publishes each page as plain markdown beside its HTML — the
+extension swapped, so `results.html` has `results.md` — and **`llms.txt`** and
+**`llms-full.txt`**, the whole documentation as one file, for anything that
+would rather make one request than six. They are not written by hand and they are not a second copy: the corpus
 entry is appended inside the same loop that renders each HTML page, from the
 same markdown, so both come from one pass over the one list in `site/main.go`.
 

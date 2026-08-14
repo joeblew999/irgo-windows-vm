@@ -19,7 +19,7 @@
 <body>
 
 <header class="top">
-  <a class="wordmark" href="index.html">irgo-windows-vm</a>
+  <a class="wordmark{{if .Home}} current{{end}}" href="index.html"{{if .Home}} aria-current="page"{{end}}>irgo-windows-vm</a>
   <nav>
     {{range .Nav}}<a href="{{.Href}}"{{if .Current}} class="current" aria-current="page"{{end}}>{{.Title}}</a>{{end}}
     <a class="gh" href="{{$.Repo}}">GitHub</a>

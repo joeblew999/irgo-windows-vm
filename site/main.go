@@ -59,18 +59,26 @@ var styleCSS []byte
 // becomes. Adding a page means adding a line here; there is nowhere else to
 // change, and nothing is discovered by scanning a directory — a site that
 // publishes whatever happens to be lying around would have published CLAUDE.md.
+// Nav is the label in the header, and an empty one means this page is the home
+// page — the wordmark already links there, so it takes no second entry. The
+// header used to carry both, two adjacent links reading "irgo-windows-vm" and
+// pointing at the same file.
+//
+// A separate field rather than reusing Title, because Title is also the H1 of
+// this page in llms.txt and llms-full.txt (corpus.go:91): renaming it to fix the
+// header would have quietly changed the machine-readable corpus.
 var pages = []struct {
-	Src, Out, Title, Blurb string
+	Src, Out, Title, Nav, Blurb string
 }{
-	{"README.md", "index.html", "irgo-windows-vm", "What it is and what it is for"},
-	{"RESULTS.md", "results.html", "Results", "What has been measured, dated"},
-	{"UPSTREAM.md", "upstream.html", "Upstream", "What was found, and where it was fixed"},
-	{"AGENTS.md", "agents.html", "Agents", "How the code is organised, and every trap that cost hours"},
-	{"CONTRIBUTING.md", "contributing.html", "Contributing", "Setup, what to run, how to land a change"},
+	{"README.md", "index.html", "irgo-windows-vm", "", "What it is and what it is for"},
+	{"RESULTS.md", "results.html", "Results", "Results", "What has been measured, dated"},
+	{"UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "What was found, and where it was fixed"},
+	{"AGENTS.md", "agents.html", "Agents", "Agents", "How the code is organised, and every trap that cost hours"},
+	{"CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},
 
 	// Generated, not read from disk. Src is empty and reference.go builds the
 	// markdown by running the binary — see generateReference.
-	{"", "reference.html", "Commands", "Every command and every flag, captured from the binary"},
+	{"", "reference.html", "Commands", "Commands", "Every command and every flag, captured from the binary"},
 }
 
 type nav struct {
@@ -88,6 +96,10 @@ type page struct {
 	// can be told from a current one. Two agents were served a page from a
 	// build several commits old and had no way to know.
 	Build string
+
+	// Home marks the page the wordmark links to, so it can carry the
+	// current-page cue the nav gives every other page.
+	Home bool
 
 	// Source is the markdown file this page was rendered from, empty for the
 	// one page captured from the binary.
@@ -242,11 +254,14 @@ func build(root, out, repo, siteURL, sha string) error {
 
 		var navs []nav
 		for _, q := range pages {
-			navs = append(navs, nav{Title: q.Title, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out})
+			if q.Nav == "" {
+				continue // the home page; the wordmark is its link
+			}
+			navs = append(navs, nav{Title: q.Nav, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out})
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line()}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == ""}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}

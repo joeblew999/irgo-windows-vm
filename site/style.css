@@ -57,6 +57,11 @@ body {
   color: var(--fg);
 }
 
+/* The wordmark is the home page's nav entry, so it shows the you-are-here cue
+   the others get. It needs its own rule: the one below is scoped `.top nav a`
+   and the wordmark sits outside the nav. */
+.wordmark.current { color: var(--accent); }
+
 .top nav { display: flex; flex-wrap: wrap; gap: 1.1rem; font-size: 0.9rem; }
 .top nav a { color: var(--muted); text-decoration: none; }
 .top nav a:hover { color: var(--fg); }

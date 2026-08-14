@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -113,4 +114,81 @@ func TestCorpusCarriesTheCapturedReference(t *testing.T) {
 			t.Errorf("the corpus does not contain %q; the reference was not captured into it", want)
 		}
 	}
+}
+
+// anchorLink matches an href with a fragment, with or without a page in front:
+// `#frag` and `page.html#frag`.
+var anchorLink = regexp.MustCompile(`href="([a-z0-9._-]*)#([^"]+)"`)
+
+var htmlID = regexp.MustCompile(`id="([^"]+)"`)
+
+// TestEveryAnchorResolves checks fragment links, which nothing checked before.
+//
+// The CI link check matches `href="[^"#:]*"` — a pattern that excludes every
+// href containing a `#`. So `agents.html#utm` and the ten links in UPSTREAM's
+// status table have never been verified by anything; they were correct by hand.
+//
+// Heading text is load-bearing once anything links to it, and renaming a
+// heading breaks those links silently — the page still renders, the link still
+// looks like a link, and it lands nowhere.
+//
+// The IDs are read out of the rendered HTML rather than recomputed from the
+// heading text. That is deliberate: goldmark deletes punctuation without
+// leaving a separator, so `errors.ErrUnsupported` becomes
+// `errorserrunsupported`, an em-dash between spaces leaves a double hyphen, and
+// collisions get `-1` appended — reference.html already relies on that, with
+// `#commands` for the H1 and `#commands-1` for the subcommand. A slug function
+// written here would have to reproduce all three or disagree with the published
+// HTML, and disagree silently.
+//
+// Negative control, run by hand: renaming "## UTM" in UPSTREAM.md fails this,
+// naming agents.html as the file whose link broke.
+func TestEveryAnchorResolves(t *testing.T) {
+	out := buildToTemp(t)
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := map[string]map[string]bool{}
+	var htmlFiles []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		htmlFiles = append(htmlFiles, e.Name())
+		body := read(t, filepath.Join(out, e.Name()))
+		set := map[string]bool{}
+		for _, m := range htmlID.FindAllStringSubmatch(body, -1) {
+			set[m[1]] = true
+		}
+		ids[e.Name()] = set
+	}
+	if len(htmlFiles) == 0 {
+		t.Fatal("no HTML was produced; this test would pass vacuously")
+	}
+
+	checked := 0
+	for _, name := range htmlFiles {
+		body := read(t, filepath.Join(out, name))
+		for _, m := range anchorLink.FindAllStringSubmatch(body, -1) {
+			page, frag := m[1], m[2]
+			if page == "" {
+				page = name // a bare #fragment means this same page
+			}
+			checked++
+			target, ok := ids[page]
+			if !ok {
+				t.Errorf("%s links to %s#%s, and %s is not a page this site publishes", name, page, frag, page)
+				continue
+			}
+			if !target[frag] {
+				t.Errorf("%s links to %s#%s, and %s has no heading with that id", name, page, frag, page)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no fragment links were found at all; the pattern has stopped matching and this test is asleep")
+	}
+	t.Logf("%d fragment links checked across %d pages", checked, len(htmlFiles))
 }

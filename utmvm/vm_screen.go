@@ -149,6 +149,12 @@ var shotName = regexp.MustCompile(`-\d{8}-\d{6}-(.+)\.png$`)
 var notAStage = map[string]bool{
 	"vm-screen": true,
 	"probe":     true,
+
+	// app-running belongs to a program, not to the machine. It is worth taking
+	// — a detached GUI app returns while its window is on a desktop nobody is
+	// watching — but docs/screens/vm documents the VM's own lifecycle, and what
+	// it catches depends entirely on what the guest happened to have open.
+	"app-running": true,
 }
 
 // Promote copies the most recent shot of each stage into dstDir, named for the

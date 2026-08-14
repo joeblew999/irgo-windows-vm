@@ -11,6 +11,12 @@ import (
 
 // Putting a binary on a VM and starting it.
 
+// appWindowDraw is how long a just-launched GUI app is given before it is
+// photographed. A scheduled task returns as soon as it has started the process,
+// which is well before the process has a window, and a picture taken then shows
+// the desktop it was about to cover.
+const appWindowDraw = 6 * time.Second
+
 // AppOptions configures AppCreate. The zero value is a headless run with the default
 // timeout, which is what almost every caller wants.
 type AppOptions struct {
@@ -164,6 +170,18 @@ func appExecInteractive(vmRef, guestExe string, args []string, user string, time
 	// Detached: it is up, and that is the whole result. Waiting for a window to
 	// close would mean waiting for a person, and the timeout would fire first.
 	if detach {
+		// Photographed, like every other stage. This was the one place the tool
+		// did something and left no picture of it, and it is the place that
+		// needs one most: the command returns while a window is open on a
+		// desktop nobody is looking at, and its own advice was to go and run
+		// vm-screen by hand.
+		//
+		// After a pause, because a window that has just been launched has not
+		// finished drawing, and a shot of an empty desktop proves nothing.
+		time.Sleep(appWindowDraw)
+		if p, sErr := Shot(vmRef, "app-running"); sErr == nil {
+			say("   %s", Home(p))
+		}
 		say("it is running on the guest's desktop; this command is done")
 		return res, nil
 	}

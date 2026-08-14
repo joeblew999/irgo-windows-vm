@@ -31,9 +31,6 @@ type ISOCatalogEntry struct {
 	FilePath     string `xml:"FilePath"`
 }
 
-// IsARM64 reports whether this entry is for Apple Silicon's guest architecture.
-func (e ISOCatalogEntry) IsARM64() bool { return strings.EqualFold(e.Architecture, "ARM64") }
-
 // Build is the Windows build string the filename starts with, e.g.
 // "26100.4349.250607-1500". It is the only version identifier in the catalog —
 // there is no field for it — and it is what distinguishes two entries that are

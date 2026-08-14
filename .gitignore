@@ -45,6 +45,20 @@ go.work.sum
 /glaze-probes/verifyevents/verifyevents
 /examples/glaze-all/glaze-all
 
+# The tool itself, from `go build ./cmd/irgo-winvm` at the root. This one was
+# not caught by the pass above, and was not hypothetical: an 11 MB Mach-O binary
+# was committed here, reporting `version: dev`, and by the time it was found it
+# no longer matched a build of the source beside it.
+#
+# Anchored with a leading slash so it means the file at the root and not the
+# package directory cmd/irgo-winvm/, which must stay tracked.
+/irgo-winvm
+
+# The site generator, from `go build` run inside site/. Committed the same way,
+# 13 MB, and found by sweeping every tracked file through `file(1)` rather than
+# by looking for the one already known about.
+/site/site
+
 # The generated site. Built by `mise run site:build` from the markdown, which is
 # the source of truth; committing the output would be the second copy the
 # generator exists to avoid.

@@ -85,6 +85,12 @@ And check on every platform. Deleting a function from `sysfile_other.go` passed
 every check that was running, because they were all darwin. `mise run go:check`
 cross-compiles.
 
+Waiting for CI is **`mise run ci:watch`** — never a hand-rolled `sleep` loop.
+There were five of those before the task existed and two were wrong, both in the
+same way, and both looked like patience rather than a bug. It watches every
+workflow the commit started, not just `check`, and exits non-zero if any failed.
+`SHA=<commit>` for one other than HEAD.
+
 ## A test that cannot fail is not a test
 
 Every assertion needs a negative control: **break the thing, watch the test go
@@ -243,6 +249,7 @@ about three sections above.
 | `UsbBusSupport: "USB3_0"` | the enum is `"2.0"` / `"3.0"` |
 | `CPUFlags` | the keys are `CPUFlagsAdd` and `CPUFlagsRemove` |
 | reading UTM's schema from `main` | `main` was v5.0.4 while the app was v4.7.5, and they disagree. Read the **tag** |
+| `gh run list --commit` with a short SHA | matches the **full 40 characters only**. An abbreviated one returns an empty list, not an error — indistinguishable from "not started yet". Use `mise run ci:watch` |
 | Windows ISOs are **UDF**, not ISO9660 | `install.wim` exceeds ISO9660's 4 GB limit, so ISO9660 readers fail on every path |
 | answer file on a FAT disk | Setup ignores it and runs interactive. Use an ISO9660 **CD** |
 | ISO padded past its declared volume size | mounts fine on macOS, ignored by Setup. Trim to the PVD size |

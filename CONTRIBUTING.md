@@ -31,6 +31,11 @@ mise run go:check   # build, vet and test every module, cross-compile every targ
 mise run go:lint    # unused, ineffassign, staticcheck, errcheck
 ```
 
+After you push, `mise run ci:watch` waits for GitHub Actions on your commit and
+exits non-zero if anything failed. Use it rather than a `sleep` loop: `gh run
+list --commit` matches the full 40-character SHA only, and returns an empty list
+for a short one — which looks exactly like a run that has not started.
+
 `go:check` covers four separate Go modules and cross-compiles for Linux and
 Windows as well as macOS. That is not ceremony: deleting a function from
 `sysfile_other.go` once passed every check being run, because they were all

@@ -302,7 +302,7 @@ func runMCP(args []string) error {
 		return err
 	}
 	v := values{fs}
-	list := v.Bool("list")
+	list, addr := v.Bool("list"), v.String("http")
 	if list {
 		// What the documentation is generated from. Printed by the binary so no
 		// tool name, description or annotation is ever transcribed — the same
@@ -314,6 +314,9 @@ func runMCP(args []string) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(tools)
+	}
+	if addr != "" {
+		return mcpserver.ServeHTTP(context.Background(), addr, mcpDeps())
 	}
 	return mcpserver.Serve(context.Background(), mcpDeps())
 }

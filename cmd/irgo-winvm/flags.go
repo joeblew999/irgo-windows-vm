@@ -110,6 +110,7 @@ func isoDeleteFlags() *flag.FlagSet {
 func mcpFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
+	fs.String("http", "", "serve over HTTP on this address instead of stdin and stdout; loopback only (127.0.0.1:8129). Read docs/THREAT-MODEL.md first")
 	return fs
 }
 

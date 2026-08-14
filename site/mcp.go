@@ -220,11 +220,38 @@ One thing is still unproven: a **genuinely long** job. The detached path works
 and survives the client exiting, but the 45-minute ` + "`vm-create -install`" + ` it was
 written for has not been driven over MCP.
 
+## Over HTTP, on this machine only
+
+` + "`irgo-winvm mcp -http 127.0.0.1:8129`" + ` serves the same tools over HTTP instead
+of stdin and stdout. **Read the [threat model](threat-model.html) first**: the
+product is "run this arbitrary binary on my machine", so anything reaching that
+port can execute code of its choosing in the guest.
+
+A non-loopback address is **refused**, not warned about — authentication is not
+built yet, so the only defence is that nothing off this machine can reach it. A
+bare ` + "`:8129`" + ` is refused too: it reads like a local default and binds every
+interface, and it is rejected rather than quietly rewritten, because rewriting
+would make the flag do something other than what it says.
+
+The session is stateless, which the current protocol revision requires — a
+stateful server negotiates down to the older one. GET and DELETE return 405, and
+server-to-client requests are rejected outright, which is why a long job is
+keyed by an id in the tool arguments rather than by a session.
+
+DNS rebinding protection is on: a request arriving on loopback with a
+non-localhost ` + "`Host`" + ` header is rejected. That defence comes from the SDK, and
+the work here was to leave it alone.
+
 ## What it does not do yet
 
-Remote access — the server over HTTP rather than stdin and stdout — is not
-built. It is remote code execution by design and needs its own authentication,
-upload path and locking, so it waits until this half has run against a real VM.
+**Authentication.** Until it exists, the HTTP transport is loopback-only by
+refusal rather than by default.
+
+**Uploads.** ` + "`app-create`" + ` takes a path on the server's filesystem, so a remote
+agent with a freshly cross-compiled binary and no shared disk cannot yet do the
+one thing this tool is for.
+
+**A lock.** Two clients could drive one VM at once.
 `)
 	return b.String(), nil
 }

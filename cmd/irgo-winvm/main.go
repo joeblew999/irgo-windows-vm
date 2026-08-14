@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joeblew999/irgo-windows-vm/command"
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
 
@@ -90,54 +91,60 @@ func main() {
 	}
 }
 
-// command is one thing this tool does.
+// cmd pairs a declared command with the function that performs it.
 //
-// The table below is the only place a command is declared. Dispatch reads it,
-// the usage text is generated from it, `irgo-winvm commands` prints it, and CI
-// checks the documentation against that output.
-//
-// It was a switch and a hand-typed usage block — two copies of the same list,
-// already disagreeing about whether `-h` worked on every command. A flag
-// reference page and a CI check would have made four copies. One list is the
-// only way this stays true: a command that is not here does not exist, and one
-// that is here cannot be missing from the usage or the docs.
-type command struct {
-	Name    string
-	Summary string
-	// Undo names the command that reverses this one, so the usage can pair
-	// them. Every make has one; that is the repository's rule, not a detail.
-	Undo string
-	// IsUndo keeps a reversing command out of the first column, since it is
-	// already printed beside the command it undoes.
-	IsUndo bool
-	Run    func(args []string) error
+// The declaration lives in package command, which the MCP server imports; the
+// handler lives here, because running a command is this program's job and
+// nothing else's. Nothing enumerates command names twice: `commands` below is
+// built by walking command.All, and `handlers` is keyed by the names that list
+// already declares.
+type cmd struct {
+	command.Command
+	Run func(args []string) error
 }
 
-// Assigned in init, not at declaration: `commands` contains runCommands, which
-// reads `commands`, and Go rejects that as an initialization cycle.
-var commands []command
+// Assigned in init, not at declaration: the table contains runCommands, which
+// reads the table, and Go rejects that as an initialization cycle.
+var commands []cmd
+
+// handlers is the wiring: one entry per declared command, keyed by its name.
+//
+// Package level rather than a local in init, so the test that checks it against
+// command.All can see it. There is no initialization cycle: it refers to
+// runCommands, which reads `commands`, and `commands` has no initializer — it
+// is filled in by init below.
+var handlers = map[string]func([]string) error{
+	"iso-create": runISOCreate,
+	"vm-create":  runVMCreate,
+	"app-create": runAppCreate,
+
+	"iso-delete": runISODelete,
+	"vm-delete":  runVMDelete,
+	"app-delete": runAppDelete,
+
+	"vm-screen": runVMScreen,
+	"doctor":    runDoctor,
+	"help":      runHelp,
+	"version":   runVersion,
+	"commands":  runCommands,
+}
 
 func init() {
-	commands = []command{
-		{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Run: runISOCreate},
-		{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Run: runVMCreate},
-		{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Run: runAppCreate},
-
-		{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Run: runISODelete},
-		{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Run: runVMDelete},
-		{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Run: runAppDelete},
-
-		{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", Run: runVMScreen},
-		{Name: "doctor", Summary: "what is here, and where the log and screenshots are", Run: runDoctor},
-		{Name: "help", Summary: "the three steps explained, and what your .exe has to be", Run: runHelp},
-		{Name: "version", Summary: "what this binary is", Run: runVersion},
-		{Name: "commands", Summary: "one command name per line, for tooling", Run: runCommands},
+	// Walked in the list's order, so the usage and `irgo-winvm commands` print
+	// what package command declares rather than what a map happened to iterate.
+	//
+	// Both directions are gated: a declared command with no handler leaves Run
+	// nil, which TestEveryCommandIsReachable fails on, and a handler naming nothing
+	// declared is caught by TestEveryHandlerIsADeclaredCommand. Half a check
+	// leaves half the drift invisible.
+	for _, c := range command.All {
+		commands = append(commands, cmd{Command: c, Run: handlers[c.Name]})
 	}
 }
 
 // find returns the command by name. Aliases for help are accepted here rather
-// than in the table, because they are spellings of one command, not commands.
-func find(name string) (command, bool) {
+// than in the list, because they are spellings on a command line, not commands.
+func find(name string) (cmd, bool) {
 	if name == "-h" || name == "--help" {
 		name = "help"
 	}
@@ -146,35 +153,16 @@ func find(name string) (command, bool) {
 			return c, true
 		}
 	}
-	return command{}, false
+	return cmd{}, false
 }
 
 // usage goes to stderr, for the case where the user got it wrong. The same
 // text on stdout is what a bare `irgo-winvm` prints.
 func usage() { fmt.Fprint(os.Stderr, usageText()) }
 
-// usageText is generated from the table, so it cannot list a command that does
+// usageText is generated from the list, so it cannot name a command that does
 // not exist or omit one that does.
-func usageText() string {
-	var b strings.Builder
-	b.WriteString("irgo-winvm — build a Go program on your Mac, run it on real Windows.\n\n")
-	b.WriteString("  MAKE                                                 UNDO\n")
-	for _, c := range commands {
-		if c.Undo == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "  %-12s %-39s %s\n", c.Name, c.Summary, c.Undo)
-	}
-	b.WriteString("\n")
-	for _, c := range commands {
-		if c.Undo != "" || c.IsUndo {
-			continue
-		}
-		fmt.Fprintf(&b, "  %-12s %s\n", c.Name, c.Summary)
-	}
-	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
-	return b.String()
-}
+func usageText() string { return command.UsageText() }
 
 func runVersion([]string) error { fmt.Println(version); return nil }
 

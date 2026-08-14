@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
+
+	"github.com/joeblew999/irgo-windows-vm/command"
 )
 
 // TestHelpIsNotAnError covers the whole point of swallowing flag.ErrHelp: -h
@@ -187,4 +189,35 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		}
 		seen[c.code] = c.name
 	}
+}
+
+// TestEveryHandlerIsADeclaredCommand is the direction the split created.
+//
+// The list of commands lives in package command so the MCP server can import
+// it; the functions that run them stay here. That is one list and one wiring
+// map, and the map is keyed by strings — so a typo, or a handler for a command
+// that was renamed, silently wires nothing.
+//
+// The other direction is already covered: a declared command with no handler
+// leaves Run nil, and TestTableIsWellFormed fails on that. This is the half
+// that would otherwise be invisible, because an unused map entry compiles,
+// vets, lints and does nothing.
+//
+// Negative control, run by hand: adding "iso-crate": runISOCreate to handlers
+// fails this and names iso-crate.
+func TestEveryHandlerIsADeclaredCommand(t *testing.T) {
+	if len(handlers) == 0 {
+		t.Fatal("no handlers; this test would pass vacuously")
+	}
+	for name := range handlers {
+		if _, ok := command.Find(name); !ok {
+			t.Errorf("handlers has %q, which package command does not declare — "+
+				"it is wired to nothing and can never run", name)
+		}
+	}
+	// Sizes agree, so neither list can carry an entry the loop above misses.
+	if len(handlers) != len(command.All) {
+		t.Errorf("%d handlers against %d declared commands", len(handlers), len(command.All))
+	}
+	t.Logf("%d handlers, all declared", len(handlers))
 }

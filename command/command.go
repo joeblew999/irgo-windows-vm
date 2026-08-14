@@ -38,6 +38,30 @@ type Command struct {
 	// IsUndo keeps a reversing command out of the first column, since it is
 	// already printed beside the command it undoes.
 	IsUndo bool
+
+	// ReadOnly marks a command that changes nothing: it reports, it does not
+	// act. An agent can call one of these to find out where it is without
+	// having to reason about consequences.
+	ReadOnly bool
+
+	// Destructive marks a command that removes something expensive to get
+	// back — a 45-minute install, a 4.2 GB download from a rate-limited
+	// source. These keep -force as an argument that is never defaulted.
+	//
+	// Declared rather than inferred. The obvious rule, "IsUndo means
+	// destructive", is close enough to look right and wrong in both
+	// directions: it would be a guess, and the guess is shipped to an agent
+	// as a claim about what is safe to call.
+	Destructive bool
+
+	// OverMCP is false for a command that makes no sense as a tool.
+	//
+	// `commands` and `version` exist for tooling that has to scrape a binary;
+	// a connected client already has the tool list and the server's version
+	// from the protocol. `help` is the usage text, which a client gets as tool
+	// descriptions. Exposing them would be three tools that answer questions
+	// the transport already answered.
+	OverMCP bool
 }
 
 // All is the only place a command is declared.
@@ -50,19 +74,20 @@ type Command struct {
 //
 // Order is the order the usage prints, which is the order they are run in.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete"},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete"},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete"},
+	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", OverMCP: true},
 
-	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true},
-	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true},
+	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Destructive: true, OverMCP: true},
+	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Destructive: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Destructive: true, OverMCP: true},
 
-	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck"},
-	{Name: "doctor", Summary: "what is here, and where the log and screenshots are"},
-	{Name: "help", Summary: "the three steps explained, and what your .exe has to be"},
-	{Name: "version", Summary: "what this binary is"},
-	{Name: "commands", Summary: "one command name per line, for tooling"},
+	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
+	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
+	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
+	{Name: "version", Summary: "what this binary is", ReadOnly: true},
+	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},
+	{Name: "mcp", Summary: "serve these commands to an agent over MCP, on stdin and stdout"},
 }
 
 // Find returns the command by name.

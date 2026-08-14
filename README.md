@@ -92,6 +92,14 @@ somewhere between two states.
 Two more, for when something is wrong: **`vm-screen`** photographs the VM, and
 **`doctor`** reports what is here. Neither changes anything.
 
+And one for an agent rather than a person: **`irgo-winvm mcp`** serves these
+same commands over the Model Context Protocol, on stdin and stdout. It is the
+point of the whole repository pointed at its most likely user — an agent writing
+a Go desktop app on a Mac cannot find out whether it works on Windows, and this
+lets it ask, get a real answer from real Windows, and see the screen when the
+answer is that it hung. The tools are generated from the command list, so they
+are the commands above and nothing else.
+
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
 

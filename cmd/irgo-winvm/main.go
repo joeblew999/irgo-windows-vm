@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/mcpserver"
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
 
@@ -127,6 +129,7 @@ var handlers = map[string]func([]string) error{
 	"help":      runHelp,
 	"version":   runVersion,
 	"commands":  runCommands,
+	"mcp":       runMCP,
 }
 
 func init() {
@@ -165,6 +168,40 @@ func usage() { fmt.Fprint(os.Stderr, usageText()) }
 func usageText() string { return command.UsageText() }
 
 func runVersion([]string) error { fmt.Println(version); return nil }
+
+// runMCP serves the commands to an agent.
+//
+// The handler each tool calls is the same function this program dispatches to,
+// through the same table — so a tool cannot do anything the CLI cannot, and
+// cannot do it differently. That is the rule mcpserver's doc comment states,
+// and this closure is where it is actually enforced.
+//
+// utmvm.Capture is not optional here. stdout is the JSON-RPC channel, and every
+// command announces its progress; without the capture the first vm-create would
+// write status lines into the middle of the protocol stream. The captured text
+// becomes the tool's result, which is where an agent needs it anyway.
+func runMCP(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "Usage of mcp:\n"+
+			"  Serves the commands above to an agent over the Model Context Protocol,\n"+
+			"  on stdin and stdout. It takes no flags: a client spawns it and speaks\n"+
+			"  JSON-RPC. Nothing else should be written to stdout while it runs.\n")
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return mcpserver.Serve(context.Background(), mcpserver.Deps{
+		Version: version,
+		Run: func(_ context.Context, name string, args []string) (string, error) {
+			c, ok := find(name)
+			if !ok || c.Run == nil {
+				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
+			}
+			return utmvm.Capture(func() error { return c.Run(args) })
+		},
+	})
+}
 
 // runCommands prints one name per line.
 //

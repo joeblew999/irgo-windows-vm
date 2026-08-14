@@ -44,7 +44,7 @@ darwin.
 
 The split is load-bearing, not organisational. `glaze` and `native` are what
 this repository exists to test, and they must not reach the binary a user
-downloads: `go list -deps ./cmd/irgo-winvm` names eleven third-party modules and
+downloads: `go list -deps ./cmd/irgo-winvm` names nineteen third-party modules and
 neither of them is there. `site` is separate for the same reason in the other
 direction — it needs a markdown parser that the tool has no business shipping.
 
@@ -202,9 +202,20 @@ anywhere in the module graph:
 
 | licence | modules |
 |---|---|
-| MIT | `anchore/go-lzo`, `diskfs/go-diskfs`, `djherbis/times`, `sirupsen/logrus` |
-| BSD | `elliotwutingfeng/asciiset`, `google/uuid`, `pierrec/lz4`, `pkg/xattr`, `ulikunitz/xz`, `golang.org/x/sys` |
+| MIT | `anchore/go-lzo`, `diskfs/go-diskfs`, `djherbis/times`, `sirupsen/logrus`, `google/jsonschema-go`, `modelcontextprotocol/go-sdk`, `segmentio/asm`, `segmentio/encoding` |
+| BSD | `elliotwutingfeng/asciiset`, `google/uuid`, `pierrec/lz4`, `pkg/xattr`, `ulikunitz/xz`, `yosida95/uritemplate`, `golang.org/x/sys`, `golang.org/x/oauth2`, `golang.org/x/sync`, `golang.org/x/time` |
 | Apache-2.0 | `klauspost/compress` |
+
+Nineteen modules, up from eleven when the MCP server landed. The eight it added
+are `go-sdk` and everything it pulls: `jsonschema-go`, `segmentio/asm`,
+`segmentio/encoding`, `uritemplate`, `x/oauth2`, `x/sync` and `x/time`. Worth
+knowing that `x/oauth2` arrives whether or not the auth package is used —
+importing `mcp` alone is enough.
+
+`go-sdk`'s LICENSE describes a transition: Apache-2.0 for new contributions, MIT
+for older un-relicensed ones. Both are permissive and neither adds a condition
+beyond attribution. Checked for `NOTICE` files: none of the eight ships one, so
+there is nothing to carry.
 
 The Apache-2.0 one is the only one with a condition beyond attribution, and it
 ships no `NOTICE` file, so there is nothing to carry. Re-check this if you add a

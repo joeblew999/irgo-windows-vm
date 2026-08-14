@@ -28,6 +28,27 @@ without it Gatekeeper reports the binary as damaged.
 
 macOS on Apple Silicon. It installs UTM itself if you do not have it.
 
+## Try it
+
+Three commands, in this order. Each is cheap to repeat — if it is already done
+it says so and stops.
+
+```sh
+irgo-winvm iso-create -fetch    # the Windows installer
+irgo-winvm vm-create -install   # a VM, with Windows installed on it
+irgo-winvm app-create your.exe  # your binary, run in that VM, output back
+```
+
+| | cost | |
+|---|---|---|
+| `iso-create -fetch` | **4.2 GB**, ~250 s | downloaded once; ~40 s to rebuild afterwards |
+| `vm-create -install` | **about 45 minutes** | an estimate, not a measurement — unattended, you click nothing |
+| `app-create` | **10.8 s** | measured 12 Aug 2026, cross-compiled on the Mac with no toolchain |
+
+Flags for all of them are in the
+[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html),
+captured from the binary.
+
 ## What it is for
 
 This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)** — a

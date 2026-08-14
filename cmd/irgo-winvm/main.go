@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -233,6 +234,7 @@ func explicitOutput(args []string) (path string, given bool) {
 // becomes the tool's result, which is where an agent needs it anyway.
 func runMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	list := fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage of mcp:\n"+
 			"  Serves the commands above to an agent over the Model Context Protocol,\n"+
@@ -242,7 +244,25 @@ func runMCP(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return mcpserver.Serve(context.Background(), mcpserver.Deps{
+	if *list {
+		// What the documentation is generated from. Printed by the binary so no
+		// tool name, description or annotation is ever transcribed — the same
+		// rule that makes the command reference trustworthy.
+		tools, err := mcpserver.Describe(mcpDeps())
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(tools)
+	}
+	return mcpserver.Serve(context.Background(), mcpDeps())
+}
+
+// mcpDeps is the wiring, in one place, so serving and describing cannot
+// disagree about what the server is.
+func mcpDeps() mcpserver.Deps {
+	return mcpserver.Deps{
 		Version:    version,
 		Classify:   exitCode,
 		Screenshot: screenshotForMCP,
@@ -253,7 +273,7 @@ func runMCP(args []string) error {
 			}
 			return utmvm.Capture(func() error { return c.Run(args) })
 		},
-	})
+	}
 }
 
 // runCommands prints one name per line.

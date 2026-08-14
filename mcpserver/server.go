@@ -257,6 +257,41 @@ func errorResult(s string) *mcp.CallToolResult {
 	}
 }
 
+// Describe returns what a client would see on connecting: every tool, with its
+// description, annotations and input schema.
+//
+// It exists so the documentation can be captured from the binary rather than
+// transcribed, the way the command reference already is. The site generator
+// calls `irgo-winvm mcp -list` and renders this; it does not import this
+// package, which would drag the protocol SDK and its eight dependencies into a
+// module that requires only a markdown parser.
+//
+// Built from the same New() the server runs, so a page cannot describe a tool
+// the server does not offer.
+func Describe(d Deps) ([]*mcp.Tool, error) {
+	ctx := context.Background()
+	server := New(d)
+	ct, st := mcp.NewInMemoryTransports()
+
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx, st) }()
+
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "irgo-winvm-describe", Version: d.Version}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cs.Close(); <-done }()
+
+	// Listed over the protocol rather than read out of the Go values, so what
+	// is documented is what a client actually receives — including whatever the
+	// SDK does to it on the way out.
+	res, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return res.Tools, nil
+}
+
 // Serve runs the server on stdin and stdout until the client disconnects.
 //
 // StdioTransport is the convention clients spawn a server with, and the only

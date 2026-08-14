@@ -93,6 +93,9 @@ func TestEveryPageReachesBothRenderings(t *testing.T) {
 			if fi.Size() == 0 {
 				t.Errorf("%s is empty; an empty page is worse than a missing one because it still serves", markdownName(p.Out))
 			}
+			if !strings.Contains(sitemap, "<loc>https://example.test/docs/"+markdownName(p.Out)+"</loc>") {
+				t.Errorf("%s is published but %s does not list it", markdownName(p.Out), sitemapFile)
+			}
 		})
 	}
 }
@@ -125,9 +128,10 @@ func TestSitemapIsValidXML(t *testing.T) {
 	if err := xml.Unmarshal([]byte(raw), &doc); err != nil {
 		t.Fatalf("sitemap does not parse: %v", err)
 	}
-	if len(doc.URLs) != len(pages)+2 {
-		t.Errorf("sitemap has %d urls, want %d (every page plus the two corpus files)",
-			len(doc.URLs), len(pages)+2)
+	// Every page twice — HTML and markdown — plus the two corpus files.
+	if want := len(pages)*2 + 2; len(doc.URLs) != want {
+		t.Errorf("sitemap has %d urls, want %d (each page as HTML and markdown, plus the two corpus files)",
+			len(doc.URLs), want)
 	}
 	for _, u := range doc.URLs {
 		if !strings.HasPrefix(u.Loc, "https://") {

@@ -137,6 +137,13 @@ func renderCorpusIndex(entries []corpusEntry, base, summary string, stamp buildS
 		fmt.Fprintf(&b, "- [%s](%s%s): %s\n", e.Title, base, e.Out, e.Blurb)
 	}
 
+	b.WriteString("\n## One page at a time, as markdown\n\n")
+	b.WriteString("Every page above is also served as plain markdown, with the extension\n")
+	b.WriteString("swapped — so the HTML page and its source are one character apart:\n\n")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "- [%s](%s%s)\n", markdownName(e.Out), base, markdownName(e.Out))
+	}
+
 	b.WriteString("\n## Everything at once\n\n")
 	fmt.Fprintf(&b, "- [%s](%s%s): every page above in one file, for reading in a single request\n",
 		corpusFull, base, corpusFull)
@@ -209,6 +216,10 @@ func renderSitemap(entries []corpusEntry, base string) []byte {
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	for _, e := range entries {
 		fmt.Fprintf(&b, "  <url><loc>%s</loc></url>\n", escapeXML(base+e.Out))
+		// The plain-text form of the same page. Published but absent from here
+		// at first, which is the same mistake as publishing llms.txt with no
+		// sitemap: a rendering nothing advertises is a rendering nothing finds.
+		fmt.Fprintf(&b, "  <url><loc>%s</loc></url>\n", escapeXML(base+markdownName(e.Out)))
 	}
 	for _, f := range []string{corpusIndex, corpusFull} {
 		fmt.Fprintf(&b, "  <url><loc>%s</loc></url>\n", escapeXML(base+f))

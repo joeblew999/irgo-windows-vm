@@ -20,9 +20,8 @@
 // exists to prevent. It lives in README.md now.
 //
 // What the template still supplies is labels, not statements: the navigation
-// titles and the pages' meta descriptions, below, and a heading over the
-// screenshot gallery. Those name things rather than claim anything about them,
-// and a nav cannot be generated from prose.
+// titles and the pages' meta descriptions, below. Those name things rather than
+// claim anything about them, and a nav cannot be generated from prose.
 package main
 
 import (
@@ -84,7 +83,6 @@ type page struct {
 	Body         template.HTML
 	Nav          []nav
 	Repo         string
-	Screens      []string
 
 	// Build is the commit and time this page was generated, so a cached copy
 	// can be told from a current one. Two agents were served a page from a
@@ -249,9 +247,6 @@ func build(root, out, repo, siteURL, sha string) error {
 
 		var rendered bytes.Buffer
 		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line()}
-		if p.Out == "index.html" {
-			data.Screens = screens
-		}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}

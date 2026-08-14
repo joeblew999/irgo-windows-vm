@@ -150,6 +150,14 @@ var notAStage = map[string]bool{
 	"vm-screen": true,
 	"probe":     true,
 
+	// booting is retired. The boot wait is photographed every few seconds now,
+	// as booting-1, booting-2 and so on, and plain "booting" is the single shot
+	// the old code took when the window opened. The runtime directory still
+	// holds four of them, so without this line `vm:shots` republishes a file
+	// that duplicates booting-1 — the same UEFI "Start boot option" screen,
+	// 338,933 bytes against 339,589 — and nothing in the README captions it.
+	"booting": true,
+
 	// app-running belongs to a program, not to the machine. It is worth taking
 	// — a detached GUI app returns while its window is on a desktop nobody is
 	// watching — but docs/screens/vm documents the VM's own lifecycle, and what

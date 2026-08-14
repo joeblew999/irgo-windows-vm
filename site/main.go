@@ -83,6 +83,16 @@ type page struct {
 	Nav          []nav
 	Repo         string
 	Screens      []string
+
+	// Source is the markdown file this page was rendered from, empty for the
+	// one page captured from the binary.
+	//
+	// The template needs it because the footer used to tell every page's reader
+	// that "if this page is wrong, the markdown is wrong" — which is false on
+	// the command reference, on the very page whose own body says it was
+	// captured from the binary. Somebody finding a wrong default was being sent
+	// to edit a file that does not exist.
+	Source string
 }
 
 func main() {
@@ -225,7 +235,7 @@ func build(root, out, repo, siteURL string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src}
 		if p.Out == "index.html" {
 			data.Screens = screens
 		}

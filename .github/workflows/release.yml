@@ -30,16 +30,63 @@ permissions:
 
 jobs:
   release:
-    # Built on macOS so the binaries are produced on the platform they target,
-    # and so `go:check` has already run against a real Mac before anything ships.
+    # Built on macOS so the binaries are produced on the platform they target.
+    # The gate itself is not repeated here — see the guard below.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v4.2.4
 
-      # Nothing ships that has not passed the same gate a contributor runs.
-      - run: mise run go:check
-      - run: mise run go:lint
+      # go:build compiles for two Mac architectures; same cache as everywhere
+      # else so it is not doing that from cold.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      # Nothing ships that has not passed the gate — but the gate is not run
+      # again here.
+      #
+      # A tag names a commit that `check` has already run on, on both a Mac and
+      # ubuntu. Re-running it cost 124s of a 171s release, 72% of the whole
+      # thing, to re-derive an answer GitHub already had.
+      #
+      # So this asks instead, and refuses to publish if the answer is missing or
+      # red. That is stricter than what it replaced in one way worth naming: the
+      # old version would happily build a tag whose commit had never been
+      # checked, because it checked it right there and then. This will not.
+      #
+      # Only for a real publish. A workflow_dispatch dry run builds nothing that
+      # reaches anybody, so it does not need the guard and should not be blocked
+      # by a branch that has never been pushed.
+      - name: the tagged commit must have a green check
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.sha }}"
+          echo "commit: $sha"
+
+          # --json is used rather than parsing text: a column layout change
+          # would silently turn this into a check that passes on anything.
+          runs=$(gh run list --workflow=check.yml --commit "$sha" \
+                   --json conclusion,status,databaseId,url)
+
+          if [ "$(echo "$runs" | jq 'length')" = "0" ]; then
+            echo "::error::no check run exists for $sha — refusing to publish an unverified commit"
+            exit 1
+          fi
+          echo "$runs" | jq -r '.[] | "  \(.status)/\(.conclusion // "pending")  \(.url)"'
+
+          if [ "$(echo "$runs" | jq '[.[] | select(.conclusion == "success")] | length')" = "0" ]; then
+            echo "::error::no SUCCESSFUL check run for $sha — refusing to publish"
+            exit 1
+          fi
+          echo "a green check exists for this commit; publishing"
 
       - name: build
         env:

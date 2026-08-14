@@ -118,6 +118,23 @@ func renderCorpusIndex(entries []corpusEntry, base, summary string) []byte {
 	b.WriteString("\n## Everything at once\n\n")
 	fmt.Fprintf(&b, "- [%s](%s%s): every page above in one file, for reading in a single request\n",
 		corpusFull, base, corpusFull)
+
+	// Why this file rather than the repository's markdown.
+	//
+	// Not a general preference for the site over the source: it is that one
+	// page has no source. Asked how an agent should read these docs, a capable
+	// model recommended fetching the .md files from raw.githubusercontent.com —
+	// which works for five of the six and silently drops the command reference,
+	// producing documentation that looks complete with no flag reference in it.
+	b.WriteString("\n## How this is generated\n\n")
+	b.WriteString("Every page here is generated from markdown in the repository, so the source\n")
+	b.WriteString("is authoritative and this is never edited by hand.\n\n")
+	b.WriteString("One page is different, and it is the reason to prefer these files over\n")
+	b.WriteString("fetching the raw markdown from GitHub: the command reference has **no source\n")
+	b.WriteString("file**. It is captured from the compiled binary at build time — `irgo-winvm\n")
+	b.WriteString("help` and `-h` for every command — so that no flag, default or usage string\n")
+	b.WriteString("is ever transcribed. Fetching the repository's .md files gets you five of the\n")
+	b.WriteString("six pages and silently omits it.\n")
 	return b.Bytes()
 }
 

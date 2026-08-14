@@ -199,4 +199,19 @@ starts from nothing.
 - **[RESULTS.md](RESULTS.md)** — what has been measured, dated.
 - **[UPSTREAM.md](UPSTREAM.md)** — what was found and where it was fixed.
 
+## Reading this with a machine
+
+The whole documentation is published as one file:
+
+- **[llms-full.txt](https://joeblew999.github.io/irgo-windows-vm/llms-full.txt)**
+  — every page, one request, ~67 KB of markdown.
+- **[llms.txt](https://joeblew999.github.io/irgo-windows-vm/llms.txt)** — the
+  index, if you would rather choose first.
+
+Prefer those over fetching the `.md` files from this repository. Five of the six
+pages are here as markdown; the sixth, the command reference, **has no source
+file** — it is captured from the compiled binary at build time so that no flag
+or default is ever transcribed. Fetching the raw markdown gets you documentation
+that looks complete with no flag reference in it.
+
 MIT licensed — see [LICENSE](LICENSE).

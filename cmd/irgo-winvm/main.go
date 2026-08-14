@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/job"
 	"github.com/joeblew999/irgo-windows-vm/mcpserver"
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
 )
@@ -120,6 +121,7 @@ var handlers = map[string]func([]string) error{
 	"help":      runHelp,
 	"version":   runVersion,
 	"commands":  runCommands,
+	"status":    runStatus,
 	"mcp":       runMCP,
 }
 
@@ -221,6 +223,62 @@ func explicitOutput(args []string) (path string, given bool) {
 	return "", false
 }
 
+// runStatus reports long-running work.
+//
+// For a person as much as for an agent: an agent can leave a 45-minute install
+// going and disconnect, and this is how anyone finds out whether it is still
+// alive. It reports liveness by asking the operating system, not by trusting a
+// file that says "running".
+func runStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "Usage of status:\n"+
+			"  status          every job, newest first\n"+
+			"  status <id>     one job\n\n"+
+			"  Jobs are long-running commands started detached — vm-create -install\n"+
+			"  and iso-create -fetch. Started over MCP they outlive the client that\n"+
+			"  asked for them, so this is how you find out what happened.\n")
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	say := utmvm.Reporter("status")
+
+	if fs.NArg() == 1 {
+		s, err := job.Status(fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		reportJob(say, s)
+		return nil
+	}
+
+	all, err := job.All()
+	if err != nil {
+		return err
+	}
+	if len(all) == 0 {
+		say("no jobs have been started")
+		say("jobs live in %s", utmvm.Home(job.Dir()))
+		return nil
+	}
+	for _, s := range all {
+		reportJob(say, s)
+	}
+	say("%d job(s), in %s", len(all), utmvm.Home(job.Dir()))
+	return nil
+}
+
+// reportJob prints one job. "running" and "finished" are what the operating
+// system says, not what the record claims.
+func reportJob(say func(string, ...any), s job.State) {
+	state := "finished"
+	if s.Alive {
+		state = "running"
+	}
+	say("%-28s %-9s %-8s %s %s", s.ID, state, s.Elapsed, s.Command, strings.Join(s.Args, " "))
+}
+
 // runMCP serves the commands to an agent.
 //
 // The handler each tool calls is the same function this program dispatches to,
@@ -272,6 +330,13 @@ func mcpDeps() mcpserver.Deps {
 				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
 			}
 			return utmvm.Capture(func() error { return c.Run(args) })
+		},
+		StartJob: func(name string, args []string) (string, error) {
+			s, err := job.Start(name, args)
+			if err != nil {
+				return "", err
+			}
+			return s.ID, nil
 		},
 	}
 }

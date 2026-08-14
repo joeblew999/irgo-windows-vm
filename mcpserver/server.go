@@ -47,6 +47,13 @@ type Deps struct {
 	// boot and a working one are identical — that is why vm-screen exists at
 	// all — and doubly so for a caller that cannot look at a screen.
 	Screenshot func(ctx context.Context, args []string) (png []byte, output string, err error)
+
+	// StartJob runs a long command detached and returns its id.
+	//
+	// vm-create -install is about 45 minutes; every client times out long
+	// before that, so blocking means the call is abandoned while the install
+	// carries on and the agent has nothing to ask about it.
+	StartJob func(name string, args []string) (id string, err error)
 }
 
 // argsSchema is the input every tool takes: the command line, as an array.
@@ -144,6 +151,23 @@ func handler(name string, d Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Long work is started, not waited on. Which calls are long is declared
+		// on the command — see command.Command.Detach — not guessed from a
+		// duration nobody measures.
+		if c, ok := command.Find(name); ok && c.DetachedBy(in.Args) && d.StartJob != nil {
+			id, sErr := d.StartJob(name, in.Args)
+			if sErr != nil {
+				return failure(name, "", sErr, d.Classify), nil
+			}
+			r := textResult(fmt.Sprintf(
+				"%s started as job %s and is running in the background.\n"+
+					"It outlives this connection. Call `status` with that id to see whether it is "+
+					"still alive and how long it has been going, and `vm-screen` to see what it is doing.",
+				name, id))
+			r.StructuredContent = started{Command: name, Job: id, Running: true}
+			return r, nil
+		}
+
 		out, err := d.Run(ctx, name, in.Args)
 		if err != nil {
 			// The output is returned alongside the error, not instead of it.
@@ -203,6 +227,14 @@ func textResult(s string) *mcp.CallToolResult {
 // and correct itself, and that protocol errors are for exceptional conditions.
 // A missing VM is something an agent fixes by creating one, not a transport
 // failure.
+// started is what a caller gets instead of a result it would have waited 45
+// minutes for.
+type started struct {
+	Command string `json:"command"`
+	Job     string `json:"job"`
+	Running bool   `json:"running"`
+}
+
 // outcome is the machine-readable half of a failed result.
 //
 // An agent must not have to parse English to decide what to do next. The

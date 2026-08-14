@@ -162,12 +162,29 @@ boot and a working one are identical — that is why the command exists — and 
 file path is useless to a caller that cannot open one, or that is on another
 machine.
 
-## What it does not do yet
+## The long calls do not block
 
-` + "`vm-create -install`" + ` takes about 45 minutes and every client times out long
-before that. Until long-running work returns a handle, that call blocks and the
-install carries on without anything to ask about it. That is the next piece of
-work, not a property of the design.
+` + "`vm-create -install`" + ` takes about 45 minutes and ` + "`iso-create -fetch`" + ` downloads
+4.2 GB. Both start the work and return a job id immediately, because every
+client times out long before that:
+
+` + "```json" + `
+{"command": "vm-create", "job": "vm-create-20260814-150000", "running": true}
+` + "```" + `
+
+The work runs in its own process group and outlives the connection that asked
+for it — closing the client does not kill the install. Call ` + "`status`" + ` with the id
+to find out whether it is still alive, and ` + "`vm-screen`" + ` to see what it is doing.
+
+Whether a job is alive is measured by signalling the process, not by reading a
+file that claims it is running. A handle that says "running" forever because
+nothing checked is worse than no handle.
+
+Starting the same command with the same arguments twice returns the job already
+running rather than beginning a second one — a client that timed out simply asks
+again, and two installs against one VM is the failure that would cause.
+
+## What it does not do yet
 
 Remote access — the server over HTTP rather than stdin and stdout — is not
 built. It is remote code execution by design and needs its own authentication,

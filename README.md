@@ -90,8 +90,11 @@ says so and stops. Each has an undo — `iso-delete`, `vm-delete`, `app-delete` 
 so a step that fails can be cleaned and re-run rather than leaving the machine
 somewhere between two states.
 
-Two more, for when something is wrong: **`vm-screen`** photographs the VM, and
-**`doctor`** reports what is here. Neither changes anything.
+Three more, none of which change anything: **`vm-screen`** photographs the VM,
+**`doctor`** reports what is here, and **`status`** lists long-running work —
+what is still going, what finished, and how long it has been. Whether a job is
+alive is answered by asking the operating system, not by reading a file that
+says so.
 
 And one for an agent rather than a person: **`irgo-winvm mcp`** serves these
 same commands over the Model Context Protocol, on stdin and stdout. It is the
@@ -100,6 +103,11 @@ a Go desktop app on a Mac cannot find out whether it works on Windows, and this
 lets it ask, get a real answer from real Windows, and see the screen when the
 answer is that it hung. The tools are generated from the command list, so they
 are the commands above and nothing else.
+
+The two calls that take a long time — `vm-create -install` and `iso-create
+-fetch` — start the work and hand back a job id rather than blocking for
+45 minutes on a connection that will time out. The work outlives the client that
+asked for it; `status` is how anyone finds out what happened.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.

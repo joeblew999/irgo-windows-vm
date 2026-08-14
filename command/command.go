@@ -54,6 +54,18 @@ type Command struct {
 	// as a claim about what is safe to call.
 	Destructive bool
 
+	// Detach names the flag that makes this command long-running.
+	//
+	// With that flag present, an MCP call starts the work and returns a handle
+	// instead of blocking: vm-create -install is about 45 minutes and every
+	// client times out long before that. Without it the same command is quick
+	// and runs inline, so the caller gets its answer rather than a job to poll.
+	//
+	// A flag rather than a duration, because the duration is a property of what
+	// was asked for, not of the command. `iso-create` rebuilds from a local
+	// .esd in about 50 seconds; `iso-create -fetch` downloads 4.2 GB first.
+	Detach string
+
 	// OverMCP is false for a command that makes no sense as a tool.
 	//
 	// `commands` and `version` exist for tooling that has to scrape a binary;
@@ -74,8 +86,8 @@ type Command struct {
 //
 // Order is the order the usage prints, which is the order they are run in.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Detach: "-install", OverMCP: true},
 	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Destructive: true, OverMCP: true},
@@ -84,10 +96,28 @@ var All = []Command{
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
+	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},
 	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},
 	{Name: "mcp", Summary: "serve these commands to an agent over MCP, on stdin and stdout"},
+}
+
+// DetachedBy reports whether these arguments make this command long-running.
+//
+// Matching -install and -install=true and -install true alike, because a caller
+// writes whichever it prefers and a missed match means a 45-minute call that
+// blocks — the exact failure jobs exist to prevent.
+func (c Command) DetachedBy(args []string) bool {
+	if c.Detach == "" {
+		return false
+	}
+	for _, a := range args {
+		if a == c.Detach || strings.HasPrefix(a, c.Detach+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // Find returns the command by name.

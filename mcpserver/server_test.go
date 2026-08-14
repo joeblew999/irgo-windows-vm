@@ -423,3 +423,78 @@ func TestPromoteReturnsNoPicture(t *testing.T) {
 		t.Errorf("the output was lost: %q", text(res))
 	}
 }
+
+// TestALongCallStartsAJobInsteadOfBlocking.
+//
+// vm-create -install is about 45 minutes. Every MCP client times out long
+// before that, so blocking means the call is abandoned while the install
+// carries on and the agent has nothing left to ask about it.
+//
+// Negative controls, run by hand: clear Detach on vm-create and this blocks
+// through Run instead; drop the DetachedBy check and the plain vm-create case
+// below starts a job it should have run inline.
+func TestALongCallStartsAJobInsteadOfBlocking(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantJob  bool
+		wantRuns bool
+	}{
+		{"install detaches", []string{"-install"}, true, false},
+		{"install with a value detaches", []string{"-install=true"}, true, false},
+		{"plain vm-create runs inline", []string{}, false, true},
+		{"an unrelated flag runs inline", []string{"-vm", "other"}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ran, startedJob bool
+			ctx := context.Background()
+			server := New(Deps{
+				Version: "test",
+				Run: func(context.Context, string, []string) (string, error) {
+					ran = true
+					return "finished inline", nil
+				},
+				StartJob: func(string, []string) (string, error) {
+					startedJob = true
+					return "vm-create-20260814-150000", nil
+				},
+			})
+			ct, st := mcp.NewInMemoryTransports()
+			done := make(chan error, 1)
+			go func() { done <- server.Run(ctx, st) }()
+			cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "t"}, nil).Connect(ctx, ct, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cs.Close(); <-done }()
+
+			res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+				Name: "vm-create", Arguments: map[string]any{"args": tc.args}})
+			if err != nil {
+				t.Fatalf("calling: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("reported an error: %s", text(res))
+			}
+			if startedJob != tc.wantJob {
+				t.Errorf("started a job = %v, want %v", startedJob, tc.wantJob)
+			}
+			if ran != tc.wantRuns {
+				t.Errorf("ran inline = %v, want %v", ran, tc.wantRuns)
+			}
+			if tc.wantJob {
+				var got started
+				raw, _ := json.Marshal(res.StructuredContent)
+				if uErr := json.Unmarshal(raw, &got); uErr != nil {
+					t.Fatalf("structured content is not the documented shape: %v", uErr)
+				}
+				if got.Job == "" || !got.Running {
+					t.Errorf("the result does not name a running job: %+v", got)
+				}
+				if !strings.Contains(text(res), "status") {
+					t.Error("the result does not tell the agent how to ask about the job")
+				}
+			}
+		})
+	}
+}

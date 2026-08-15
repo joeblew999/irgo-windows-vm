@@ -100,7 +100,7 @@ rewritten — and refuses any non-loopback address outright. Proven by
 `mcpserver/http_test.go`: the refusal cases, the refusal message, refuse before
 listen, and an HTTP round-trip.
 
-### The wider bind and authentication — 15 Aug 2026, `e793e50`
+### The wider bind and authentication — 15 Aug 2026, `136a3e5`
 
 `-allow-remote` consents to a non-loopback bind, and `IRGO_WINVM_TOKEN` is the
 bearer token behind it, compared in constant time through the SDK's
@@ -110,7 +110,7 @@ that starts unauthenticated because a token was missing is refused outright.
 Proven by `mcpserver/http_test.go`: 401 without the token, 405 with it, and the
 SDK's own HTTP client round-tripping a tool call with the token.
 
-### Content-addressed, chunked uploads — 15 Aug 2026, `e793e50`
+### Content-addressed, chunked uploads — 15 Aug 2026, `136a3e5`
 
 `app-upload` stages a binary as `bin/<sha256>.exe` from base64 chunks; the full
 SHA-256 is verified before the committed file exists, a mismatch is removed, and
@@ -118,7 +118,7 @@ an unchanged binary transfers nothing. `app-delete` clears the stage. Proven by
 `utmvm/upload_test.go`: commit and byte equality, mismatch rejection, truncation
 never commits, idempotent retry, and clearing twice.
 
-### The mutation lock — 15 Aug 2026, `e793e50`
+### The mutation lock — 15 Aug 2026, `136a3e5`
 
 One mutation at a time, refused not queued: a flock on `mutation.lock`, taken in
 `runTool` for every mutating command — including the detached job child — with a

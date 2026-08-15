@@ -129,7 +129,8 @@ func isoDeleteFlags() *flag.FlagSet {
 func mcpFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
-	fs.String("http", "", "serve over HTTP on this address instead of stdin and stdout; loopback only (127.0.0.1:8129). Read docs/THREAT-MODEL.md first")
+	fs.String("http", "", "serve over HTTP on this address instead of stdin and stdout; a bare :port means 127.0.0.1. Read docs/THREAT-MODEL.md first")
+	fs.Bool("allow-remote", false, "bind a non-loopback address; requires IRGO_WINVM_TOKEN. Read docs/THREAT-MODEL.md")
 	return fs
 }
 

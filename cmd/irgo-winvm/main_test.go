@@ -366,3 +366,18 @@ func TestRunToolReadOnlyCommandsSkipTheLock(t *testing.T) {
 		t.Fatalf("runTool(doctor) = %v, want nil while the lock is held", err)
 	}
 }
+
+// TestMCPHTTPRefusesANonLoopbackBind goes through runMCP, the real CLI path.
+// It reads the -allow-remote flag, so if mcpFlags stops declaring it the call
+// panics in values.Bool rather than returning an error — this test fails loudly
+// instead of the panic arriving in a running server. That is the exact failure
+// it was added after.
+func TestMCPHTTPRefusesANonLoopbackBind(t *testing.T) {
+	err := runMCP([]string{"-http", "0.0.0.0:8129"})
+	if err == nil {
+		t.Fatal("mcp -http accepted a non-loopback address without -allow-remote")
+	}
+	if !strings.Contains(err.Error(), "THREAT-MODEL") {
+		t.Errorf("the refusal does not point at the threat model: %v", err)
+	}
+}

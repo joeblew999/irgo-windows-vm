@@ -7,13 +7,14 @@ package mcpserver
 // execute code of its choosing in the Windows guest and lever on the host
 // through everything the three steps already touch.
 //
-// This is the first half: loopback only, and a non-loopback bind is refused
-// outright rather than warned about. Authentication is not built yet, and a
+// Loopback is the default and needs no token. A non-loopback bind is a
+// deliberate act: it takes AllowRemote, and it requires a bearer token. A
 // server that starts unauthenticated because a token was missing is a server
-// that will be run that way.
+// that will be run that way, so it is refused outright.
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -21,54 +22,83 @@ import (
 	"os"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ErrNotLoopback is a refusal to expose the port to anything but this machine.
+// ErrNotLoopback is a refusal to expose the port to anything but this machine
+// without authentication and explicit consent.
 var ErrNotLoopback = errors.New("refusing to bind a non-loopback address")
 
 // httpReadHeaderTimeout stops a client holding a connection open sending
 // headers slowly. A bare http.Server has no timeouts at all.
 const httpReadHeaderTimeout = 10 * time.Second
 
-// checkLoopback reports whether an address is safe to bind with no
-// authentication in front of it.
+// ServeHTTPOptions is how to run the server over HTTP.
+type ServeHTTPOptions struct {
+	// Addr is what -http was given: "127.0.0.1:8129", or a bare ":8129" for
+	// loopback on that port.
+	Addr string
+
+	// Secret is the bearer token required when Addr is not loopback. Empty
+	// means no authentication, which is only permitted on loopback.
+	Secret string
+
+	// AllowRemote consents to a non-loopback bind. Without it a non-loopback
+	// Addr is refused even with a Secret: the wider bind must be a deliberate
+	// act, not a default.
+	AllowRemote bool
+}
+
+// resolveAddr turns what -http was given into the address to bind and whether
+// it is loopback.
 //
-// A bare port is the dangerous case and the easy mistake: ":8129" binds every
-// interface, which reads like a local default and is not one. It is refused,
-// rather than silently rewritten to localhost — rewriting would mean the flag
-// does something other than what it says.
-//
-// An unresolvable host is refused too. "Cannot tell" is not "safe", and this
-// guard stands in front of arbitrary code execution.
-func checkLoopback(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("%w: %q is not host:port: %v", ErrNotLoopback, addr, err)
+// A bare ":8129" is the case worth care: it reads like a local default but
+// would bind every interface, so it is resolved to 127.0.0.1:8129. The flag
+// says "port", and a port means this machine. An unresolvable host is refused:
+// "cannot tell" is not "safe", and this guard stands in front of arbitrary
+// code execution.
+func resolveAddr(addr string) (bind string, loopback bool, err error) {
+	host, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		return "", false, fmt.Errorf("%w: %q is not host:port: %v", ErrNotLoopback, addr, splitErr)
 	}
 	if host == "" {
-		return fmt.Errorf("%w: %q binds every interface. Write 127.0.0.1%s to mean this machine only",
-			ErrNotLoopback, addr, addr)
+		return net.JoinHostPort("127.0.0.1", port), true, nil
 	}
 	if host == "localhost" {
-		return nil
+		return addr, true, nil
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		return fmt.Errorf("%w: cannot resolve %q, so it cannot be shown to be local: %v",
+		return "", false, fmt.Errorf("%w: cannot resolve %q, so it cannot be shown to be local: %v",
 			ErrNotLoopback, host, err)
 	}
 	if len(ips) == 0 {
-		return fmt.Errorf("%w: %q resolves to nothing", ErrNotLoopback, host)
+		return "", false, fmt.Errorf("%w: %q resolves to nothing", ErrNotLoopback, host)
 	}
+	loopback = true
 	for _, ip := range ips {
 		if !ip.IsLoopback() {
-			return fmt.Errorf("%w: %s resolves to %s, which is reachable from outside this machine. "+
-				"Authentication is not built yet, so anything that reaches this port can run code here — "+
-				"see docs/THREAT-MODEL.md", ErrNotLoopback, host, ip)
+			loopback = false
+			break
 		}
 	}
-	return nil
+	return addr, loopback, nil
+}
+
+// bearerVerifier checks a bearer token against the secret in constant time.
+//
+// The SDK rejects a TokenInfo with a zero Expiration by default, so a valid
+// token returns one in the future — the token is a shared secret with no
+// expiry of its own, and the middleware's strictness is not a fact about it.
+func bearerVerifier(secret string) auth.TokenVerifier {
+	return func(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(secret)) == 1 {
+			return &auth.TokenInfo{Expiration: time.Now().Add(time.Hour)}, nil
+		}
+		return nil, fmt.Errorf("%w: bad token", auth.ErrInvalidToken)
+	}
 }
 
 // ServeHTTP serves MCP over HTTP until the context is cancelled.
@@ -84,9 +114,21 @@ func checkLoopback(addr string) error {
 // server. Setting DisableLocalhostProtection would turn that off, and the
 // symptom it causes — a confusing 403 during development — is exactly the sort
 // of thing somebody switches off to make a problem go away.
-func ServeHTTP(ctx context.Context, addr string, d Deps) error {
-	if err := checkLoopback(addr); err != nil {
+func ServeHTTP(ctx context.Context, o ServeHTTPOptions, d Deps) error {
+	bind, loopback, err := resolveAddr(o.Addr)
+	if err != nil {
 		return err
+	}
+	if !loopback {
+		if !o.AllowRemote {
+			return fmt.Errorf("%w: %s is not loopback. Pass -allow-remote and set IRGO_WINVM_TOKEN to bind it — see docs/THREAT-MODEL.md",
+				ErrNotLoopback, o.Addr)
+		}
+		if o.Secret == "" {
+			return fmt.Errorf("%w: %s is reachable from outside this machine and IRGO_WINVM_TOKEN is not set. "+
+				"Authentication is mandatory off loopback, not optional — see docs/THREAT-MODEL.md",
+				ErrNotLoopback, o.Addr)
+		}
 	}
 
 	// Announced only after the address has been accepted. The first version
@@ -96,7 +138,11 @@ func ServeHTTP(ctx context.Context, addr string, d Deps) error {
 	// On stderr, never stdout: over stdio that is the protocol channel, and a
 	// server writing its address into a JSON-RPC stream is the bug utmvm.Out
 	// exists to prevent.
-	fmt.Fprintf(os.Stderr, "irgo-winvm mcp on http://%s — read docs/THREAT-MODEL.md\n", addr)
+	state := "no authentication"
+	if o.Secret != "" {
+		state = "bearer token required"
+	}
+	fmt.Fprintf(os.Stderr, "irgo-winvm mcp on http://%s — %s. Read docs/THREAT-MODEL.md\n", bind, state)
 
 	handler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return New(d) },
@@ -106,9 +152,14 @@ func ServeHTTP(ctx context.Context, addr string, d Deps) error {
 	// Cross-origin protection goes in middleware. The SDK's option field for it
 	// is deprecated, and wrapping the handler is what replaces it.
 	protected := http.NewCrossOriginProtection().Handler(handler)
+	if o.Secret != "" {
+		// Authentication wraps the cross-origin-protected handler, so a
+		// request is authenticated before anything else sees it.
+		protected = auth.RequireBearerToken(bearerVerifier(o.Secret), nil)(protected)
+	}
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              bind,
 		Handler:           protected,
 		ReadHeaderTimeout: httpReadHeaderTimeout,
 	}

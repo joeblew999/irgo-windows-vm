@@ -30,6 +30,11 @@ const (
 	CodeNoVM      Code = 3
 	CodeNoAgent   Code = 4
 	CodeNeedForce Code = 5
+
+	// CodeBusy is a refusal: another mutation holds the lock, so this one was
+	// not started. Retryable — wait and ask again — but only by polling, since
+	// the holder finishes on its own schedule.
+	CodeBusy Code = 6
 )
 
 // Outcome describes a code to whoever has to act on it.
@@ -44,12 +49,14 @@ type Outcome struct {
 	// Meaning is the sentence a person reads.
 	Meaning string
 
-	// Retryable marks the one worth trying again.
+	// Retryable marks the outcomes worth trying again.
 	//
 	// Windows Update takes the guest agent away for minutes at a time; the VM
 	// is fine and will answer. An agent that cannot tell this from "no such
 	// VM" either gives up on a working VM or retries forever against one that
-	// is not there. It is the single most useful bit in this file.
+	// is not there. "Busy" is the same shape: the holder of the mutation lock
+	// will finish on its own, and the caller should wait rather than conclude.
+	// It is the single most useful bit in this file.
 	Retryable bool
 }
 
@@ -61,6 +68,7 @@ var Outcomes = []Outcome{
 	{CodeNoVM, "no-vm", "that VM does not exist", false},
 	{CodeNoAgent, "no-agent", "the VM is there, the guest agent is not answering — wait and try again", true},
 	{CodeNeedForce, "need-force", "refused: a destructive command without -force", false},
+	{CodeBusy, "busy", "another mutation is in progress — wait and try again", true},
 }
 
 // Classify returns the outcome for a code.

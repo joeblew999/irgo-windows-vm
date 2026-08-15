@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -67,6 +68,8 @@ func exitCode(err error) command.Code {
 		return command.CodeNoVM
 	case errors.Is(err, utmvm.ErrNoAgent):
 		return command.CodeNoAgent
+	case errors.Is(err, utmvm.ErrMutationInProgress):
+		return command.CodeBusy
 	case errors.Is(err, errUsage):
 		return command.CodeUsage
 	default:
@@ -111,6 +114,7 @@ var handlers = map[string]func([]string) error{
 	"iso-create": runISOCreate,
 	"vm-create":  runVMCreate,
 	"app-create": runAppCreate,
+	"app-upload": runAppUpload,
 
 	"iso-delete": runISODelete,
 	"vm-delete":  runVMDelete,
@@ -294,9 +298,9 @@ func runMCP(args []string) error {
 	fs := mcpFlags()
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage of mcp:\n"+
-			"  Serves the commands above to an agent over the Model Context Protocol,\n"+
-			"  on stdin and stdout. It takes no flags: a client spawns it and speaks\n"+
-			"  JSON-RPC. Nothing else should be written to stdout while it runs.\n")
+			"  Serves the commands above to an agent over the Model Context Protocol.\n"+
+			"  With no flags it speaks JSON-RPC on stdin and stdout; -http serves the\n"+
+			"  same tools over HTTP. Read docs/THREAT-MODEL.md before -http.\n")
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -316,7 +320,11 @@ func runMCP(args []string) error {
 		return enc.Encode(tools)
 	}
 	if addr != "" {
-		return mcpserver.ServeHTTP(context.Background(), addr, mcpDeps())
+		return mcpserver.ServeHTTP(context.Background(), mcpserver.ServeHTTPOptions{
+			Addr:        addr,
+			Secret:      os.Getenv("IRGO_WINVM_TOKEN"),
+			AllowRemote: v.Bool("allow-remote"),
+		}, mcpDeps())
 	}
 	return mcpserver.Serve(context.Background(), mcpDeps())
 }
@@ -338,13 +346,20 @@ func mcpDeps() mcpserver.Deps {
 			return nil
 		},
 		Run: func(_ context.Context, name string, args []string) (string, error) {
-			c, ok := find(name)
-			if !ok || c.Run == nil {
-				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
-			}
-			return utmvm.Capture(func() error { return c.Run(args) })
+			return utmvm.Capture(func() error { return runTool(name, args) })
 		},
 		StartJob: func(name string, args []string) (string, error) {
+			// Refuse at call time, not forty minutes in. The job child takes
+			// the lock itself and is the source of truth, but asking first
+			// means a second mutation is told "busy" now rather than after it
+			// has forked. "Cannot tell" is refused too.
+			held, err := utmvm.MutationHeld()
+			if err != nil {
+				return "", err
+			}
+			if held {
+				return "", utmvm.ErrMutationInProgress
+			}
 			s, err := job.Start(name, args)
 			if err != nil {
 				return "", err
@@ -418,8 +433,7 @@ func run(args []string) error {
 		fmt.Print(usageText())
 		return nil
 	}
-	c, ok := find(args[0])
-	if !ok {
+	if _, ok := find(args[0]); !ok {
 		usage()
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -435,10 +449,41 @@ func run(args []string) error {
 	// question answered two ways depending on which command you asked.
 	//
 	// One mode everywhere now, and ErrHelp stops here.
-	if err := c.Run(args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
+	if err := runTool(args[0], args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
 		return err
 	}
 	return nil
+}
+
+// runTool is the one path every command takes — the CLI, an MCP tool call, and
+// the detached job child, which re-runs this binary. The mutation lock is
+// taken here, so a command that changes state on disk is refused while another
+// holds the lock: never queued, never interleaved.
+func runTool(name string, args []string) error {
+	c, ok := find(name)
+	if !ok || c.Run == nil {
+		return fmt.Errorf("%w: no such command %q", errUsage, name)
+	}
+	if c.Mutates && !wantsHelp(args) {
+		release, err := utmvm.AcquireMutation()
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	return c.Run(args)
+}
+
+// wantsHelp reports whether the arguments ask for help. Help is answered before
+// the lock, or `irgo-winvm vm-create -h` would be refused as "busy" while
+// another mutation runs.
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 // runVMCreate is the one command a new developer runs.
@@ -712,6 +757,12 @@ func runAppDelete(args []string) error {
 	if name == "" {
 		return fmt.Errorf("app-delete: -vm was given an empty name")
 	}
+	// Staged uploads live on the host, not in the guest, so they are cleared
+	// regardless of whether the VM exists: app-upload's undo is app-delete.
+	if err := utmvm.ClearStage(); err != nil {
+		return err
+	}
+	say("stage:  %s", utmvm.Home(utmvm.VMStageDir()))
 	say("vm:     %s", name)
 	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
 	e, err := utmvm.Find(name)
@@ -725,6 +776,36 @@ func runAppDelete(args []string) error {
 		return err
 	}
 	say("cleaned %s", e.Name)
+	return nil
+}
+
+// runAppUpload stages a binary for app-create, from bytes over MCP.
+//
+// A remote agent has a binary it just cross-compiled and no shared filesystem;
+// app-create wants a host path. This is the bridge: base64 chunks land in
+// bin/<sha256>.exe, and the committed path is what gets passed to app-create.
+func runAppUpload(args []string) error {
+	fs := appUploadFlags()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	v := values{fs}
+	hash, total, offset := v.String("hash"), v.Int64("total"), v.Int64("offset")
+	data, err := base64.StdEncoding.DecodeString(v.String("data"))
+	if err != nil {
+		return fmt.Errorf("%w: -data is not base64: %v", errUsage, err)
+	}
+	say := utmvm.Printer("app-upload")
+
+	staged, n, err := utmvm.Upload(hash, total, offset, data)
+	if err != nil {
+		return err
+	}
+	if staged != "" {
+		say("staged %s (%s)", utmvm.Home(staged), utmvm.HumanBytes(n))
+		return nil
+	}
+	say("chunk accepted — %d of %d bytes staged", n, total)
 	return nil
 }
 

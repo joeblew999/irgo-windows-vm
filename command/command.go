@@ -54,6 +54,15 @@ type Command struct {
 	// as a claim about what is safe to call.
 	Destructive bool
 
+	// Mutates marks a command that changes state on disk — media, a VM, or a
+	// staged binary — and therefore needs the mutation lock.
+	//
+	// Declared, not inferred. The obvious rule, "!ReadOnly means mutates", is
+	// wrong in exactly one place: `mcp` changes nothing itself but serves
+	// mutations, so it is not read-only and also not a mutation. One
+	// exception is enough to make the rule a guess.
+	Mutates bool
+
 	// Detach names the flag that makes this command long-running.
 	//
 	// With that flag present, an MCP call starts the work and returns a handle
@@ -86,13 +95,14 @@ type Command struct {
 //
 // Order is the order the usage prints, which is the order they are run in.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Detach: "-install", OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Mutates: true, Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Mutates: true, Detach: "-install", OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Mutates: true, OverMCP: true},
+	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Mutates: true, OverMCP: true},
 
-	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Destructive: true, OverMCP: true},
-	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Destructive: true, OverMCP: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Destructive: true, OverMCP: true},
+	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
+	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},

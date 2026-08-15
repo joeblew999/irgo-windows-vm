@@ -144,6 +144,16 @@ func readArgs(name string, raw []byte, d Deps) ([]string, error) {
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
 	}
+	// `args` must be an array. A string or number unmarshals fine and used to
+	// be dropped silently by argv's type assertion, so a malformed call ran the
+	// command with no arguments and reported success — the model was told it had
+	// done something it had not. Refused instead: the model can correct a wrong
+	// shape, and cannot correct one it is never shown.
+	if v, ok := in["args"]; ok {
+		if _, isList := v.([]any); !isList {
+			return nil, fmt.Errorf("args must be an array of strings, got %T", v)
+		}
+	}
 	var fs *flag.FlagSet
 	if d.Flags != nil {
 		fs = d.Flags(name)

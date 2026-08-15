@@ -245,8 +245,11 @@ description = "Build, vet and test every module, and cross-compile every target"
 run = [
   "go build ./...",
   "go vet ./...",
-  "go test ./utmvm/...",
-  "go test ./cmd/...",
+  # Every root-module package, not just utmvm and cmd. This used to name the
+  # two by hand, which is how mcpserver's tests went unrun: its malformed-
+  # arguments guard was broken and every check stayed green, because the one
+  # package that tested it was not in this list.
+  "go test ./...",
 
   # The other three are separate modules and would be skipped by ./... above.
   # -o a directory because they are all main packages: a bare `go build` drops

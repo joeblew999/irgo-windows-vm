@@ -97,12 +97,20 @@ alive is answered by asking the operating system, not by reading a file that
 says so.
 
 And one for an agent rather than a person: **`irgo-winvm mcp`** serves these
-same commands over the Model Context Protocol, on stdin and stdout. It is the
+same commands over the Model Context Protocol, on stdin and stdout or over HTTP
+(`-http`, loopback by default). It is the
 point of the whole repository pointed at its most likely user — an agent writing
 a Go desktop app on a Mac cannot find out whether it works on Windows, and this
 lets it ask, get a real answer from real Windows, and see the screen when the
 answer is that it hung. The tools are generated from the command list, so they
 are the commands above and nothing else.
+
+Over HTTP, an agent that has just cross-compiled a `.exe` and has no shared
+filesystem with the Mac can send it in chunks with **`app-upload`** — staged
+content-addressed under `bin/`, verified by SHA-256 before it is committed —
+then hand the staged path to `app-create`. A wider bind than loopback needs
+`-allow-remote` and `IRGO_WINVM_TOKEN`; read
+[the threat model](docs/THREAT-MODEL.md) before opening one.
 
 The two calls that take a long time — `vm-create -install` and `iso-create
 -fetch` — start the work and hand back a job id rather than blocking for
@@ -138,16 +146,18 @@ something specific:
 | **3** | that VM does not exist |
 | **4** | the VM is there, the guest agent is not answering |
 | **5** | refused — a destructive command without `-force` |
+| **6** | refused — another mutation is in progress |
 
 **1 is your program, not this tool.** The guest's own exit code is *not* passed
 through: a binary exiting 3 exits `app-create` **1**, and names its real code in
 the message. That is deliberate — a failing program and a missing VM must not
 look the same to a script.
 
-**4 is the one worth retrying.** Windows Update takes the agent away for minutes
-at a time; the VM is fine and will answer again. `app-create` already waits and
-tries to recover before giving up, which is why it can take several minutes to
-reach that code.
+**4 and 6 are the ones worth retrying.** Windows Update takes the agent away
+for minutes at a time; the VM is fine and will answer again. `app-create`
+already waits and tries to recover before giving up, which is why it can take
+several minutes to reach that code. 6 means another mutation holds the lock —
+the holder finishes on its own schedule, and waiting changes the answer.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.

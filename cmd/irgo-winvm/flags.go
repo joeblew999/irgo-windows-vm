@@ -18,6 +18,7 @@ package main
 
 import (
 	"flag"
+	"strconv"
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/utmvm"
@@ -42,6 +43,15 @@ func (v values) lookup(name string) flag.Value {
 
 func (v values) String(name string) string { return v.lookup(name).String() }
 func (v values) Bool(name string) bool     { return v.lookup(name).String() == "true" }
+
+func (v values) Int64(name string) int64 {
+	n, err := strconv.ParseInt(v.lookup(name).String(), 10, 64)
+	if err != nil {
+		// Unreachable: the flag package rejected anything unparseable at Parse.
+		panic("flag " + name + " is not an integer: " + v.lookup(name).String())
+	}
+	return n
+}
 
 func (v values) Duration(name string) time.Duration {
 	d, err := time.ParseDuration(v.lookup(name).String())
@@ -92,6 +102,15 @@ func appDeleteFlags() *flag.FlagSet {
 	return fs
 }
 
+func appUploadFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("app-upload", flag.ContinueOnError)
+	fs.String("hash", "", "SHA-256 of the whole binary, as 64 hex digits")
+	fs.Int64("total", 0, "size of the whole binary, in bytes")
+	fs.Int64("offset", 0, "byte offset of this chunk in the whole binary")
+	fs.String("data", "", "this chunk, base64-encoded (up to 2 MiB of binary per call)")
+	return fs
+}
+
 func isoCreateFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("iso-create", flag.ContinueOnError)
 	// The size is asked for, not typed in: it is a constant in utmvm, and this
@@ -125,6 +144,7 @@ var flagSets = map[string]func() *flag.FlagSet{
 	"vm-delete":  vmDeleteFlags,
 	"app-create": appCreateFlags,
 	"app-delete": appDeleteFlags,
+	"app-upload": appUploadFlags,
 	"iso-create": isoCreateFlags,
 	"iso-delete": isoDeleteFlags,
 	"mcp":        mcpFlags,

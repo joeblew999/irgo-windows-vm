@@ -251,6 +251,7 @@ func TestTheFailureIsMachineReadable(t *testing.T) {
 		{"agent busy", command.CodeNoAgent, "no-agent", true},
 		{"the guest program failed", command.CodeFailed, "failed", false},
 		{"refused without -force", command.CodeNeedForce, "need-force", false},
+		{"another mutation holds the lock", command.CodeBusy, "busy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -306,21 +307,22 @@ func TestTheFailureIsMachineReadable(t *testing.T) {
 	}
 }
 
-// TestExactlyOneOutcomeIsRetryable.
+// TestOnlyTransientOutcomesAreRetryable.
 //
 // Retryable is advice an agent acts on: it will wait and call again. Marking a
-// second code retryable — "no such VM", say — would have it retry forever
-// against a VM that will never exist.
-func TestExactlyOneOutcomeIsRetryable(t *testing.T) {
+// permanent code retryable — "no such VM", say — would have it retry forever
+// against a VM that will never exist. The retryable outcomes are the transient
+// ones: a guest agent that is away, and a mutation lock someone else holds.
+func TestOnlyTransientOutcomesAreRetryable(t *testing.T) {
 	var retryable []string
 	for _, o := range command.Outcomes {
 		if o.Retryable {
 			retryable = append(retryable, o.Name)
 		}
 	}
-	if len(retryable) != 1 || retryable[0] != "no-agent" {
-		t.Errorf("retryable outcomes are %v; only no-agent should be, because it is the "+
-			"only one where waiting changes the answer", retryable)
+	if len(retryable) != 2 || retryable[0] != "no-agent" || retryable[1] != "busy" {
+		t.Errorf("retryable outcomes are %v; want exactly [no-agent busy] — only "+
+			"transient states, where waiting changes the answer", retryable)
 	}
 }
 

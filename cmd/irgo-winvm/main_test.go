@@ -161,6 +161,7 @@ func TestExitCode(t *testing.T) {
 		{"no such VM", fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"), command.CodeNoVM},
 		{"agent not answering", fmt.Errorf("%w: busy", utmvm.ErrNoAgent), command.CodeNoAgent},
 		{"refused without -force", fmt.Errorf("would delete things (%w)", errRefused), command.CodeNeedForce},
+		{"another mutation holds the lock", fmt.Errorf("%w: someone else", utmvm.ErrMutationInProgress), command.CodeBusy},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := exitCode(tc.err); got != tc.want {
@@ -207,6 +208,7 @@ func TestEveryCodeExitCodeReturnsIsDeclared(t *testing.T) {
 		fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"),
 		fmt.Errorf("%w: busy", utmvm.ErrNoAgent),
 		fmt.Errorf("would delete things (%w)", errRefused),
+		fmt.Errorf("%w: someone else", utmvm.ErrMutationInProgress),
 	} {
 		code := exitCode(err)
 		if _, ok := command.Classify(code); !ok {
@@ -325,5 +327,42 @@ func TestGeneratedSchemaMatchesTheFlagsTheCLIRegisters(t *testing.T) {
 					name, f.Name, f.DefValue, got)
 			}
 		})
+	}
+}
+
+// TestRunToolRefusesMutationWhileLockHeld is the wrapper the whole feature
+// hangs on: a mutating command is refused before its own work starts, and help
+// is not a mutation.
+func TestRunToolRefusesMutationWhileLockHeld(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	release, err := utmvm.AcquireMutation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if err := runTool("vm-create", nil); !errors.Is(err, utmvm.ErrMutationInProgress) {
+		t.Fatalf("runTool(vm-create) = %v, want ErrMutationInProgress", err)
+	}
+
+	// -h must be answered before the lock, or asking for help while another
+	// mutation runs would be refused as "busy".
+	if err := runTool("vm-create", []string{"-h"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("runTool(vm-create -h) = %v, want ErrHelp", err)
+	}
+}
+
+// TestRunToolReadOnlyCommandsSkipTheLock: reporting is not a mutation, so it
+// must keep working while another mutation holds the lock.
+func TestRunToolReadOnlyCommandsSkipTheLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	release, err := utmvm.AcquireMutation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if err := runTool("doctor", nil); err != nil {
+		t.Fatalf("runTool(doctor) = %v, want nil while the lock is held", err)
 	}
 }

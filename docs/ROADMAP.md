@@ -16,7 +16,7 @@ things that do not exist yet is exactly what a roadmap is for. Verified both
 ways: this file may name a future command, and the same sentence at the root is
 refused.
 
-Last revised 14 August 2026.
+Last revised 15 August 2026.
 
 ---
 
@@ -29,6 +29,7 @@ writing a Go desktop app on a Mac can find out whether it works on Windows.
 |---|---|
 | ISO, VM, app — the three steps and their undos | working |
 | `irgo-winvm mcp` over stdio, tools generated from one list | v0.3.0 |
+| `irgo-winvm mcp -http` serves the same tools over loopback Streamable HTTP | `ac16122` |
 | long calls return a job that outlives the client; `status` | v0.3.1 |
 | typed flags in the schemas, generated from the CLI's own definitions | v0.4.0 |
 | the server serves its own reference as an MCP resource | `c155a99` |
@@ -82,13 +83,58 @@ touched however many there are, size reported by `doctor`. `jobs/` had been
 growing a record and a log per run forever, which is a disk leak in a tool that
 already asks for 33 GB, and it broke the rule that every action owes an undo.
 
+### The threat model — `9ae77ce`
+
+Written before the port existed, as the plan required. It names what an
+authenticated caller gets, what is defended and how, and what is deliberately
+not defended; the recommendation is no inbound listener at all. Nothing to
+build here — what follows is what remains.
+
+### The loopback server — `ac16122`
+
+`irgo-winvm mcp -http 127.0.0.1:8129` serves the tools over Streamable HTTP:
+`Stateless: true`, cross-origin protection in middleware, a 10s read-header
+timeout, and DNS-rebinding protection left on. `checkLoopback` refuses a bare
+`:port` deliberately — the flag does what it says rather than being silently
+rewritten — and refuses any non-loopback address outright. Proven by
+`mcpserver/http_test.go`: the refusal cases, the refusal message, refuse before
+listen, and an HTTP round-trip.
+
+### The wider bind and authentication — 15 Aug 2026, `e793e50`
+
+`-allow-remote` consents to a non-loopback bind, and `IRGO_WINVM_TOKEN` is the
+bearer token behind it, compared in constant time through the SDK's
+`auth.RequireBearerToken`. A bare `:port` now resolves to loopback, replacing
+`ac16122`'s refusal. Off loopback both consent and token are mandatory: a server
+that starts unauthenticated because a token was missing is refused outright.
+Proven by `mcpserver/http_test.go`: 401 without the token, 405 with it, and the
+SDK's own HTTP client round-tripping a tool call with the token.
+
+### Content-addressed, chunked uploads — 15 Aug 2026, `e793e50`
+
+`app-upload` stages a binary as `bin/<sha256>.exe` from base64 chunks; the full
+SHA-256 is verified before the committed file exists, a mismatch is removed, and
+an unchanged binary transfers nothing. `app-delete` clears the stage. Proven by
+`utmvm/upload_test.go`: commit and byte equality, mismatch rejection, truncation
+never commits, idempotent retry, and clearing twice.
+
+### The mutation lock — 15 Aug 2026, `e793e50`
+
+One mutation at a time, refused not queued: a flock on `mutation.lock`, taken in
+`runTool` for every mutating command — including the detached job child — with a
+probe before forking. A lock whose state cannot be read refuses. Exit code 6
+(`busy`, retryable) is the refusal. Proven by `utmvm/lock_test.go`, including
+the cross-process case.
+
 ---
 
 ## Next: the server over HTTP
 
-Remote access is not built. It is the largest remaining piece and it is
-**remote code execution by design** — the product is "run this arbitrary binary
-on my machine" — so the threat model is written before the port exists.
+The server over HTTP is built: the loopback server (`ac16122`), then the wider
+bind and its mandatory bearer token, content-addressed uploads, and the mutation
+lock — all recorded above. What remains of this stage is the long job, below.
+The table that follows is what reading the SDK source changed, kept for whoever
+works on it next.
 
 **No longer gated on the long job.** The original condition was "phase A works
 and has run against a disposable VM", and phase A has now run against a real VM.
@@ -112,37 +158,6 @@ assumed. Two earlier instructions turned out to be wrong:
 An `MCPGODEBUG` parameter, `allowsessionsinstateless=1`, restores session
 handling in stateless mode. Needing an escape hatch is a design signal. Do not
 ship one.
-
-### What has to be built
-
-1. **`irgo-winvm mcp -http :port`**, with `Stateless: true`, **bound to
-   loopback by default**. A wider bind takes an explicit flag whose help text
-   says what it means.
-2. **Authentication is mandatory off loopback** — `auth.RequireBearerToken`
-   with a constant-time compare against a local secret. Not optional with a
-   warning: a server that starts unauthenticated because a token was missing is
-   a server that will be run that way. No OAuth unless a specific client demands
-   discovery, and that is its own stage with its own reason.
-3. **Uploads are content-addressed and chunked.** `app-create` takes a path, and
-   a remote agent has a binary it just cross-compiled and no shared filesystem —
-   without an upload path the remote server cannot do the one thing this tool is
-   for. A Go `.exe` is 5–15 MB against a 4 MiB default, so chunk it rather than
-   raising the limit to swallow 20 MB in memory. Pick BLAKE3 or SHA-256 and say
-   why. Verify the hash **before** writing: a truncated upload that runs anyway
-   is this repository's oldest category of bug. An unchanged binary transfers
-   nothing, because the inner loop is 10.8 seconds and an upload must not
-   dominate it. Stage into the existing `bin/`, and `app-delete` cleans uploads
-   too.
-4. **One VM, one mutation.** Two clients cannot install to the same VM at once.
-   Concurrent mutation is refused with a result that says so — never serialised
-   silently, never interleaved. A lock whose state cannot be read refuses by
-   default, because "cannot tell" is not "safe".
-5. **The threat model** — **written, before the port exists**:
-   [Threat model](threat-model.html). It names what an authenticated caller
-   gets, what is defended and how, and what is deliberately not defended. The
-   recommendation is no inbound listener at all: Cloudflare Tunnel or Tailscale
-   puts identity at the edge and keeps the server on loopback. The open port is
-   the fallback, not the plan.
 
 ---
 

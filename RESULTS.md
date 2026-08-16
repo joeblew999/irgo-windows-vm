@@ -1,5 +1,24 @@
 # Probe results
 
+## An agent uploaded, pushed, and ran a binary over HTTP — verified 16 Aug 2026
+
+The upload path — content-addressed, chunked `app-upload` — was driven end to
+end over the HTTP transport (`irgo-winvm mcp -http :8129`), not the spawned
+stdio client. A client chunked a cross-compiled probe, sent the chunks, pushed
+the staged result into the already-installed VM, and removed it again.
+
+| step | what happened |
+|---|---|
+| `app-upload` | `probe.exe`, 3,320,832 bytes, SHA-256 `7fe27641…cf130`, sent as 4 chunks of ≤1 MiB; the final chunk verified the digest and committed `bin/7fe27641….exe` |
+| `app-create` | pushed and ran on windows/arm64: 5 capabilities OK, 3 missing, 12.6 s — the same report the 14 Aug stdio run produced, which is the point: the upload feeds the same path a local file does |
+| `app-delete` | cleared `bin/` on the host and the guest binary, so the undo covers both sides |
+
+The hash is verified before the committed file exists, so a truncated or
+corrupted upload is removed rather than run — the oldest category of bug this
+repository keeps re-fixing. The transport framing (SSE over HTTP) and bearer
+authentication are exercised by `mcpserver`'s tests; this entry proves the
+binary-staging half against a real guest.
+
 ## An agent drove the whole thing over MCP — verified 14 Aug 2026
 
 Everything below was measured by connecting a real MCP client to

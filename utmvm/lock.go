@@ -1,9 +1,6 @@
 package utmvm
 
-import (
-	"errors"
-	"path/filepath"
-)
+import "errors"
 
 // The one mutation lock, shared by every command that changes state on disk.
 //
@@ -18,9 +15,3 @@ import (
 // ErrMutationInProgress is the refusal to start work while another mutation
 // holds the lock.
 var ErrMutationInProgress = errors.New("another mutation is in progress")
-
-// lockName is the file the lock is taken on, under the one application-support
-// root.
-const lockName = "mutation.lock"
-
-func lockPath() string { return filepath.Join(Root(), lockName) }

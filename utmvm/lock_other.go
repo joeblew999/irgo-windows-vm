@@ -2,24 +2,16 @@
 
 package utmvm
 
-import (
-	"errors"
-	"runtime"
-)
-
-// Off macOS the mutation lock is refused, not approximated.
-//
-// The VM machinery cannot run here anyway — UTM is macOS-only — but the package
-// must still compile, for the same reason sysfile_other.go exists: `doctor`
-// tells a Windows or Linux developer what their machine cannot do. A lock that
-// silently reported success would claim a serialisation this host does not
-// enforce, and a guard that allows when it cannot tell is the failure this
-// whole file is about.
+// Off macOS there is nothing to lock: the VM work is macOS-only, so two
+// mutations cannot race here — they all refuse when they reach the stage that
+// needs UTM. A no-op rather than a refusal, so a mutating command still reports
+// its own error: a usage mistake on Linux must say "usage", not "the lock is
+// macOS-only".
 
 func AcquireMutation() (func(), error) {
-	return nil, errors.New("utmvm: the mutation lock is macOS-only (host is " + runtime.GOOS + ")")
+	return func() {}, nil
 }
 
 func MutationHeld() (bool, error) {
-	return false, errors.New("utmvm: the mutation lock is macOS-only (host is " + runtime.GOOS + ")")
+	return false, nil
 }

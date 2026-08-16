@@ -15,8 +15,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 )
+
+// lockName is the file the lock is taken on, under the one application-support
+// root.
+const lockName = "mutation.lock"
+
+func lockPath() string { return filepath.Join(Root(), lockName) }
 
 // AcquireMutation takes the lock or refuses.
 //

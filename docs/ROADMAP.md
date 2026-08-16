@@ -115,7 +115,7 @@ SDK's own HTTP client round-tripping a tool call with the token.
 `app-upload` stages a binary as `bin/<sha256>.exe` from base64 chunks; the full
 SHA-256 is verified before the committed file exists, a mismatch is removed, and
 an unchanged binary transfers nothing. `app-delete` clears the stage. Proven by
-`utmvm/upload_test.go`: commit and byte equality, mismatch rejection, truncation
+`utmvm/app_upload_test.go`: commit and byte equality, mismatch rejection, truncation
 never commits, idempotent retry, and clearing twice.
 
 ### The mutation lock — 15 Aug 2026, `136a3e5`

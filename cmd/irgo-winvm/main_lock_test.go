@@ -10,13 +10,10 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// The mutation-lock wrapper tests run only on macOS, because the lock itself is
-// a flock and does not exist off macOS — there is nothing to serialise where
-// UTM cannot run.
+// macOS only: the mutation lock is a flock that exists only where UTM runs.
 
-// TestRunToolRefusesMutationWhileLockHeld is the wrapper the whole feature
-// hangs on: a mutating command is refused before its own work starts, and help
-// is not a mutation.
+// TestRunToolRefusesMutationWhileLockHeld: a mutating command is refused
+// before its own work starts, and help is not a mutation.
 func TestRunToolRefusesMutationWhileLockHeld(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	release, err := utmvm.AcquireMutation()

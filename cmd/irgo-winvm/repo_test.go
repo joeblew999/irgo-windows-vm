@@ -1,17 +1,8 @@
 package main
 
-// The repository must not contain compiled binaries.
-//
-// Two were found tracked at once: irgo-winvm at the root (11 MB, Mach-O arm64,
-// reporting `version: dev`) and site/site (13 MB). Both are what `go build`
-// leaves when it is run by hand with no -o, and both went in with `git add -A`.
-//
-// One of them was committed by the same work that added the screenshot gates,
-// which is the point. .gitignore had just been audited — in one direction.
-// "Nothing tracked is ignored" was checked; "nothing tracked should be" was not.
-//
-// A .gitignore entry fixes the two files. This fixes the class: whatever a
-// future build drops, wherever it drops it, it cannot be committed silently.
+// The repository must not contain compiled binaries. A bare `go build` drops
+// one in the source tree, and `git add -A` commits it; two were once tracked
+// at once (irgo-winvm at the root and site/site).
 
 import (
 	"bytes"
@@ -23,11 +14,8 @@ import (
 )
 
 // executableMagic is the first few bytes of the formats a Go build can produce
-// on the platforms this repository targets.
-//
-// Read directly rather than shelling out to file(1): one less thing that has to
-// be installed for `go test` to mean anything, and the magic numbers are not
-// going to change.
+// on the platforms this repository targets, read directly so the test needs no
+// file(1).
 var executableMagic = []struct {
 	name  string
 	bytes []byte
@@ -40,14 +28,11 @@ var executableMagic = []struct {
 }
 
 // TestNoTrackedBinaries asserts that nothing git tracks is a compiled
-// executable.
+// executable. It asks git rather than walking the tree, which is full of
+// untracked build output (.bin/, dist/, site/dist/).
 //
-// It asks git rather than walking the filesystem, because the working tree is
-// full of legitimately untracked build output — .bin/, dist/, site/dist/ — and
-// a walk would report those and be turned off within a week.
-//
-// Negative control, run by hand: `go build ./cmd/irgo-winvm && git add -f
-// irgo-winvm` fails this and names the file. `git reset` restores.
+// Negative control: `go build ./cmd/irgo-winvm && git add -f irgo-winvm` fails
+// this and names the file. `git reset` restores.
 func TestNoTrackedBinaries(t *testing.T) {
 	root := repoRoot(t)
 

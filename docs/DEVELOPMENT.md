@@ -115,7 +115,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/glazecheck` | whether glaze works: build the four examples, run them here or through `app-create`, record the verdict. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
-| `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
 
@@ -133,6 +133,16 @@ stdin/stdout or over HTTP (`-http`, loopback by default). Its purpose: an agent
 writing a Go desktop app on a Mac cannot otherwise find out whether the app
 works on Windows. Through this server it can ask, get an answer from a real
 Windows guest, and see the screen when the answer is that the app hung.
+
+Adding a command is two edits: declare it in `command.All` (name, summary,
+undo, whether it mutates), and add a `<name>Flags` func and a `run<Name>` func
+in the matching file in `cmd/irgo-winvm`, joined by one row in the table in
+`main.go`. The binary panics at start if the two lists disagree, and the MCP
+tool, its schema, the usage text and the site's reference follow on their own.
+
+It needs macOS on Apple Silicon, and UTM, which `vm-create` installs from its
+signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
+`iso-create` and removed by `iso-delete`, only when building media from scratch.
 
 - **Tools are generated from the command list** in `internal/command`, so they
   are the commands and nothing else.
@@ -307,14 +317,15 @@ that has hung. Announce each step before doing it, name every path, and print
 elapsed time; "not found" without a location cannot be checked. Example: the
 77-second ARM64 scan was always there and was found only once the tool said so.
 
-### Comments record findings
+### Comments follow Go norms
 
-Long comments record what cost hours and cannot be recovered from the code:
+A doc comment says what the thing does and, in a sentence or two, the
+non-obvious why. A measured trap or a warning stays in the code, tightly worded:
 why the display is `virtio-ramfb-gl`, why ESD image 3 needs `--boot`, why
-`utmctl suspend --save-state` must never be called, why `%q` must not be
-re-escaped for AppleScript. Move them with their code and do not compress them.
-If one is wrong, fix the fact rather than deleting the explanation, and look for
-any other copy of a measurement you correct.
+`utmctl suspend --save-state` must never be called. The story of how it was
+found belongs in [RESULTS.md](RESULTS.md) or the traps table below, not in the
+code. If a comment is wrong, fix the fact, and look for any other copy of a
+measurement you correct.
 
 ### Upstream bugs are fixed upstream
 

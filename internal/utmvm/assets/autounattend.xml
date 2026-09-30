@@ -316,9 +316,18 @@
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
-        <!-- Written last, so its presence means every step above succeeded. -->
+        <!-- The SMB share pushes go through: utmctl file push moves ~0.4 MB/s,
+             this ~100 MB/s. file-share.ps1 is on this CD beside the answer
+             file, and is the same script vm-repair runs on an existing VM.
+             Idempotent; `vm-repair -share=false` removes it. -->
         <SynchronousCommand wcm:action="add">
           <Order>17</Order>
+          <CommandLine>cmd /c for %i in (D E F G H) do @if exist %i:\file-share.ps1 powershell -NoProfile -ExecutionPolicy Bypass -File %i:\file-share.ps1</CommandLine>
+          <Description>Open the file share the host pushes binaries through</Description>
+        </SynchronousCommand>
+        <!-- Written last, so its presence means every step above succeeded. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>18</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

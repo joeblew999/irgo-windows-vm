@@ -739,6 +739,10 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	if err := os.WriteFile(filepath.Join(stage, "run-all.cmd"), runAllCmd, 0o644); err != nil {
 		return err
 	}
+	// Run at first logon by autounattend.xml; vm-repair pushes the same bytes.
+	if err := os.WriteFile(filepath.Join(stage, "file-share.ps1"), fileShareScript, 0o644); err != nil {
+		return err
+	}
 
 	// Probe binaries go at the ROOT, not in a subdirectory. go-diskfs's Joliet
 	// encoding mangles names inside nested directories into UCS-2 garbage —

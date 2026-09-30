@@ -818,6 +818,7 @@ detail there and only the reminder here.
 | a bundle written into UTM's folder | UTM only rescans at launch, and restarting it stops every running VM | write it elsewhere and `import` it |
 | `utmctl clone` / `duplicate` | keeps the source's MAC unless a global setting (default off) says otherwise; two clones fight over one DHCP lease | set the MAC in the same `duplicate ... with properties` |
 | an APFS clone of an immutable file | the clone is immutable too (`copyfile` copies BSD flags), so UTM cannot delete it later | clear the flag on the clone |
+| a long comment in `autounattend.xml` | Setup ignored the **whole** answer file and stopped at "Select language settings"; the same element under a one-line comment installed (30 Sep 2026; that comment was the only one with `%` in it, the trigger was not isolated). Unit tests pass either way | keep comments in the answer file short; prove any change to it with an install |
 | Windows 11 24H2 left alone | encrypts the disk on its own (Device Encryption), so a copy of it does not compress | `PreventDeviceEncryption` in specialize; decrypt before sealing |
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |

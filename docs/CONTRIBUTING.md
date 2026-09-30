@@ -86,7 +86,7 @@ through `go tool test2json` — no output is grepped. Each ends with one line:
 | verdict | means | exit |
 |---|---|---|
 | `YES` | everything passed or skipped by design | 0 |
-| `KNOWN BUGS ONLY` | the only failures are upstream bugs already reported (`glazecheck.KnownUpstream`) | 0 |
+| `KNOWN BUGS ONLY` | the only failures are upstream bugs recorded in UPSTREAM.md (`glazecheck.KnownUpstream`), reported or not | 0 |
 | `NO` | a test failed that is not a known upstream bug | non-zero |
 | `UNEXPECTED PASS` | a known upstream failure passes: update the list and [UPSTREAM.md](UPSTREAM.md) | non-zero |
 | `CANNOT TELL` | the suite never ran (the guest agent went away), which says nothing about glaze | non-zero |

@@ -17,7 +17,7 @@
 //
 // Known upstream failures (KnownUpstream) still fail and are still recorded
 // as failures; they only change the verdict from NO to KNOWN BUGS ONLY, so a
-// gate goes red for a new failure and not for one already reported.
+// gate goes red for a new failure and not for one already recorded in docs/UPSTREAM.md.
 //
 // # Why it is in the shipped binary
 //

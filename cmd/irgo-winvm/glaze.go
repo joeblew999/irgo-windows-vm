@@ -108,6 +108,8 @@ func runGlazeCheck(v values, _ []string) error {
 			}
 			return res.Stdout, nil
 		}
+		// The same account the suite runs as.
+		o.ResetDesktop = func() error { return utmvm.DesktopReset(e.UUID, user, say) }
 		// These mean the suite never ran. Anything else, including its own
 		// non-zero exit, is a result, read from what it printed.
 		o.NotRun = func(err error) bool {

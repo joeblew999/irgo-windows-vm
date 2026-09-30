@@ -26,7 +26,7 @@ const (
 	Unfinished = "unfinished" // started, and the binary exited or hung before it ended
 )
 
-// Known is a failure already reported upstream, expected on one target until
+// Known is a failure recorded in docs/UPSTREAM.md (not necessarily reported upstream yet), expected on one target until
 // the fix is released.
 //
 // It is still recorded as a FAIL, with Ref beside it, and the test itself

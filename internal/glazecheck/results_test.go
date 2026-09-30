@@ -174,7 +174,7 @@ func TestNeverReached(t *testing.T) {}
 	}
 }
 
-// TestKnownUpstream is the policy for a failure already reported upstream:
+// TestKnownUpstream is the policy for a failure recorded in docs/UPSTREAM.md:
 // failing is KNOWN BUGS ONLY and lets the gate through, passing is an
 // UNEXPECTED PASS that does not, and a new failure beside it is still NO.
 //

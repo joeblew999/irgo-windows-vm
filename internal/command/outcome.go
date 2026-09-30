@@ -1,22 +1,12 @@
 package command
 
-// What a run ended as, declared once.
-//
-// The CLI exits with these numbers and the MCP server reports them to an agent,
-// and the two must agree about what each one means — including which one is
-// worth retrying, which is the only piece of this that changes what a caller
-// does next.
-//
-// The alternative was a `case 4: retryable = true` in the server beside the
-// constants in package main: two statements of one contract, and the kind that
-// disagrees quietly, because nothing ever compares them.
-
-// Code is a process exit status, and the classification of a tool result.
+// Code is a process exit status, and the classification of an MCP tool result.
+// The CLI and the MCP server share these so they agree on what each means,
+// including which are worth retrying.
 type Code int
 
-// The codes. utmctl exits 0 when it fails — documented in docs/DEVELOPMENT.md — so this
-// tool is the only honest signal a caller gets, and it had better say something
-// specific.
+// The exit codes. utmctl exits 0 when it fails, so these are the only reliable
+// signal a caller gets; docs/DEVELOPMENT.md documents them for people.
 const (
 	CodeOK Code = 0
 
@@ -31,9 +21,8 @@ const (
 	CodeNoAgent   Code = 4
 	CodeNeedForce Code = 5
 
-	// CodeBusy is a refusal: another mutation holds the lock, so this one was
-	// not started. Retryable — wait and ask again — but only by polling, since
-	// the holder finishes on its own schedule.
+	// CodeBusy means another mutation holds the lock, so this one was not
+	// started. Retryable once the holder finishes.
 	CodeBusy Code = 6
 )
 
@@ -41,22 +30,17 @@ const (
 type Outcome struct {
 	Code Code
 
-	// Name is the machine-readable form, for a caller that should not be
-	// parsing English. An agent matching on the wording of "that VM does not
-	// exist" breaks the day the sentence is reworded.
+	// Name is the machine-readable form, so callers need not match on Meaning,
+	// which is prose and gets reworded.
 	Name string
 
 	// Meaning is the sentence a person reads.
 	Meaning string
 
-	// Retryable marks the outcomes worth trying again.
-	//
-	// Windows Update takes the guest agent away for minutes at a time; the VM
-	// is fine and will answer. An agent that cannot tell this from "no such
-	// VM" either gives up on a working VM or retries forever against one that
-	// is not there. "Busy" is the same shape: the holder of the mutation lock
-	// will finish on its own, and the caller should wait rather than conclude.
-	// It is the single most useful bit in this file.
+	// Retryable marks outcomes that can change by waiting: Windows Update takes
+	// the guest agent away for minutes, and the lock holder finishes on its
+	// own. A caller that cannot tell these from "no such VM" either gives up
+	// on a working VM or retries forever against a missing one.
 	Retryable bool
 }
 
@@ -71,11 +55,8 @@ var Outcomes = []Outcome{
 	{CodeBusy, "busy", "another mutation is in progress — wait and try again", true},
 }
 
-// Classify returns the outcome for a code.
-//
-// An unknown code is reported as such rather than defaulted to failure: a
-// caller told "failed" about a number nobody declared has been given a wrong
-// answer, and "cannot tell" is not "safe".
+// Classify returns the outcome for a code. An undeclared code is reported as
+// unknown, with ok false, rather than defaulted to failure.
 func Classify(c Code) (Outcome, bool) {
 	for _, o := range Outcomes {
 		if o.Code == c {

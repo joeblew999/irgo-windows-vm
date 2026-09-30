@@ -17,30 +17,24 @@
 // SYSTEM in session 0, where there is no window station and every windowed call
 // fails.
 //
-// The headless half — clipboard, power, single-instance, mmap — is examples/probe/, and
-// is not repeated here. It was, once, and the copy is the reason this file is
-// named for the window rather than for native: a program called `nativeall`
-// that duplicated four of native's capabilities and added glaze on top told you
-// nothing about which of the two it was really testing.
+// Run it and it opens the window and waits: every capability is a button, and
+// you drive them by hand — `mise run glaze:hands` puts it on the VM's desktop.
+// A tray icon you can click is the capability, and a table saying the call
+// returned nil is the summary of it.
 //
-// Run it with no flags and it opens the window and waits: every capability is a
-// button, and you drive them by hand. That is the default because it is an
-// example first — a tray icon you can click is the capability, and a table
-// saying the call returned nil is the summary of it.
-//
-// `-probe` is the other half: it runs each one unattended, prints a status line
-// per capability, and exits non-zero if any FAILED. That is what
-// `irgo-winvm app-create -gui ... -probe` runs in the VM.
+// It is not a test. It had a -probe mode that ran each capability unattended
+// and printed a table that glaze-check grepped for FAILED; that is
+// examples/conformance now, a go test suite that asserts what each call did,
+// runs the same on the Mac, the VM and CI, and leaves no window behind. The
+// in-window report button below is still here, as part of the demo.
 package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -78,9 +72,8 @@ var (
 //
 // errors.ErrUnsupported stays first: it is what this list becomes.
 //
-// Only the packages this program reports on: clipboard, power, singleinstance
-// and mmap are examples/probe/'s to answer for, and their sentinels belong in examples/probe/'s
-// copy of this list, not here.
+// Only the packages this program reports on. examples/conformance keeps the
+// full list, for every package it tests.
 var unsupportedErrs = []error{
 	errors.ErrUnsupported,
 	openurl.ErrUnsupported,
@@ -149,11 +142,12 @@ var tinyPNG = []byte{
 //
 // clipboard, power, single-instance and mmap used to be probed here too, with
 // the same canary, the same "second acquire must fail", the same temp-file
-// write-through as examples/probe/. Two programs asserting the same four things is two
-// places to update when native changes and two reports to reconcile when they
-// disagree. examples/probe/ owns them now: it is headless all the way down, so it runs
-// under the guest agent with no window at all, which is the strictest place
-// they can be checked.
+// write-through as the headless probe. Two programs asserting the same four
+// things is two places to update when native changes and two reports to
+// reconcile when they disagree. examples/conformance owns them now, and its
+// -short run is headless all the way down, so app:test runs it under the guest
+// agent with no window at all, which is the strictest place they can be
+// checked.
 //
 // They still appear in interactive mode, where a human drives them through the window. That
 // is not the same test: interactive mode exercises the second-instance handoff
@@ -215,58 +209,6 @@ func probeOpenURL() {
 
 // --- windowed capabilities: need a desktop session -------------------------
 
-// trayVisibleFor is how long the icon stays up. Long enough to appear and be
-// caught in a screenshot, short enough that an unattended run is not held up.
-const trayVisibleFor = 2 * time.Second
-
-// probeTray raises the tray icon and takes it down again.
-//
-// Two things here are not interchangeable with the obvious alternative, and
-// both cost a hang when got wrong.
-//
-// It is posted to the UI thread and NOT waited on. tray.Run blocks, driving the
-// OS event loop until Stop is called, so onMain would sit on it forever. Stop
-// is documented safe from any goroutine, which is what unwinds it.
-//
-// And it happens AFTER the window, not before. On macOS glaze's New runs a
-// temporary [NSApp run] that ends only when applicationDidFinishLaunching
-// fires — once per process. A tray started first consumes that, and glaze.New
-// then blocks forever with no window and no error to say why. That is an
-// upstream bug, fixed in glaze rather than ordered around here (docs/UPSTREAM.md
-// §1); this order is what a released glaze still requires.
-func probeTray(w glaze.WebView) {
-	done := make(chan error, 1)
-	w.Dispatch(func() {
-		done <- tray.Run(tray.Config{
-			Title:   "irgo",
-			Tooltip: "irgo native example",
-			Icon:    tinyPNG,
-			Items: []tray.Item{
-				{Title: "Example running"},
-				{Separator: true},
-				{Title: "Quit", OnClick: tray.Stop},
-			},
-		})
-	})
-
-	select {
-	case err := <-done:
-		// Returned without being asked to: no backend on this platform, or a
-		// tray is already up.
-		record("tray.Run", err, "")
-		return
-	case <-time.After(trayVisibleFor):
-	}
-
-	tray.Stop()
-	select {
-	case err := <-done:
-		record("tray.Run", err, "icon raised and removed")
-	case <-time.After(5 * time.Second):
-		record("tray.Run", errors.New("Stop did not unwind Run within 5s"), "")
-	}
-}
-
 func probeMenu(w glaze.WebView) {
 	// Window is required on Windows — Set returns an error naming it if the
 	// HWND is missing — and ignored on macOS, where the menu bar is global.
@@ -319,86 +261,4 @@ func probeFileDialog(w glaze.WebView) {
 	}
 }
 
-func report() int {
-	mu.Lock()
-	defer mu.Unlock()
-	fmt.Printf("\nwindowed capability probe — %s/%s\n(the headless four are examples/probe/)\n\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("%-24s %-12s %s\n", "CAPABILITY", "STATUS", "DETAIL")
-	fmt.Println(strings.Repeat("-", 78))
-	failed := 0
-	for _, r := range results {
-		fmt.Printf("%-24s %-12s %s\n", r.name, r.status, r.detail)
-		if r.status == "FAILED" {
-			failed++
-		}
-	}
-	fmt.Println()
-	if failed == 0 {
-		fmt.Println("all capabilities OK or cleanly unsupported")
-		return 0
-	}
-	fmt.Printf("%d capability/capabilities FAILED\n", failed)
-	return 1
-}
-
-func main() {
-	// Interactive is the default, because this is an example before it is a
-	// test. Someone who builds it and runs it wants to see a tray icon they can
-	// click and a file dialog they can pick a file in — that is what the
-	// capabilities ARE. A table saying they worked is the summary of the thing,
-	// not the thing.
-	//
-	// It was the other way round, and the default suited the automated caller
-	// rather than the person: running the example printed a report and exited
-	// before you could look at it, and the interesting half was behind a flag
-	// nobody discovers by running it.
-	//
-	// So the report is the flag now. `irgo-winvm app-create -gui` passes it,
-	// which is right — an unattended run wants an exit code and no windows left
-	// open, and it should have to say so.
-	report := flag.Bool("probe", false, "run the capability report and exit, instead of opening the window")
-	flag.Parse()
-
-	if *report {
-		runReport()
-		return
-	}
-	runInteractive()
-}
-
-func runReport() {
-	// openurl does not need the window, so run it first: if the windowed half
-	// dies, there is still a partial report.
-	probeOpenURL()
-
-	w, err := glaze.New(false)
-	if err != nil {
-		record("glaze.New", err, "no window: the rest cannot be tested")
-		os.Exit(report())
-	}
-	defer w.Destroy()
-	w.SetTitle("irgo windowed probe")
-	w.SetSize(520, 320, glaze.HintNone)
-	w.SetHtml(`<!doctype html><meta charset="utf-8">
-<body style="font:14px system-ui;padding:2rem">
-<h2>irgo windowed probe</h2><p>Exercising every capability that needs a window, then exiting.</p>
-<p style="color:#666">Run with no flags to try them by hand instead.</p></body>`)
-
-	go func() {
-		// Give the window a moment to exist before touching anything that needs
-		// a handle.
-		time.Sleep(2 * time.Second)
-		probeAppIcon(w)
-		probeNoCapture(w)
-		probeMenu(w)
-		probeTray(w)
-		probeFileDialog(w)
-		code := report()
-		w.Terminate()
-		// Terminate unwinds the run loop; exit once it has.
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(code)
-	}()
-
-	w.Run()
-}
+func main() { runInteractive() }

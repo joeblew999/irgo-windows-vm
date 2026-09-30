@@ -2,18 +2,23 @@
 #MISE description="Put a binary on a VM, run it, and remove it"
 #MISE depends=["go:tool"]
 set -euo pipefail
-exe="$MISE_PROJECT_ROOT/.bin/win/probe.exe"
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags="-s -w" -o "$exe" ./probe
+exe="$MISE_PROJECT_ROOT/.bin/win/conformance.test.exe"
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples test -c -trimpath -ldflags="-s -w" -o "$exe" ./conformance
 # No precondition check here any more. It shelled out to `utmctl ip-address` to
 # decide whether the guest agent was up, which meant this file held both the
 # VM's name and a second opinion about what "ready" means -- and app-create
 # already answers that, recovers a VM that has rebooted, and says what to run
 # if Windows is not installed yet.
 #
-# examples/probe, not a throwaway: this once ran `go build` into a mktemp
-# hello.exe, which tested a path no user takes.
+# The conformance suite, not a throwaway: this once ran `go build` into a
+# mktemp hello.exe, which tested a path no user takes. -test.short runs the
+# headless tests only (clipboard, power, single-instance, mmap, openurl's
+# refusals) and skips the rest by name, so this runs headless, under the guest
+# agent in session 0 with no desktop at all: the strictest place those can be
+# checked, and the headless path of app-create at the same time. Its exit code
+# is the verdict, and app-create passes a non-zero one back as exit 1.
 echo "=== create: push it and run it ==="
-irgo-winvm app-create "$exe"
+irgo-winvm app-create "$exe" -test.short -test.v
 
 echo
 echo "=== delete: take it off again ==="

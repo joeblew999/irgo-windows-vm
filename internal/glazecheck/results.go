@@ -1,0 +1,241 @@
+package glazecheck
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"regexp"
+	"strings"
+)
+
+// Suite is the conformance suite: its package, relative to the examples
+// module, and its import path, which is what test2json events name.
+const (
+	SuiteDir     = "./conformance"
+	SuitePackage = repoModule + "/examples/conformance"
+)
+
+// Outcomes a test can have in the record.
+const (
+	Pass       = "pass"
+	Fail       = "fail"
+	Skip       = "skip"
+	Unfinished = "unfinished" // started, and the binary exited or hung before it ended
+)
+
+// Known is a failure recorded in docs/UPSTREAM.md (not necessarily reported upstream yet), expected on one target until
+// the fix is released.
+//
+// It is still recorded as a FAIL, with Ref beside it, and the test itself
+// still fails: nothing is skipped, and anyone running the suite by hand sees
+// it red. What Known changes is only what a run concludes. A run whose only
+// failures are known ones answers KNOWN BUGS ONLY and exits 0, so a gate — the
+// VM run before a commit, the CI job — stays green for changes that broke
+// nothing, and goes red for a failure that is new. A known failure that
+// PASSES is reported too, and fails the run: either the fix landed and this
+// list is out of date, or the test stopped testing what it names.
+type Known struct {
+	Target string
+	Test   string
+	Ref    string
+}
+
+// KnownUpstream is every known upstream failure. Keep it short and cited:
+// each entry is a bug with a section in docs/UPSTREAM.md.
+var KnownUpstream = []Known{
+	{Target: TargetWindows, Test: "TestAppScheme/absolute_subresources", Ref: "docs/UPSTREAM.md §1b"},
+}
+
+func knownRef(target, test string) string {
+	for _, k := range KnownUpstream {
+		if k.Target == target && k.Test == test {
+			return k.Ref
+		}
+	}
+	return ""
+}
+
+// event is one line of `go tool test2json` output.
+type event struct {
+	Action  string
+	Package string
+	Test    string
+	Output  string
+}
+
+// toJSON converts what a test binary printed under -test.v=test2json into
+// test2json events, by running Go's own converter. The framing the binary
+// adds is for that tool, and its format is the toolchain's business, not
+// something to reimplement here.
+func toJSON(raw []byte) ([]byte, error) {
+	c := exec.Command("go", "tool", "test2json", "-t", "-p", SuitePackage)
+	c.Stdin = bytes.NewReader(raw)
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+	out, err := c.Output()
+	if err != nil {
+		return out, fmt.Errorf("go tool test2json: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+// parseEvents turns test2json events into one Result per test and subtest, in
+// the order they started, and a Result named "(package)" when the binary
+// failed in a way no single test accounts for — a panic in TestMain, a
+// -test.timeout, a crash between tests.
+func parseEvents(target string, stream []byte) ([]Result, error) {
+	var (
+		order    []string
+		byName   = map[string]*Result{}
+		pkgFail  bool
+		pkgLines []string
+	)
+	get := func(name string) *Result {
+		r, ok := byName[name]
+		if !ok {
+			r = &Result{Name: name, Outcome: Unfinished}
+			byName[name] = r
+			order = append(order, name)
+		}
+		return r
+	}
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("reading test2json output: %w", err)
+		}
+		if e.Test == "" {
+			switch e.Action {
+			case "fail":
+				pkgFail = true
+			case "output":
+				if l := strings.TrimSpace(e.Output); l != "" && !isFrame(l) {
+					pkgLines = append(pkgLines, l)
+				}
+			}
+			continue
+		}
+		r := get(e.Test)
+		switch e.Action {
+		case "pass":
+			r.Outcome = Pass
+		case "fail":
+			r.Outcome = Fail
+		case "skip":
+			r.Outcome = Skip
+		case "output":
+			// A screenshot line is about the test, not from it: recorded, and
+			// never taken for its first message.
+			if shotLine(r, e.Output) {
+				continue
+			}
+			// The first line the test itself wrote: its t.Error, t.Fatal or
+			// t.Skip message. The runner's own === and --- lines are not it.
+			if l := strings.TrimSpace(e.Output); r.Detail == "" && l != "" && !isFrame(l) {
+				r.Detail = l
+			}
+		}
+	}
+
+	var out []Result
+	anyTestFailed := false
+	for _, name := range order {
+		r := *byName[name]
+		if r.Outcome == Pass {
+			r.Detail = "" // a passing test's log line is not a finding
+		}
+		if r.Outcome == Unfinished && r.Detail == "" {
+			r.Detail = "started and never finished: the test binary exited or hung while it ran"
+		}
+		r.Known = knownRef(target, r.Name)
+		if r.Outcome == Fail || r.Outcome == Unfinished {
+			anyTestFailed = true
+		}
+		out = append(out, r)
+	}
+	markInheritedFailures(out)
+	if pkgFail && !anyTestFailed {
+		// test2json names the package as failed and no test: say what the
+		// binary said last, which is where a panic or a timeout lands.
+		if len(pkgLines) > 3 {
+			pkgLines = pkgLines[len(pkgLines)-3:]
+		}
+		out = append(out, Result{Name: "(package)", Outcome: Fail, Detail: strings.Join(pkgLines, " / ")})
+	}
+	return out, nil
+}
+
+// isFrame is a line the test runner prints about a test rather than one the
+// test printed: === RUN, --- FAIL: and the package's closing PASS, FAIL, ok.
+func isFrame(l string) bool {
+	return strings.HasPrefix(l, "=== ") || strings.HasPrefix(l, "--- ") ||
+		l == "PASS" || l == "FAIL" || strings.HasPrefix(l, "ok  \t") || strings.HasPrefix(l, "FAIL\t")
+}
+
+// markInheritedFailures marks a parent that failed only because a subtest did.
+//
+// A failing subtest fails its parent too, so TestAppScheme fails whenever
+// TestAppScheme/absolute_subresources does. Counting both would call one bug
+// two, and would count a known one as a new failure under its parent's name.
+// A parent is inherited only if it printed nothing of its own: a t.Fatal in
+// the parent body is its own failure, and stays one.
+func markInheritedFailures(rs []Result) {
+	for i := range rs {
+		if rs[i].Outcome != Fail || rs[i].Detail != "" {
+			continue
+		}
+		prefix := rs[i].Name + "/"
+		for _, c := range rs {
+			if strings.HasPrefix(c.Name, prefix) && (c.Outcome == Fail || c.Outcome == Unfinished) {
+				rs[i].Inherited = true
+				break
+			}
+		}
+	}
+}
+
+// rawTail is the last n lines of what a binary printed, for the record when
+// nothing structured came out of it.
+func rawTail(raw []byte, n int) string {
+	var lines []string
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		if l := strings.TrimSpace(strings.Trim(sc.Text(), "\x16")); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " / ")
+}
+
+// The lines examples/conformance logs about its screenshots (shots_test.go:
+// shotOK and shotNone), after the file:line prefix t.Logf adds. A picture's
+// line may end in a parenthesised note about it.
+var (
+	shotTaken  = regexp.MustCompile(`(?:^|: )screenshot: (\S+\.png)(?: \((.*)\))?$`)
+	shotMissed = regexp.MustCompile(`(?:^|: )screenshot not captured: (.+)$`)
+)
+
+// shotLine records a screenshot line on r and reports whether l was one.
+func shotLine(r *Result, l string) bool {
+	l = strings.TrimSpace(l)
+	if m := shotTaken.FindStringSubmatch(l); m != nil {
+		r.Shot, r.ShotNote, r.NoShot = m[1], m[2], ""
+		return true
+	}
+	if m := shotMissed.FindStringSubmatch(l); m != nil {
+		r.Shot, r.ShotNote, r.NoShot = "", "", m[1]
+		return true
+	}
+	return false
+}

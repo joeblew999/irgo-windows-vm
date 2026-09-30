@@ -71,29 +71,43 @@ not worth it.
 
 ## Does glaze work?
 
-Four programs in `examples/` answer this: `probe` (clipboard, power,
-single-instance, mmap), `verify` (glaze's portless `app://` path),
-`verify-events` (glaze's Events bridge) and `glaze-all` (tray, menus, file
-dialogs, app icon). Each exits non-zero if anything it checks failed. Run all
-four with:
+One test suite answers this: `examples/conformance` (the tests are listed in
+[DEVELOPMENT.md](DEVELOPMENT.md#the-conformance-suite)). Run it with:
 
 ```sh
-mise run glaze:mac       # natively on this Mac: ~15 s, no VM
-mise run glaze:windows   # in the VM: ~2 min, the real gate
+mise run glaze:mac       # natively on this Mac: ~5 s, no VM
+mise run glaze:windows   # in the VM: the real gate
 ```
 
-Both run `irgo-winvm glaze-check` (`-windows` for the VM). Each ends with one
-line: `YES`, `NO: failed: <names>`, or `CANNOT TELL` (the guest agent went
-away, which says nothing about glaze). It exits non-zero unless `YES`.
+Both run `irgo-winvm glaze-check` (`-windows` for the VM): build the suite with
+`go test -c`, run the binary with `-test.v=test2json`, and read the results
+through `go tool test2json` — no output is grepped. Each ends with one line:
 
-Every run records its verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md): commit,
+| verdict | means | exit |
+|---|---|---|
+| `YES` | everything passed or skipped by design | 0 |
+| `KNOWN BUGS ONLY` | the only failures are upstream bugs recorded in UPSTREAM.md (`glazecheck.KnownUpstream`), reported or not | 0 |
+| `NO` | a test failed that is not a known upstream bug | non-zero |
+| `UNEXPECTED PASS` | a known upstream failure passes: update the list and [UPSTREAM.md](UPSTREAM.md) | non-zero |
+| `CANNOT TELL` | the suite never ran (the guest agent went away), which says nothing about glaze | non-zero |
+
+Every run records every test in [GLAZE-STATUS.md](GLAZE-STATUS.md): commit,
 glaze and native versions (or the linked clone's branch and commit), and each
-program's first FAIL line. The full output goes to the log directory, and the
-path is printed. Commit that file with the change it describes.
+test's result with its first message. The full output and the test2json events
+go to the log directory, and both paths are printed. Commit that file with the
+change it describes.
 
 To read the last answer without running anything: `irgo-winvm glaze-status`. It
 also says whether the answer still matches the tree. Agents get the same through
 the `glaze-status` and `glaze-check` MCP tools.
+
+The suite is plain `go test`, so it also runs by hand:
+`go -C examples test ./conformance` (opens windows), `-short` for the headless
+tests only, `-run TestAppScheme` for one.
+
+CI runs it too: the `conformance` workflow runs `glaze-check` on GitHub's
+`macos-latest` and `windows-11-arm`, shows the table in the job summary, and
+uploads the record, the log and the events as an artifact.
 
 - Run `glaze:mac` on every edit.
 - Run `glaze:windows` before you commit.
@@ -111,9 +125,17 @@ mise run upstream:lint && mise run upstream:test:windows
 mise run upstream:unlink         # back to the released versions
 ```
 
-### Run one program by hand
+### Run one test on the VM by hand
 
-Build it, then run `irgo-winvm app-create [-gui] <exe>`. Inside the repo,
+Build the suite for Windows, then hand the binary to `app-create` with the
+test flags you want:
+
+```sh
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples test -c -o $PWD/.bin/win/conformance.test.exe ./conformance
+irgo-winvm app-create -gui .bin/win/conformance.test.exe -test.v -test.run TestAppScheme
+```
+
+Inside the repo,
 `irgo-winvm` is on your PATH: mise puts `.bin/` there, and any task (or
 `mise run go:tool`) rebuilds it.
 

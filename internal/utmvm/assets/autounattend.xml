@@ -274,6 +274,55 @@
           <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v AUOptions /t REG_DWORD /d 2 /f</CommandLine>
           <Description>Windows Update: notify, do not install on its own</Description>
         </SynchronousCommand>
+        <!-- ...and must not put its prompts on the desktop either. Seen 30 Sep
+             2026: the restart prompt stayed on the screen through every run
+             and every screenshot. UpdateNotificationLevel 2 with
+             SetUpdateNotificationLevel 1 is "Display options for update
+             notifications: disable all notifications, including restart
+             warnings"; SetAutoRestartNotificationDisable is "Turn off
+             auto-restart notifications for update installations". vm-repair
+             applies the same to an existing VM, and its desktop reset closes a
+             prompt that is already up. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>10</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v SetUpdateNotificationLevel /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>Windows Update: the notification level is set by policy</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>11</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v UpdateNotificationLevel /t REG_DWORD /d 2 /f</CommandLine>
+          <Description>Windows Update: no notifications, restart warnings included</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>12</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v SetAutoRestartNotificationDisable /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>Windows Update: no auto-restart notifications</Description>
+        </SynchronousCommand>
+        <!-- No Windows key. UTM forwards the Mac's Command key as the Windows
+             key, so every Cmd-Tab on the Mac opened Start in the guest: in
+             screenshots, over -gui windows, stealing their focus. Scancode Map
+             remaps E0 5B (left Windows) and E0 5C (right Windows) to nothing.
+             Read at boot, so it applies from the next restart. vm-repair sets
+             the same on an existing VM. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>13</Order>
+          <CommandLine>reg add "HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layout" /v "Scancode Map" /t REG_BINARY /d 00000000000000000300000000005BE000005CE000000000 /f</CommandLine>
+          <Description>No Windows key: the Mac's Command key is forwarded as it</Description>
+        </SynchronousCommand>
+        <!-- No OneDrive. Seen 30 Sep 2026: "Turn On Windows Backup" on the
+             desktop a minute after an update reboot. vm-repair sets the same. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>14</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v DisableFileSyncNGSC /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>No OneDrive: it puts backup prompts on the desktop</Description>
+        </SynchronousCommand>
+        <!-- No toasts, which is how that prompt arrived. A per-user policy:
+             FirstLogonCommands run as dev, so HKCU is dev's. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>15</Order>
+          <CommandLine>reg add "HKCU\Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" /v NoToastApplicationNotification /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>No notification toasts on the desktop</Description>
+        </SynchronousCommand>
         <!-- Marker the host can look for to know the install finished. -->
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
@@ -286,13 +335,22 @@
              simply never runs. `for` expands the version-stamped filename to a
              literal path first. -->
         <SynchronousCommand wcm:action="add">
-          <Order>10</Order>
+          <Order>16</Order>
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
+        <!-- The SMB share pushes go through: utmctl file push moves ~0.4 MB/s,
+             this ~100 MB/s. file-share.ps1 is on this CD beside the answer
+             file, and is the same script vm-repair runs on an existing VM.
+             Idempotent; `vm-repair -share=false` removes it. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>17</Order>
+          <CommandLine>cmd /c for %i in (D E F G H) do @if exist %i:\file-share.ps1 powershell -NoProfile -ExecutionPolicy Bypass -File %i:\file-share.ps1</CommandLine>
+          <Description>Open the file share the host pushes binaries through</Description>
+        </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->
         <SynchronousCommand wcm:action="add">
-          <Order>11</Order>
+          <Order>18</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

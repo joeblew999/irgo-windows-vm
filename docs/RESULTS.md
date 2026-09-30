@@ -4,14 +4,18 @@ What has been measured, newest first. Each entry keeps the date it was measured
 and the numbers it found. If a later run changes a number, correct it here too.
 
 The goal is parity: the same probes, against the same glaze version, on both
-platforms. A pass on one OS proves nothing on its own. The probes are built from
-`examples/probe/` (native capabilities), and `examples/verify` and
-`examples/verify-events` (glaze's `app://` scheme and its Events bridge).
+platforms. A pass on one OS proves nothing on its own. Entries up to 30 Sep
+2026 name the probes they ran: `examples/probe/` (native capabilities), and
+`examples/verify` and `examples/verify-events` (glaze's `app://` scheme and its
+Events bridge). Since then the same checks are the test suite
+`examples/conformance`, and [GLAZE-STATUS.md](GLAZE-STATUS.md) holds its latest
+run per platform.
 
 ## At a glance
 
 | date | result |
 |---|---|
+| 30 Sep 2026 | [pushes go over SMB: 49 MB in 1.6 s instead of 1 min 17 s; `glaze:windows` 31 s → 24 s](#pushes-go-over-smb--measured-30-sep-2026) |
 | 30 Sep 2026 | [GoReleaser rebuilds v0.4.1 byte for byte](#goreleaser-reproduces-the-published-v041-byte-for-byte--verified-30-sep-2026) |
 | 16 Aug 2026 | [an agent uploaded and ran a binary over HTTP](#an-agent-uploaded-pushed-and-ran-a-binary-over-http--verified-16-aug-2026) |
 | 14 Aug 2026 | [an agent drove every step over MCP](#an-agent-drove-the-whole-thing-over-mcp--verified-14-aug-2026) |
@@ -22,6 +26,52 @@ platforms. A pass on one OS proves nothing on its own. The probes are built from
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## Pushes go over SMB — measured 30 Sep 2026
+
+**Result:** `Push` over the guest's SMB share is 11× to 48× faster than the
+zipped `utmctl file push`, and the Mac needs no change.
+
+**Method:** `irgo-win11` (Windows 11 Pro, build 26100) on UTM's shared network,
+guest `192.168.64.40`. The share was opened by `vm-repair`. Each file was pushed
+to `C:\Windows\Temp` by `pushZipped` and then by `pushShared`, and by `Push` to
+`C:\Users\Public`. Every SMB time includes the guest round trip that moves the
+file into place and checks its SHA-256 with `certutil`. The files were real Go
+binaries: the conformance test binary, and four windows/arm64 binaries
+concatenated. Zipping such binaries helps, but random bytes would not compress.
+
+| file | zipped `utmctl` push | SMB (`pushShared`) | `Push` |
+|---|---|---|---|
+| conformance test binary, 8.1 MB | 14.18 s, then 11.92 s | 1.34 s, then 1.07 s | 1.15 s, then 1.05 s |
+| four binaries, 50.9 MB | **1 min 16.81 s** | **1.67 s** | 1.58 s |
+
+About 1.1 s of each SMB push is the move-and-hash round trip. The 50 MB transfer
+itself took about half a second.
+
+`mise run glaze:windows` (conformance suite, 5 MB, `-gui`): **24.35 s**, down from
+31 s on the old path the same afternoon. The push took 1.09 s. Most of what is
+left is the two desktop resets (about 8.5 s each) and the tests (about 6 s).
+Verdict: KNOWN BUGS ONLY, as before. After main's windowed-test screenshots were
+merged in, the same gate took 32.5 s. The push was unchanged at 1.13 s. The test
+phase grew from about 6 s to 12.4 s, and pulling the seven pictures added 1.3 s.
+
+**Checked along the way:**
+
+- **The fallback.** With the share removed (`vm-repair -share=false`),
+  `app-create` said `pushing 8 MB compressed through utmctl, because the SMB
+  share did not work (… The specified share name cannot be found …)`. It then
+  pushed in 11.95 s and ran the program.
+- **Negative control for the hash check.** With the comparison broken on
+  purpose, every push fell back, naming both hashes. Restored.
+- **Windows opens more than it is asked to.** After `New-SmbShare`, the rule
+  `File and Printer Sharing (Restrictive) (SMB-In)` was enabled, Public profile,
+  remote address Any. It was still enabled after `Remove-SmbShare`, which is
+  why the share was still reachable (and answered "share name cannot be found")
+  with our own rule gone. `file-share.ps1` now turns it off. Afterwards the only
+  enabled inbound rule for 445 was ours (`LocalSubnet`), and pushes still went
+  over SMB.
+- **The Mac.** Nothing was changed. The connection out to the guest's port 445
+  worked the first time, and nothing on the Mac asked for a permission.
 
 ## GoReleaser reproduces the published v0.4.1 byte for byte — verified 30 Sep 2026
 

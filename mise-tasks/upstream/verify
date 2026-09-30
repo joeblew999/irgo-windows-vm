@@ -12,5 +12,5 @@ mise run go:check
 echo
 echo "prove it on Windows (still LINKED):"
 echo "  mise run upstream:lint && mise run upstream:test:windows   # their lint + their tests, on the VM"
-echo "  mise run glaze:mac && mise run glaze:windows   # the four examples, against your clones"
+echo "  mise run glaze:mac && mise run glaze:windows   # the conformance suite, against your clones"
 echo "then: mise run upstream:unlink"

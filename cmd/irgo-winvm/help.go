@@ -61,8 +61,9 @@ in examples/ are examples of that, and what this repository
 uses to find out what breaks in glaze and native on Windows. In a checkout
 of this repository:
 
-     glaze-check  build the four and run them here (-windows: on the VM),
-                  and record the verdict in docs/GLAZE-STATUS.md
+     glaze-check  build the conformance suite and run it here (-windows: on
+                  the VM), and record every test and each window's screenshot
+                  in docs/GLAZE-STATUS.md
      glaze-status print that record, and whether it still holds
 
 Every command takes -h for its flags.

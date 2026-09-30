@@ -104,14 +104,16 @@ func vmRepairFlags() *flag.FlagSet {
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
 	fs.String("user", "dev", "the AutoLogon user whose password must never expire")
 	fs.Bool("reboot", false, "restart the VM afterwards so AutoLogon runs again")
+	fs.Bool("share", true, "open the guest's SMB share that pushes go through at network speed; -share=false removes it")
 	return fs
 }
 
 // runVMRepair fixes an expired password and a stale WebView2 registration.
 // Both leave the agent answering while every -gui run fails, so the repair runs
-// through the agent as SYSTEM, the access that still works.
+// through the agent as SYSTEM, the access that still works. It also opens the
+// file share that makes pushes fast, or with -share=false removes it.
 func runVMRepair(v values, _ []string) error {
-	name, user, reboot := v.String("vm"), v.String("user"), v.Bool("reboot")
+	name, user, share, reboot := v.String("vm"), v.String("user"), v.Bool("share"), v.Bool("reboot")
 	say := utmvm.Printer("vm-repair")
 	e, err := utmvm.Find(name)
 	if err != nil {
@@ -121,7 +123,7 @@ func runVMRepair(v values, _ []string) error {
 		return err
 	}
 	say("vm:     %s", e.Name)
-	return utmvm.VMRepair(e.UUID, user, reboot, say)
+	return utmvm.VMRepair(e.UUID, user, share, reboot, say)
 }
 
 // ensureAgent recovers a VM whose guest agent is not answering. Windows

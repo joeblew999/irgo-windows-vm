@@ -205,8 +205,12 @@ func (v VM) IsPaused() bool {
 // means the UTM guest tools. A VM generated without them will always report
 // the agent as missing — that is the tools being absent, not the guest being
 // broken.
-func (v VM) IPAddress() ([]string, error) {
-	out, err := v.run("ip-address")
+func (v VM) IPAddress() ([]string, error) { return v.ipAddressWithin(utmctlTimeout) }
+
+// ipAddressWithin is IPAddress with its own deadline, for a caller that has a
+// faster way to go if utmctl is slow.
+func (v VM) ipAddressWithin(d time.Duration) ([]string, error) {
+	out, err := v.runFor(d, "ip-address")
 	if err != nil {
 		return nil, err
 	}

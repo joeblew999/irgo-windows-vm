@@ -1,11 +1,23 @@
 // Package glazecheck answers "does glaze work?" and writes the answer down.
 //
-// The four programs in examples/ — probe, verify, verify-events, glaze-all —
-// are the question. `glaze-check` builds them and runs them, on this Mac or on
-// the VM, and records the verdict in docs/GLAZE-STATUS.md; `glaze-status`
-// reads it back. Before this existed the mise tasks printed YES or NO and threw
-// it away, so "does glaze work on Windows?" could only be answered by someone
-// re-running a minute and a half of VM work, and an agent could not ask at all.
+// The question is examples/conformance, a go test suite. `glaze-check`
+// compiles it with `go test -c`, runs the binary with -test.v=test2json — on
+// this machine, or on the VM through app-create — converts what it printed
+// with `go tool test2json`, and records every test's outcome and first message
+// in docs/GLAZE-STATUS.md; `glaze-status` reads it back. Before this existed
+// the mise tasks printed YES or NO and threw it away, so "does glaze work on
+// Windows?" could only be answered by someone re-running a minute and a half
+// of VM work, and an agent could not ask at all.
+//
+// It used to run four standalone programs and grep their output for FAIL,
+// FAILED or ERROR. That could not tell a skipped capability from a missing
+// one, lost everything after a program's first failure, and gave one result
+// for a program that checked six things. Structured events from the testing
+// package are the answer to all three.
+//
+// Known upstream failures (KnownUpstream) still fail and are still recorded
+// as failures; they only change the verdict from NO to KNOWN BUGS ONLY, so a
+// gate goes red for a new failure and not for one already recorded in docs/UPSTREAM.md.
 //
 // # Why it is in the shipped binary
 //

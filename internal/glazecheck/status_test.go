@@ -1,7 +1,6 @@
 package glazecheck
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,16 +34,16 @@ func TestRecordKeepsTheOtherTarget(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	win := section(TargetWindows, Result{Name: "verify", FirstFail: "FAIL: absolute app:// sub-resources never loaded"})
+	win := section(TargetWindows, Result{Name: "TestAppScheme/absolute_subresources", Outcome: Fail, Detail: "app://home/abs.js did not run"})
 	if _, err := Record(root, win); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Record(root, section(TargetMac, Result{Name: "verify", Pass: true})); err != nil {
+	if _, err := Record(root, section(TargetMac, Result{Name: "TestAppScheme/absolute_subresources", Outcome: Pass})); err != nil {
 		t.Fatal(err)
 	}
 	// And again, so a section that was read back from the file survives too,
 	// not only one that was just rendered.
-	if _, err := Record(root, section(TargetMac, Result{Name: "verify", Pass: true})); err != nil {
+	if _, err := Record(root, section(TargetMac, Result{Name: "TestAppScheme/absolute_subresources", Outcome: Pass})); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, StatusFile))
@@ -53,9 +52,9 @@ func TestRecordKeepsTheOtherTarget(t *testing.T) {
 	}
 	body := string(b)
 	for _, want := range []string{
-		"## On Windows — NO: failed: verify",
-		"`FAIL: absolute app:// sub-resources never loaded`",
-		"## On the Mac — YES: all 1 passed",
+		"## On Windows — NO: failed: TestAppScheme/absolute_subresources",
+		"| TestAppScheme/absolute_subresources | **FAIL** | `app://home/abs.js did not run` |",
+		"## On the Mac — YES: 1 passed, 0 skipped",
 		"native LINKED to /src/native — branch fix/x, commit 58f48b7c6ef9, with uncommitted changes",
 		"glaze=v0.0.61 native=linked@58f48b7c6ef9+dirty",
 	} {
@@ -71,44 +70,28 @@ func TestRecordKeepsTheOtherTarget(t *testing.T) {
 	}
 }
 
-// TestFirstFailIsTheLineThatSaysSo: the four each say "broken" differently, and
-// the record wants that line, not the exit status.
-//
-// Negative control, run by hand: returning err.Error() unconditionally fails
-// every case but the last.
-func TestFirstFailIsTheLineThatSaysSo(t *testing.T) {
-	exit := errors.New("verify.exe exited 1 in the guest")
-	cases := []struct{ name, out, want string }{
-		{"verify", "PASS: page\n[  12.3s] FAIL: timed out waiting for JS to call Go\nFAIL: later\n", "FAIL: timed out waiting for JS to call Go"},
-		{"probe row", "CAPABILITY  STATUS  DETAIL\nclipboard.read   ERROR   no display\n\n1 capability/capabilities ERROR\n", "clipboard.read   ERROR   no display"},
-		{"glaze-all row", "menu.Set  FAILED  needs a window\n", "menu.Set  FAILED  needs a window"},
-		{"not a status word", "failover OK\nFAILURES are fine to mention? no\n", exit.Error()},
-		{"nothing printed", "", exit.Error()},
-	}
-	for _, c := range cases {
-		if got := firstFail(c.out, exit); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
-	}
-}
-
 // TestVerdictNeverCallsNotRunAFailure: a guest agent that went away says
 // nothing about glaze, and must not be recorded as NO — nor as YES.
 func TestVerdictNeverCallsNotRunAFailure(t *testing.T) {
+	notRun := section(TargetWindows)
+	notRun.NotRun = "the guest agent is not answering"
 	cases := []struct {
 		s    Section
 		want string
 	}{
-		{section(TargetMac, Result{Name: "a", Pass: true}, Result{Name: "b", Pass: true}), "YES: all 2 passed"},
-		{section(TargetMac, Result{Name: "a", Pass: true}, Result{Name: "b"}), "NO: failed: b"},
-		{section(TargetMac, Result{Name: "a", Pass: true}, Result{Name: "b", NotRun: true}), "CANNOT TELL: did not run: b"},
-		{section(TargetMac, Result{Name: "a"}, Result{Name: "b", NotRun: true}), "NO: failed: a"},
+		{section(TargetMac, Result{Name: "a", Outcome: Pass}, Result{Name: "b", Outcome: Skip}), "YES: 1 passed, 1 skipped"},
+		{section(TargetMac, Result{Name: "a", Outcome: Pass}, Result{Name: "b", Outcome: Fail}), "NO: failed: b"},
+		{section(TargetMac, Result{Name: "a", Outcome: Unfinished}), "NO: failed: a"},
+		{notRun, "CANNOT TELL: the suite did not run: the guest agent is not answering"},
 		{section(TargetMac), "CANNOT TELL: nothing ran"},
-		{Section{BuildError: "x"}, "NO: the examples did not build"},
+		{Section{BuildError: "x"}, "NO: the conformance suite did not build"},
 	}
 	for _, c := range cases {
 		if got := c.s.Verdict(); got != c.want {
 			t.Errorf("got %q, want %q", got, c.want)
+		}
+		if c.s.Passed() != strings.HasPrefix(c.want, "YES") {
+			t.Errorf("%q: Passed() = %t", c.want, c.s.Passed())
 		}
 	}
 }

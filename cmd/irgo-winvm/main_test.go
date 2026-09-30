@@ -34,6 +34,9 @@ func TestHelpIsNotAnError(t *testing.T) {
 // Negative control: inverting the guard to swallow everything that is not a
 // help request fails this.
 func TestRealErrorsStillPropagate(t *testing.T) {
+	// Its own HOME, so the machine-wide lock is not the real one: with the
+	// real lock this failed with "busy" whenever anything was using the VM.
+	t.Setenv("HOME", t.TempDir())
 	err := run([]string{"app-create"})
 	if err == nil {
 		t.Fatal("app-create with no binary returned nil, want an error")

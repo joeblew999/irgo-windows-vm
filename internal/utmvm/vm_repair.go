@@ -16,21 +16,41 @@ import (
 //go:embed assets/vm-repair.ps1
 var vmRepairScript string
 
+// fileShareScript opens (or, with -Remove, closes) the SMB share Push uses. It
+// is on the unattend CD too, where autounattend.xml runs it at first logon, so
+// a new VM and a repaired one get the same share from the same script.
+//
+//go:embed assets/file-share.ps1
+var fileShareScript []byte
+
 // VMRepair fixes what silently breaks -gui runs on a VM that has
 // lived a while: an expired password (AutoLogon stops, no desktop session), a
-// stale WebView2 registration (every webview reports the runtime missing), and
-// Windows Update restarting the VM on its own in the middle of a run.
+// stale WebView2 registration (every webview reports the runtime missing),
+// Windows Update restarting the VM on its own in the middle of a run or putting
+// its prompts on the screen, and a desktop littered with what earlier runs left
+// (DesktopReset, unless it reboots). It also opens the file share Push uses, or
+// with share false removes it.
 //
 // It runs as SYSTEM through the guest agent, so it works exactly when it is
 // needed: nobody can log in, but the agent still answers. With reboot, the VM
 // restarts afterwards so AutoLogon runs again.
-func VMRepair(vmRef, user string, reboot bool, say func(string, ...any)) error {
-	guest := guestPublic + `\irgo-vm-repair.ps1`
-	if err := pushScript(vmRef, guest, vmRepairScript); err != nil {
+func VMRepair(vmRef, user string, share, reboot bool, say func(string, ...any)) error {
+	repair := guestPublic + `\irgo-vm-repair.ps1`
+	if err := pushScript(vmRef, repair, vmRepairScript); err != nil {
 		return fmt.Errorf("pushing the repair script: %w", err)
 	}
-	res, err := appExec(vmRef, []string{
-		"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", guest, "-User", user,
+	shareGuest := guestPublic + `\irgo-file-share.ps1`
+	if err := pushScript(vmRef, shareGuest, string(fileShareScript)); err != nil {
+		return fmt.Errorf("pushing the file-share script: %w", err)
+	}
+	ps := []string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"}
+	shareCmd := append(append([]string{}, ps...), shareGuest, "-User", shareUser)
+	if !share {
+		shareCmd = append(shareCmd, "-Remove")
+	}
+	res, err := appExecSteps(vmRef, [][]string{
+		append(append([]string{}, ps...), repair, "-User", user),
+		shareCmd,
 	}, 5*time.Minute, say)
 	if err != nil {
 		return err
@@ -48,8 +68,17 @@ func VMRepair(vmRef, user string, reboot bool, say func(string, ...any)) error {
 		if _, err := appExec(vmRef, []string{"shutdown", "/r", "/t", "5"}, time.Minute, say); err != nil {
 			return fmt.Errorf("requesting the reboot: %w", err)
 		}
+		return nil
 	}
-	return nil
+	// The desktop too, which the SYSTEM half above cannot reach. Skipped, and
+	// said, when nobody is logged in: that is what -reboot is for, and the
+	// repair itself has already worked.
+	err = DesktopReset(vmRef, user, say)
+	if errors.Is(err, ErrNoDesktopSession) {
+		say("desktop: not reset, nobody is logged in (-reboot brings AutoLogon back)")
+		return nil
+	}
+	return err
 }
 
 // ErrNoDesktopSession is returned before a -gui launch when nobody is logged in.

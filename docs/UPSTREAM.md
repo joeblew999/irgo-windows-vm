@@ -24,6 +24,7 @@ so the distinction stays visible.
 | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | glaze + native | medium | `PATCHED LOCALLY`, not reported | branch `fix/errunsupported-wrap` (glaze `50cc331`, native `854cdb9`), not pushed |
 | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | native | low | `FOUND HERE` — a limitation, not reported | question drafted |
 | [WebView2 "not found" when its registration is stale](#4-glaze--webview2-not-found-when-its-registration-is-stale) | glaze | high | `FILED` 30 Sep 2026, no reply yet | [glaze#34](https://github.com/crgimenes/glaze/issues/34); branch `fix/webview2-stale-registration` (`ba8775b`) on the fork, **no PR** |
+| [`New` crashes if the main goroutine has moved thread](#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread) (macOS) | glaze | medium | `FOUND HERE` 30 Sep 2026, not reported, not patched | — |
 | [`utmctl` reports failure and exits 0](#utmctl-reports-failure-and-exits-0) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`utmctl exec` never returns the guest's output](#utmctl-exec-never-returns-the-guests-output) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`suspend --save-state` power-cuts the guest](#utmctl-suspend---save-state-reports-success-and-power-cuts-the-guest) | UTM | high | `FOUND HERE`, not reported | drafted |
@@ -184,7 +185,10 @@ The document therefore loads from `https://app.localhost/`, and an absolute
 `app://home/app.js` inside it names a scheme WebView2 has never heard of.
 
 **Reproduction.** Windows 11 ARM64, `examples/verify` loading the same asset
-twice, once absolutely and once relatively:
+twice, once absolutely and once relatively (the output below is that program's;
+it is now `TestAppScheme` in `examples/conformance`, where
+`TestAppScheme/absolute_subresources` fails on Windows and is listed in
+`glazecheck.KnownUpstream`):
 
 ```
 scheme handler served: app://home/index.html -> text/html
@@ -221,8 +225,8 @@ one browser process. Design, checks and the upstream text:
 `.plans/2026-09-30_1745_glaze-1b-upstream.md`.
 
 **Workaround for glaze users today:** reference assets **relatively**. It works
-on both platforms. `examples/verify-events` does exactly that, and with it the
-Events bridge passes completely on Windows.
+on both platforms. `TestEvents` in `examples/conformance` does exactly that,
+and with it the Events bridge passes completely on Windows.
 
 **Status.** `PATCHED LOCALLY` — branch `fix/windows-custom-scheme` (`75f3ea1`,
 on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed. Checked on
@@ -342,7 +346,8 @@ regression. The likely trigger — inferred, not proven — is an update interru
 by a shutdown, which end users can hit after a power cut.
 
 **Reproduction** (in the VM, as SYSTEM): point the registration at a folder that
-does not exist, then run `examples/verify` against released glaze.
+does not exist, then run `examples/verify` (now `TestAppScheme` in
+`examples/conformance`) against released glaze.
 
 ```
 reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v EBWebView /t REG_SZ /d "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\1.0.0.0" /f
@@ -368,6 +373,26 @@ on 30 Sep 2026, no reply yet. The fix is on branch
 `fix/webview2-stale-registration` (`ba8775b`), pushed to the fork
 `joeblew999/glaze`; **no PR opened**, because the maintainer fixes his own bugs
 and a PR is sent only if asked.
+
+## 5. glaze — `New` crashes if the main goroutine has moved thread
+
+On macOS, `glaze.New` called from `main` after other work crashes with SIGTRAP
+inside the temporary `[NSApp run]` that `windowInit` starts. The stack shows
+goroutine 1 on `m=4`, not the main thread `m0`. glaze pins the thread with
+`uiThreadOnce.Do(runtime.LockOSThread)` inside `NewWithOptions`, which pins
+whatever thread the goroutine is on at that moment. Nothing pins the main
+goroutine to the main thread before then, so the scheduler is free to move it.
+
+Measured 30 Sep 2026 with `examples/glaze-all -probe` (since replaced by the
+conformance suite), when an openurl probe taking several seconds of `osascript`
+subprocesses and sleeps ran before `New`: two crashes in fourteen runs, exit
+status 2. With `New` moved first: none in ten. Nothing in glaze's
+documentation says `New` must come first.
+
+Fix, in glaze: `func init() { runtime.LockOSThread() }` in `webview_darwin.go`,
+which pins the main goroutine to the main thread before `main` runs, as Cocoa
+bindings generally do. Until then, call `New` before anything slow on the main
+goroutine.
 
 ## UTM
 
@@ -511,3 +536,4 @@ mistaken for upstream problems.
 | waiting on `tray.Run` | ours | documented as blocking |
 | `openurl.Open != nil` as a capability check | ours | a function value is never nil; `go vet` says so |
 | `file://` URL built by concatenation | ours | Windows needs `file:///C:/dir`; covered by `TestFileURL` |
+| `menu.Menu.Release` called on the UI thread with `Options.Dispatch` set | ours, but undocumented upstream | on Windows Release hands its work to the UI thread and waits (`menu_windows.go` `runOnUI`), so calling it there deadlocks; on macOS it does not. Found by the conformance suite on GitHub's Windows ARM64 runner, 30 Sep 2026. Worth a doc line in glaze: which thread Release may be called from |

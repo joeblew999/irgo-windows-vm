@@ -1,0 +1,45 @@
+{
+  "Target": "windows",
+  "When": "2026-09-30T15:43:16.919852+07:00",
+  "Platform": "windows/arm64, VM irgo-win11 (through app-create -gui)",
+  "Commit": "f16189091b5ee7d1eadc6e5f1668686233bbf95f",
+  "Verdict": "KNOWN BUGS ONLY: TestAppScheme/absolute_subresources (docs/UPSTREAM.md §1b) fail, known upstream bugs listed in docs/UPSTREAM.md; nothing else did",
+  "Tests": [
+    {
+      "Test": "TestEvents",
+      "Result": "PASS",
+      "Picture": "TestEvents.png"
+    },
+    {
+      "Test": "TestAppScheme",
+      "Result": "fail (a subtest failed)",
+      "Picture": "TestAppScheme.png"
+    },
+    {
+      "Test": "TestTray/running",
+      "Result": "PASS",
+      "Picture": "TestTray_running.png"
+    },
+    {
+      "Test": "TestMenu",
+      "Result": "PASS",
+      "Picture": "TestMenu.png"
+    },
+    {
+      "Test": "TestNoCapture",
+      "Result": "PASS",
+      "Picture": "TestNoCapture.png",
+      "Note": "black: the window is excluded from capture, which is what Protect is for"
+    },
+    {
+      "Test": "TestAppIcon",
+      "Result": "skip",
+      "Picture": "TestAppIcon.png"
+    },
+    {
+      "Test": "TestFileDialog",
+      "Result": "PASS",
+      "Picture": "TestFileDialog.png"
+    }
+  ]
+}

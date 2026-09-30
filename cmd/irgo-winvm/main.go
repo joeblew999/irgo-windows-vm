@@ -130,16 +130,6 @@ func (c cmd) parse(args []string) (values, []string, error) {
 	return values{fs}, fs.Args(), nil
 }
 
-// exec parses args and runs c without taking the mutation lock, for a caller
-// that already holds it.
-func (c cmd) exec(args []string) error {
-	v, rest, err := c.parse(args)
-	if err != nil {
-		return err
-	}
-	return c.run(v, rest)
-}
-
 // commands is command.All, in its order, each joined to its implementation.
 // Built in init because the table refers to runMCP, which reaches back here
 // through runTool, and Go rejects that as an initialization cycle.

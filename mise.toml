@@ -44,9 +44,9 @@ run = "rm -f go.work go.work.sum && echo 'unlinked — back to the versions in e
 [tasks."glaze:hands"]
 description = "glaze-all on the VM with its window left up, to drive by hand"
 depends = ["go:tool"]
-# No -probe, so it opens the window and waits for a person. -detach because of
-# that: a window nobody closes never exits, so waiting for it can only end in
-# the timeout. Without it this sat silent for ten minutes and read as a hang.
+# It opens the window and waits for a person. -detach because of that: a window
+# nobody closes never exits, so waiting for it can only end in the timeout.
+# Without it this sat silent for ten minutes and read as a hang.
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags='-s -w' -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
   "irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
@@ -54,23 +54,24 @@ run = [
 
 [tasks."glaze:mac"]
 # The inner loop. glaze and native run natively on macOS, cgo-free, so the same
-# four programs glaze:windows puts on the VM run here in seconds, no VM.
+# conformance suite glaze:windows puts on the VM runs here in seconds, no VM.
 # Windows stays the gate before a commit; this is for every edit before it.
 #
 # A wrapper, which the rule above says a task should not be — kept because the
 # go:tool dependency rebuilds the binary first, and because these two names are
-# what every doc and habit says. The logic (all four run even if one fails,
-# works linked or not, the verdict recorded in docs/GLAZE-STATUS.md, the full
-# log kept in the log dir) is in internal/glazecheck. It was two shell scripts
-# here that printed YES or NO and threw it away.
-description = "Does glaze work on this Mac? All four examples, verdict recorded in docs/GLAZE-STATUS.md, ~15s, no VM"
+# what every doc and habit says. The logic (one test binary, test2json events,
+# every test recorded in docs/GLAZE-STATUS.md, known upstream failures told
+# apart from new ones, the full log and the events kept in the log dir) is in
+# internal/glazecheck. It was two shell scripts here that printed YES or NO and
+# threw it away.
+description = "Does glaze work on this Mac? The conformance suite, every test recorded in docs/GLAZE-STATUS.md, ~5s, no VM"
 depends = ["go:tool"]
 run = "irgo-winvm glaze-check"
 
 [tasks."glaze:windows"]
-# The gate. The same four programs, built for Windows ARM64 (stripped, since
-# utmctl file push moves ~0.4 MB/s and size is time), run on the VM through
-# app-create: -gui for the three that open a window, probe headless as SYSTEM.
-description = "Does glaze work on Windows? All four examples on the VM, verdict recorded in docs/GLAZE-STATUS.md"
+# The gate. The same suite, compiled with `go test -c` for Windows ARM64
+# (stripped, since utmctl file push moves ~0.4 MB/s and size is time), run on
+# the VM's desktop through app-create -gui with -test.v=test2json.
+description = "Does glaze work on Windows? The conformance suite on the VM, every test recorded in docs/GLAZE-STATUS.md"
 depends = ["go:tool"]
 run = "irgo-winvm glaze-check -windows"

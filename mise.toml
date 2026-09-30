@@ -6,6 +6,12 @@ idiomatic_version_file_enable_tools = ["go"]
 # Pinned so CI installs what a maintainer has. mise-action reads this.
 golangci-lint = "2.11.2"
 
+[env]
+# Where local clones of glaze and native live. A bug in either is fixed THERE,
+# not worked around here — UPSTREAM.md tracks each one. The upstream:* tasks
+# read it; restored from the mise.toml deleted in e533764.
+UPSTREAM_DIR = "{{env.HOME}}/workspace/go/src/github.com/crgimenes"
+
 # Maintainer tasks. A user of the binary never needs this file.
 #
 # Namespaced by what they drive, and alphabetical:
@@ -14,6 +20,7 @@ golangci-lint = "2.11.2"
 #   vm:*    the VM
 #   app:*   your binary on that VM
 #   go:*    the Go toolchain and the analysers
+#   upstream:*  local glaze/native clones: clone, link, verify, unlink
 #   doctor  what is here; belongs to no stage because it reports on all of them
 #
 # The command tasks are the commands and nothing else. If a task here does more
@@ -380,6 +387,84 @@ description = "Build the site and serve it at http://localhost:8127 to check it"
 # pointed at a stale dist from an earlier run, and checking a site that no
 # longer matches the markdown is worse than not checking it.
 run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8127}"
+
+[tasks."upstream:clone"]
+description = "Clone glaze and native into $UPSTREAM_DIR, or bring existing clones to trunk"
+run = '''
+set -e
+mkdir -p "$UPSTREAM_DIR"
+for repo in glaze native; do
+  d="$UPSTREAM_DIR/$repo"
+  [ -d "$d/.git" ] || git clone "https://github.com/crgimenes/$repo.git" "$d"
+  git -C "$d" fetch --quiet origin
+  git -C "$d" remote set-head origin -a >/dev/null
+  def=$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||')
+  cur=$(git -C "$d" branch --show-current)
+  if [ -n "$(git -C "$d" status --porcelain)" ]; then
+    echo "$repo: uncommitted changes on $cur — commit them to a branch first; not switching"
+    continue
+  fi
+  # never move a fix branch: only a clone on a stale or current default is switched
+  if [ "$cur" = "master" ] || [ "$cur" = "$def" ]; then
+    git -C "$d" switch --quiet "$def" && git -C "$d" pull --quiet --ff-only
+  fi
+  echo "$repo: on $(git -C "$d" branch --show-current) (upstream default: $def)"
+done
+'''
+
+[tasks."upstream:link"]
+# One go.work at the root listing every module. `use` alone is not enough:
+# without the replaces the workspace still resolves glaze from the module cache
+# at the version in go.mod, and the edit being tested is silently ignored — a
+# build that looks like it proves something and proves nothing.
+description = "Point every module at the LOCAL glaze/native clones"
+run = '''
+set -e
+for repo in glaze native; do
+  if [ ! -d "$UPSTREAM_DIR/$repo" ]; then
+    echo "missing $UPSTREAM_DIR/$repo — run: mise run upstream:clone" >&2
+    exit 1
+  fi
+done
+cd "$MISE_PROJECT_ROOT"
+rm -f go.work go.work.sum
+# Every module in the repo (site/ was added after these tasks were first
+# written; a hand list goes stale), then the two replaces.
+go work init
+go work use -r .
+go work edit -replace "github.com/crgimenes/glaze=$UPSTREAM_DIR/glaze" \
+             -replace "github.com/crgimenes/native=$UPSTREAM_DIR/native"
+echo "linked. every module now builds against:"
+echo "  $UPSTREAM_DIR/glaze ($(git -C "$UPSTREAM_DIR/glaze" branch --show-current))"
+echo "  $UPSTREAM_DIR/native ($(git -C "$UPSTREAM_DIR/native" branch --show-current))"
+echo "undo with: mise run upstream:unlink"
+'''
+
+[tasks."upstream:unlink"]
+description = "Go back to the released glaze and native modules"
+run = '''
+set -e
+rm -f "$MISE_PROJECT_ROOT/go.work" "$MISE_PROJECT_ROOT/go.work.sum"
+echo "unlinked — back to the versions in each go.mod"
+'''
+
+[tasks."upstream:verify"]
+# The measurement behind a claim that an upstream fix works: their tests, our
+# tests, and (next) Windows binaries built from the edit. Nothing here is taken
+# on faith from a diff that compiles.
+description = "Run glaze's and native's own tests, then build and test this repo against them"
+depends = ["upstream:link"]
+run = '''
+set -e
+echo "--- glaze's own tests ---";  go -C "$UPSTREAM_DIR/glaze"  test ./...
+echo "--- native's own tests ---"; go -C "$UPSTREAM_DIR/native" test ./...
+echo "--- this repo, against them ---"
+mise run go:check
+echo
+echo "prove it on Windows (still LINKED):"
+echo "  mise run app:create:probe | app:create:verify | app:create:verify-events | app:create:glaze-all"
+echo "then: mise run upstream:unlink"
+'''
 
 [tasks."vm:create"]
 description = "irgo-winvm vm-create"

@@ -251,6 +251,19 @@ to everyone using those libraries. Worse, the workaround hides it: the probe
 goes green, the report says the capability works, and the next person to hit it
 starts from nothing.
 
+How a fix is made and proven, from this repo:
+
+```sh
+mise run upstream:clone    # glaze + native clones in $UPSTREAM_DIR, on trunk
+# edit on a branch in $UPSTREAM_DIR/glaze (or native)
+mise run upstream:verify   # their tests + go:check, built against the local clones
+mise run app:create:verify # the proof on Windows (any app:create:* task)
+mise run upstream:unlink   # back to the released versions
+```
+
+Then open an issue and a PR from your fork, and record the finding in
+[UPSTREAM.md](UPSTREAM.md).
+
 ## The rest
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to set up, what to run, how to

@@ -10,6 +10,7 @@ A plan must stand on its own: symptom, evidence, cause, the exact change, and ho
 | 0 | [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md) — the whole work order and which agent owns each part; one agent on the VM at a time | in progress |
 | 1 | [`2026-09-30_1500_fast-dev-cycle.md`](2026-09-30_1500_fast-dev-cycle.md) — macOS-first loop, batched Windows gate, build tool once, poll not sleep, full logs, `vm:repair:test` | mostly done — `go:tool`, `glaze:mac`, logs, compressed pushes, polling; left: guest-pull transfer (firewall) |
 | 2 | [`2026-09-30_1700_vm-golden-image.md`](2026-09-30_1700_vm-golden-image.md) — ready VM in minutes: seal a golden image once per machine, APFS-clone it per agent (0 s), optional private R2 cache; no public distribution (Windows licence); BitLocker must be off first | phase 1 code done (agent H), merged only after the disposable-VM run |
+| 3 | [`2026-09-30_1900_robotgo-evaluation.md`](2026-09-30_1900_robotgo-evaluation.md) — can go-vgo/robotgo help? No: no single-window capture, focus-dependent input, cgo by default and untested purego backends; optional follow-up: find the UTM window ID with purego instead of `swift` | evaluated, not adopted |
 
 Earlier work is in Done: [`done/`](done/) — upstream workflow restored (`upstream:*`), glaze#34 reported,
 VM hardened (`vm-repair`, never-expiring password, fail-fast `-gui`).

@@ -1,38 +1,37 @@
 # irgo-windows-vm
 
-<https://github.com/joeblew999/irgo-windows-vm>
+<https://github.com/joeblew999/irgo-windows-vm> · [Docs site](https://joeblew999.github.io/irgo-windows-vm/)
 
-[Docs site](https://joeblew999.github.io/irgo-windows-vm/)
+Build a Go desktop program on your Mac and find out whether it really works on Windows.
 
-Build a Go desktop program on your Mac, and find out whether it really works on Windows.
+`irgo-winvm` creates a real Windows 11 ARM64 virtual machine on Apple Silicon,
+runs your program in it, and brings back the output. The install is unattended:
+you don't click anything, and you never open the VM's window.
 
-One command, `irgo-winvm`, makes a real Windows 11 ARM64 virtual machine on
-Apple Silicon, runs your program inside it, and brings back what happened. No
-GUI to drive, no manual install, nothing to click. `irgo-winvm mcp` offers the
-same commands to an AI agent, so an agent writing a desktop app on a Mac can
-ask real Windows too.
+`irgo-winvm mcp` offers the same commands to an AI agent, so an agent building
+a desktop app on a Mac can test it on real Windows too.
 
 ## What it is for
 
-This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)**, a
-framework for building apps in Go with Datastar that run on iOS, Android,
-**desktop** and the web.
+This is the Windows test rig for **[Irgo](https://github.com/stukennedy/irgo)**,
+a Go + Datastar framework for iOS, Android, **desktop** and the web.
 
-An app that runs on one desktop is not a desktop app. Irgo's desktop half rests
-on [glaze](https://github.com/crgimenes/glaze) (the webview) and
-[native](https://github.com/crgimenes/native) (the OS integration around it),
-and *"it works on my Mac"* says nothing about Windows, which cannot be checked
-by reading the code. So this installs a real Windows, runs the program there,
-and reads back what it actually did, to find what breaks in glaze and native on
-Windows.
+Irgo's desktop support is built on [glaze](https://github.com/crgimenes/glaze)
+(the webview) and [native](https://github.com/crgimenes/native) (the OS
+integration around it). Passing on a Mac tells you nothing about Windows, and
+you can't find Windows bugs by reading the code. So this runs the program on a
+real Windows and reports what actually happened.
 
-Once that is dependable it belongs inside Irgo, so that checking a desktop build
-on every platform is part of building one.
+When it is dependable, it moves into Irgo, so every desktop build is checked on
+every platform.
 
-## Get it
+## Install
 
-Download the [latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest)
-for your Mac (`arm64` for Apple Silicon), then:
+You need a Mac with Apple Silicon. UTM, the hypervisor, is installed for you if
+it is missing.
+
+Download `irgo-winvm-darwin-arm64` from the
+[latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest), then:
 
 ```sh
 chmod +x irgo-winvm-darwin-arm64
@@ -40,62 +39,66 @@ xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
 ./irgo-winvm-darwin-arm64
 ```
 
-The second line is needed because macOS refuses anything downloaded from the
-internet; without it Gatekeeper reports the binary as damaged. It needs macOS
-on Apple Silicon, and installs UTM itself if you do not have it.
-[All releases](https://github.com/joeblew999/irgo-windows-vm/releases) are
-listed with checksums.
+The `xattr` line clears macOS's quarantine flag on downloaded files. Without
+it, Gatekeeper reports the binary as damaged.
 
-## Try it
+Checksums are published with [every release](https://github.com/joeblew999/irgo-windows-vm/releases).
 
-Three commands, in this order. Each is safe to repeat: if it is already done,
-it says so and stops.
+## Quick start
+
+Run these three commands in order:
 
 ```sh
-irgo-winvm iso-create -fetch    # get the Windows installer
-irgo-winvm vm-create -install   # make a VM and install Windows on it, unattended
-irgo-winvm app-create your.exe  # run your program in that VM, output back
+irgo-winvm iso-create -fetch    # download the Windows installer
+irgo-winvm vm-create -install   # create a VM and install Windows, unattended
+irgo-winvm app-create your.exe  # run your program in the VM and print its output
 ```
 
-The first two are slow, once: a large download, then an install you do not have
-to watch ([what each costs](docs/DEVELOPMENT.md#what-it-costs)). After that,
-running a program takes seconds.
+- The first two are slow, but only once: a 4.2 GB download, then about 45
+  minutes of install you don't need to watch. See
+  [what each step costs](docs/DEVELOPMENT.md#what-it-costs).
+- After that, `app-create` takes seconds.
+- Every command is safe to repeat. If the work is already done, it says so and
+  stops.
+- `irgo-winvm doctor` shows what is set up and what is missing.
 
-`irgo-winvm doctor` tells you what is set up and what is missing.
+Your `.exe` is any build made with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 
-## What it looks like
+## What you'll see
 
-Taken by the tool itself, not mock-ups. Windows installing with nobody at the
+The tool takes these screenshots itself. Windows installing with nobody at the
 keyboard:
 
 ![copying](docs/screens/vm/copying.png)
 
-And ready for your program:
+Windows ready to run your program:
 
 ![ready](docs/screens/vm/ready.png)
 
-## Does glaze work?
+## Check glaze on Windows
 
-`mise run glaze:mac` and `mise run glaze:windows` answer that with one YES or
-NO. When the answer is NO, the fix goes to
-[crgimenes/glaze](https://github.com/crgimenes/glaze) or
-[crgimenes/native](https://github.com/crgimenes/native), never into a workaround
-here: finding those bugs is the point, and a workaround hides a bug that still
-ships to everyone using those libraries.
+```sh
+mise run glaze:mac       # on this Mac
+mise run glaze:windows   # in the VM
+```
 
-## More
+Each prints one line: `YES`, or `NO` and the names of what failed.
 
-- **[CONTRIBUTING](docs/CONTRIBUTING.md)**: how to set up, what to run, how to
-  land a change, how to check glaze.
-- **[DEVELOPMENT](docs/DEVELOPMENT.md)**: how it works, the commands, exit
-  codes and costs, and every trap that cost hours.
-- **[RESULTS](docs/RESULTS.md)**: what has been measured, dated, with
-  screenshots.
-- **[UPSTREAM](docs/UPSTREAM.md)**: what was found in glaze, native and UTM, and
-  where it was fixed.
-- **[ROADMAP](docs/ROADMAP.md)**: what is next.
-- **[THREAT-MODEL](docs/THREAT-MODEL.md)**: what serving it over HTTP exposes.
-- **[Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**:
-  every command and flag, captured from the binary.
+A `NO` is fixed in [crgimenes/glaze](https://github.com/crgimenes/glaze) or
+[crgimenes/native](https://github.com/crgimenes/native), never worked around
+here. A workaround would hide a bug that still ships to everyone using those
+libraries, and finding those bugs is the point of this project.
+
+## Documentation
+
+| page | read it to |
+|---|---|
+| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, land a change, test glaze |
+| [Development](docs/DEVELOPMENT.md) | understand the commands, exit codes, costs and known traps |
+| [Results](docs/RESULTS.md) | see what has been measured, with dates and screenshots |
+| [Upstream](docs/UPSTREAM.md) | see the bugs found in glaze, native and UTM, and their status |
+| [Roadmap](docs/ROADMAP.md) | see what is next |
+| [Threat model](docs/THREAT-MODEL.md) | know what the HTTP server exposes before you enable it |
+| [Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html) | look up every command and flag, captured from the binary |
 
 MIT licensed. See [LICENSE](LICENSE).

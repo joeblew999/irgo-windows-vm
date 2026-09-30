@@ -1,95 +1,107 @@
 # Contributing
 
-This file is the mechanics: how to get set up, what to run, how to land a
+This page covers the mechanics: how to set up, what to run, and how to land a
 change.
 
-It deliberately says nothing about how the code is written. That is
-[DEVELOPMENT.md](DEVELOPMENT.md), and it is not optional reading — most of the duplication
-this project has had to remove was written by someone who did not check what
-already existed. Read it before writing code, not after.
+How the code is written is in [DEVELOPMENT.md](DEVELOPMENT.md). **Read it
+before you write code.** Most of the duplication this project has had to remove
+was written by someone who didn't check what already existed.
 
-## Setup
+## Set up
 
-[mise](https://mise.jdx.dev) pins the toolchain, so there is one step:
+[mise](https://mise.jdx.dev) pins the toolchain:
 
 ```sh
 mise install       # Go and golangci-lint, at the versions CI uses
-mise run go:check  # proves it works
+mise run go:check  # confirms the setup works
 ```
 
-Nothing else is required to build or test the Go code. The VM work needs macOS
-on Apple Silicon and UTM, which `vm-create` installs itself.
+That is all you need to build and test the Go code. Work on the VM itself also
+needs macOS on Apple Silicon and UTM, which `vm-create` installs.
 
-`mise tasks` lists everything. The names are the commands they run.
+`mise tasks` lists every task. Each task's name matches the command it runs.
 
 ## Before you push
 
-Two tasks, the same two CI runs:
+Run the same two checks CI runs:
 
 ```sh
-mise run go:check   # build, vet and test every module, cross-compile every target
+mise run go:check   # build, vet and test every module; cross-compile every target
 mise run go:lint    # unused, ineffassign, staticcheck, errcheck
 ```
 
-After you push, `mise run ci:watch` waits for GitHub Actions on your commit and
-exits non-zero if anything failed. Use it rather than a `sleep` loop: `gh run
-list --commit` matches the full 40-character SHA only, and returns an empty list
-for a short one — which looks exactly like a run that has not started.
+After you push, wait for CI with:
 
-`go:check` covers **three** separate Go modules — the root, `examples`
-and `site` — and cross-compiles for Linux and Windows
-as well as macOS. That is not ceremony: deleting a function from
+```sh
+mise run ci:watch   # exits non-zero if any workflow on your commit failed
+```
+
+Don't write your own `sleep` loop around `gh run list --commit`. It matches only
+the full 40-character SHA, and a short one returns an empty list, which looks
+exactly like a run that hasn't started.
+
+`go:check` covers all **three** Go modules (the root, `examples` and `site`) and
+cross-compiles for Linux and Windows as well as macOS. Deleting a function from
 `sysfile_other.go` once passed every check being run, because they were all
 darwin.
 
-The split is load-bearing, not organisational. `glaze` and `native` are what
-this repository exists to test, and they must not reach the binary a user
-downloads: `go list -deps ./cmd/irgo-winvm` names nineteen third-party modules and
-neither of them is there. `site` is separate for the same reason in the other
-direction — it needs a markdown parser that the tool has no business shipping.
+The modules are split so each binary carries only what it needs:
 
-## The three cycle tests
+- `examples` builds against glaze and native, the libraries under test, which
+  must never reach the binary users download. `go list -deps ./cmd/irgo-winvm`
+  names nineteen third-party modules, and neither is among them.
+- `site` needs a markdown parser the tool has no reason to ship.
 
-These are not run by CI and cannot be — they need UTM, an Apple Silicon host and
-real media. Run the one you touched.
+More on the layout is in [DEVELOPMENT.md](DEVELOPMENT.md), under "Where things go".
+
+## Run the cycle tests
+
+These need UTM, an Apple Silicon host and real media, so CI can't run them.
+Run the one for the stage you changed.
 
 | task | what it does | cost |
 |---|---|---|
-| `mise run iso:test` | delete the ISO and rebuild it from the `.esd` | ~50s, and 4.9 GB of disk once (see the note in the task) |
-| `mise run vm:test` | create and delete a VM, against a disposable name | minutes; refuses to run if a VM is up, since it restarts UTM |
-| `mise run app:test` | push a binary to the VM, run it, remove it | ~20s; needs a VM with Windows on it |
+| `mise run iso:test` | deletes the ISO and rebuilds it from the `.esd` | ~50 s, and 4.9 GB of disk once (see the note in the task) |
+| `mise run vm:test` | creates and deletes a VM under a disposable name | minutes; refuses to run if a VM is up, because it restarts UTM |
+| `mise run app:test` | pushes a binary to the VM, runs it, removes it | ~20 s; needs a VM with Windows installed |
 
-Use a disposable VM for anything destructive. `vm:test` already does — it builds
-`irgo-test-cycle`, never your real one. Losing a 45-minute install to a test is
-not a trade worth making.
+Use a disposable VM for anything destructive. `vm:test` already does: it builds
+`irgo-test-cycle`, never your real VM. Losing a 45-minute install to a test is
+not worth it.
 
 ## Does glaze work?
 
-Four programs in `examples/` answer it: `probe` (clipboard, power,
+Four programs in `examples/` answer this: `probe` (clipboard, power,
 single-instance, mmap), `verify` (glaze's portless `app://` path),
 `verify-events` (glaze's Events bridge) and `glaze-all` (tray, menus, file
-dialogs, app icon). Each exits non-zero when anything it checks failed.
+dialogs, app icon). Each exits non-zero if anything it checks failed. Run all
+four with:
 
 ```sh
-mise run glaze:mac       # all four natively on this Mac, ~15 s, no VM
-mise run glaze:windows   # all four on the VM, ~2 min, the real gate
+mise run glaze:mac       # natively on this Mac: ~15 s, no VM
+mise run glaze:windows   # in the VM: ~2 min, the real gate
 ```
 
 Both run `irgo-winvm glaze-check` (`-windows` for the VM). Each ends with one
-line, `YES`, `NO: failed: <names>` or `CANNOT TELL` (the guest agent went away,
-which says nothing about glaze), and exits non-zero unless YES. Run the Mac one
-on every edit and the Windows one before you commit.
+line: `YES`, `NO: failed: <names>`, or `CANNOT TELL` (the guest agent went
+away, which says nothing about glaze). It exits non-zero unless `YES`.
 
-The verdict is not thrown away: each run rewrites its own section of
-[GLAZE-STATUS.md](GLAZE-STATUS.md) — commit, glaze and native versions (or the
-local clone's branch and commit when linked), and each program's first FAIL
-line — and keeps the complete output in the log directory, printing its path.
-Commit that file with the change it describes. `irgo-winvm glaze-status` prints
-it and says whether it still matches the tree; an agent gets the same through
-the `glaze-status` MCP tool, and can run the check with `glaze-check`.
+Every run records its verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md): commit,
+glaze and native versions (or the linked clone's branch and commit), and each
+program's first FAIL line. The full output goes to the log directory, and the
+path is printed. Commit that file with the change it describes.
 
-To work on glaze or native themselves, point everything at your local clones
-first. Both commands then test your edits:
+To read the last answer without running anything: `irgo-winvm glaze-status`. It
+also says whether the answer still matches the tree. Agents get the same through
+the `glaze-status` and `glaze-check` MCP tools.
+
+- Run `glaze:mac` on every edit.
+- Run `glaze:windows` before you commit.
+
+### Test your own changes to glaze or native
+
+Point everything at local clones first. Both commands above then test your
+edits:
 
 ```sh
 mise run upstream:clone && mise run upstream:link
@@ -99,149 +111,175 @@ mise run upstream:lint && mise run upstream:test:windows
 mise run upstream:unlink         # back to the released versions
 ```
 
-One at a time: build it, then `irgo-winvm app-create [-gui] <exe>` —
-`irgo-winvm` is on PATH inside the repo (mise puts `.bin/` there; any task, or
-`mise run go:tool`, rebuilds it). `mise run glaze:hands` leaves glaze-all's
-window up on the guest's desktop to drive by hand. If a `-gui` run fails with no
-desktop session, run `irgo-winvm vm-repair -reboot`.
+### Run one program by hand
 
-When something is stuck, `irgo-winvm vm-screen` photographs the guest — from the
-host a stuck boot and a working one look identical.
+Build it, then run `irgo-winvm app-create [-gui] <exe>`. Inside the repo,
+`irgo-winvm` is on your PATH: mise puts `.bin/` there, and any task (or
+`mise run go:tool`) rebuilds it.
+
+- `mise run glaze:hands` leaves glaze-all's window open on the guest's desktop,
+  so you can drive it by hand.
+- If a `-gui` run fails because there is no desktop session, run
+  `irgo-winvm vm-repair -reboot`.
+- If something looks stuck, run `irgo-winvm vm-screen` to photograph the guest.
+  From the host, a stuck boot and a working one look identical.
 
 ## The docs site
 
-<https://joeblew999.github.io/irgo-windows-vm/> is **generated from the markdown
-in this repository** and published by `pages.yml` on every push to `main`. There
-is no separate copy to edit: if a page is wrong, the markdown is wrong — with
-one exception, the command reference, which has no source file at all. See
-below.
+<https://joeblew999.github.io/irgo-windows-vm/> is generated from the markdown
+in this repository and published by `pages.yml` on every push to `main`. There
+is no separate copy to edit: if a page is wrong, fix the markdown. The one
+exception is the [command reference](#the-command-reference), which has no
+source file.
 
 ```sh
-mise run site:serve    # build it and open http://localhost:8127
-mise run site:build    # just build, into site/dist (gitignored)
+mise run site:serve    # build and serve at http://localhost:8127
+mise run site:build    # build only, into site/dist (gitignored)
 ```
 
-`site:serve` stops whatever already holds the port, because the failure it
-prevents is silent — a leftover server keeps answering and the page in front of
-you is the *old* build.
+`site:serve` stops whatever already holds the port. Otherwise a leftover server
+keeps answering and you review the *old* build without knowing.
 
-CI fails on any local link that names a file the site does not publish, on an
-absolute URL that has been rewritten as a repository path, and on a fragment
-link naming a heading that does not exist. All three have happened; none is
-visible from looking at a page that renders.
+### What CI checks
 
-The site also publishes each page as plain markdown beside its HTML — the
-extension swapped, so `results.html` has `results.md` — and **`llms.txt`** and
-**`llms-full.txt`**, the whole documentation as one file, for anything that
-would rather make one request than six (`llms-full.txt` is ~67 KB). Prefer
-them over fetching the `.md` files from the repository, which silently lack the
-command reference. They are not written by hand and they are not a second copy: the corpus
-entry is appended inside the same loop that renders each HTML page, from the
-same markdown, so both come from one pass over the one list in `site/main.go`.
+None of these failures is visible on a page that renders, and each has happened.
+CI fails on:
 
-**CI fails if a page reaches one rendering and not the other**, in both
-directions. That invariant is the reason the corpus can be trusted, and it is
-exactly the kind of thing that is invisible when you look at output that renders
-correctly — a corpus quietly missing a page still looks complete.
+- a local link to a file the site doesn't publish;
+- an absolute URL that has been rewritten as a repository path;
+- a fragment link to a heading that doesn't exist;
+- a page that appears in the HTML site but not the corpus, or the reverse (see
+  below). A corpus missing a page still looks complete;
+- a screenshot no page mentions (see [Screenshots](#screenshots)).
 
-`README.md`, `RESULTS.md`, `UPSTREAM.md`, `DEVELOPMENT.md` and this file each become
-a page. Adding another means one line in `site/main.go` — nothing is discovered
-by scanning a directory, so nothing gets published by accident.
+### Copies for machines
 
-The command reference is the exception: it has no source file. It is generated
-by building the CLI and capturing `irgo-winvm help` and `-h` for every command,
-so no flag, default or usage string is ever transcribed. `iso-create -fetch`
-computes its own usage text from a constant, which is only correct on the site
-because it is captured rather than copied.
+Beside each HTML page, the site publishes the same page as plain markdown, with
+the extension swapped (`results.html` has `results.md`). It also publishes
+**`llms.txt`**, an index, and **`llms-full.txt`**, all the documentation in one
+file (~67 KB) for readers that prefer one request to six.
+
+Point machines at these rather than at the repository's `.md` files, which lack
+the command reference.
+
+They are not a second copy. Each corpus entry is written in the same loop that
+renders the HTML page, from the same markdown, in one pass over the page list
+in `site/main.go`.
+
+### Add a page
+
+`README.md`, `RESULTS.md`, `UPSTREAM.md`, `DEVELOPMENT.md` and this file each
+become a page. To add one, add a line to `pages` in `site/main.go`. Nothing is
+discovered by scanning a directory, so nothing is published by accident.
+
+### The command reference
+
+The reference has no source file. The site build compiles the CLI and captures
+`irgo-winvm help` and `-h` for every command, so no flag, default or usage
+string is ever transcribed. `iso-create -fetch` computes its usage text from a
+constant, so only a captured copy is correct.
 
 Two commands exist for tooling rather than for people:
 
-- **`irgo-winvm commands`** prints one command name per line. It is what the
-  reference generator and the documentation check both read, so neither has to
-  scrape the usage text and neither can drift from what the binary accepts.
+- **`irgo-winvm commands`** prints one command name per line. The reference
+  generator and the documentation test both read it, so neither scrapes the
+  usage text or drifts from what the binary accepts.
 - **`irgo-winvm version`** prints the version stamped in at build time, or
-  `dev` when built by hand. `doctor` reports the same thing in its first row.
+  `dev` when built by hand. `doctor` shows the same value in its first row.
 
-Screenshots come from `docs/screens/vm/`, and are put there by the tool rather
-than by hand: `mise run vm:shots` copies the newest shot of each stage in under
-its stage name. Do not copy them across yourself.
+### Screenshots
 
-**CI fails on a screenshot no page mentions.** `vm:shots` publishes whatever
-stages a run happened to produce, and a slow boot produces `booting-3`,
-`booting-4` and so on, and a page captions only the ones it explains. So a new shot needs either a
-caption naming its file, or removing: an unexplained picture in documentation is
-not evidence, it is decoration that looks like evidence.
+Published screenshots live in `docs/screens/vm/`, and the tool puts them there:
+`mise run vm:shots` copies the newest shot of each stage under the stage's name.
+Don't copy them in by hand.
 
-## A glaze or native bug is fixed at crgimenes, not here
+**CI fails on a screenshot no page mentions.** A slow boot produces
+`booting-3`, `booting-4` and so on, and `vm:shots` publishes whatever a run
+produced. Give each new shot a caption that names its file, or delete it. A
+picture nobody explains is not evidence.
 
-**Non-negotiable, and the reason this project exists.** A failing probe means a
-patch to [crgimenes/glaze](https://github.com/crgimenes/glaze) or
-[crgimenes/native](https://github.com/crgimenes/native), never a workaround in
-this repository — a bug worked around in an example still ships to everyone
-using those libraries, and the workaround hides it.
+## Fix glaze and native bugs upstream
 
-Record what you found and where it was fixed in [UPSTREAM.md](UPSTREAM.md).
+**This is non-negotiable, and it is why the project exists.** A failing probe
+means a patch to [crgimenes/glaze](https://github.com/crgimenes/glaze) or
+[crgimenes/native](https://github.com/crgimenes/native), never a workaround
+here. A bug worked around in an example still ships to everyone using those
+libraries, and the workaround hides it.
+
+Record what you found, and where it was fixed, in [UPSTREAM.md](UPSTREAM.md).
 
 ## Commits
 
-One concern per commit, each verified on its own. A refactor landed as a single
-commit cannot be reviewed and cannot be bisected.
-
-Say what changed and *why it was wrong before*. The commit log here is the only
-record of things that cost hours and are invisible in the diff — that `utmctl`
-exits 0 on failure, that `del` exits 1 when a glob matches nothing. If you had
-to measure something to be sure, put the measurement in the message.
-
-Correct a measurement wherever it appears, including [RESULTS.md](RESULTS.md),
-which is dated on purpose.
+- **One concern per commit**, each verified on its own. A refactor landed as one
+  commit can't be reviewed or bisected.
+- **Say what changed and why the old code was wrong.** The commit log is the only
+  record of things that cost hours and don't show in the diff, such as `utmctl`
+  exiting 0 on failure, or `del` exiting 1 when a glob matches nothing.
+- **Include measurements.** If you measured something to be sure, put the
+  numbers in the message.
+- **Correct a measurement everywhere it appears**, including
+  [RESULTS.md](RESULTS.md), which is dated on purpose.
 
 ## Releases
 
-CI publishes them; you tag them.
+CI publishes releases. You tag them:
 
 ```sh
 git tag -a v0.1.2 -m "..." && git push origin v0.1.2
 ```
 
+The version comes from the tag and nowhere else, so nothing in the tree needs
+editing first.
+
+### How a release is built
+
 The build is [GoReleaser](https://goreleaser.com), configured in
-`.goreleaser.yaml` and pinned in `mise.toml`. That file holds the targets
-(darwin arm64 and amd64 only), the flags, the download names
-(`irgo-winvm-darwin-arm64`, raw binaries rather than tarballs) and the release
-notes' install instructions — edit them there.
+`.goreleaser.yaml` and pinned in `mise.toml`. Edit that file to change:
 
-`release.yml` does **not** re-run the gate — a tag names a commit `check` has
-already passed on both a Mac and ubuntu, and re-running it was 124s of a 171s
-release. It asks GitHub whether that commit has a green `check` run and refuses
-to publish if it does not, then runs `goreleaser release --clean`, which builds,
-writes `SHA256SUMS`, and creates the GitHub release with the header from
-`.goreleaser.yaml` and the commits since the previous tag. The version comes
-from the tag and from nowhere else, so nothing in the tree needs editing first.
-Running `release.yml` by hand (workflow_dispatch) is a dry run: a snapshot
-build uploaded as an artefact, nothing published.
+- the targets (darwin arm64 and amd64 only);
+- the build flags;
+- the download names (`irgo-winvm-darwin-arm64`: raw binaries, not tarballs);
+- the install instructions in the release notes.
 
-`mise run go:build` is the same build locally, into `dist/`. On a clean checkout
-of a tag it builds exactly what that release published; anywhere else it is a
-snapshot and the binary says `dev` (`dev-dirty` with uncommitted changes),
-never the tag below it.
+`release.yml` then:
 
-The checksums are reproducible: `mise run go:build` on a clean checkout of the
-same tag produces byte-identical binaries, which is why `-buildvcs=false` and
-`mod_timestamp` are in `.goreleaser.yaml`. If you change the build, check that
-is still true rather than assuming it — build twice and compare `SHA256SUMS`.
+1. Asks GitHub whether the tagged commit has a green `check` run, and refuses
+   to publish if it doesn't. It doesn't re-run the gate: `check` has already
+   passed on a Mac and on ubuntu, and re-running it took 124 s of a 171 s
+   release.
+2. Runs `goreleaser release --clean`, which builds, writes `SHA256SUMS`, and
+   creates the GitHub release with the header from `.goreleaser.yaml` and the
+   commits since the previous tag.
 
-It takes the version from the tag your checkout is on, because the version is
-compiled into the binary and so is part of those bytes. That sentence was false
-until v0.2.1 — CI passed `VERSION` and a maintainer running the same command by
-hand did not, so the local build said `dev` and hashed differently.
+Running `release.yml` by hand (workflow_dispatch) is a dry run: a snapshot build
+uploaded as an artefact, with nothing published.
+
+### Build locally
+
+`mise run go:build` runs the same build into `dist/`.
+
+- On a clean checkout of a tag, it builds exactly what that release published.
+- Anywhere else it is a snapshot, and the binary reports `dev` (`dev-dirty` with
+  uncommitted changes), never the previous tag.
+
+The checksums are reproducible: a clean checkout of the same tag produces
+byte-identical binaries. That is why `-buildvcs=false` and `mod_timestamp` are
+in `.goreleaser.yaml`. If you change the build, verify it still holds: build
+twice and compare `SHA256SUMS`.
+
+The version is compiled into the binary, so it is part of those bytes, which is
+why the build reads it from the tag your checkout is on. Before v0.2.1 it
+didn't: CI passed `VERSION` and a hand-run build didn't, so a local build said
+`dev` and hashed differently. The byte-for-byte check against a published
+release is in [RESULTS.md](RESULTS.md).
 
 ## Licence
 
-MIT — see [LICENSE](../LICENSE). A contribution is offered under it.
+MIT; see [LICENSE](../LICENSE). Contributions are offered under it.
 
-The dependencies that link into the published binary were checked against that
-before it was chosen, because the licence is a claim about the whole artefact
-and not just the code in this repository. All permissive, nothing copyleft
-anywhere in the module graph:
+The licence is a claim about the whole published binary, not just this
+repository's code, so every dependency linked into it was checked. All are
+permissive; nothing in the module graph is copyleft.
 
 | licence | modules |
 |---|---|
@@ -249,17 +287,17 @@ anywhere in the module graph:
 | BSD | `elliotwutingfeng/asciiset`, `google/uuid`, `pierrec/lz4`, `pkg/xattr`, `ulikunitz/xz`, `yosida95/uritemplate`, `golang.org/x/sys`, `golang.org/x/oauth2`, `golang.org/x/sync`, `golang.org/x/time` |
 | Apache-2.0 | `klauspost/compress` |
 
-Nineteen modules, up from eleven when the MCP server landed. The eight it added
-are `go-sdk` and everything it pulls: `jsonschema-go`, `segmentio/asm`,
-`segmentio/encoding`, `uritemplate`, `x/oauth2`, `x/sync` and `x/time`. Worth
-knowing that `x/oauth2` arrives whether or not the auth package is used —
-importing `mcp` alone is enough.
+- **Nineteen modules**, up from eleven before the MCP server. The eight it added
+  are `go-sdk` and what it pulls in: `jsonschema-go`, `segmentio/asm`,
+  `segmentio/encoding`, `uritemplate`, `x/oauth2`, `x/sync` and `x/time`.
+  `x/oauth2` arrives even if the auth package is unused; importing `mcp` is
+  enough.
+- **`go-sdk` is mid-relicence**: Apache-2.0 for new contributions, MIT for older
+  un-relicensed ones. Both are permissive and neither adds a condition beyond
+  attribution. None of the eight ships a `NOTICE` file.
+- **`klauspost/compress` (Apache-2.0)** is the only licence with a condition
+  beyond attribution, and it ships no `NOTICE` file, so there is nothing to
+  carry.
 
-`go-sdk`'s LICENSE describes a transition: Apache-2.0 for new contributions, MIT
-for older un-relicensed ones. Both are permissive and neither adds a condition
-beyond attribution. Checked for `NOTICE` files: none of the eight ships one, so
-there is nothing to carry.
-
-The Apache-2.0 one is the only one with a condition beyond attribution, and it
-ships no `NOTICE` file, so there is nothing to carry. Re-check this if you add a
-dependency — `go list -deps ./cmd/irgo-winvm` is what actually reaches a user.
+**If you add a dependency, re-check this table.** `go list -deps ./cmd/irgo-winvm`
+lists what actually reaches a user.

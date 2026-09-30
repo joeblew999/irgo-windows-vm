@@ -1,119 +1,164 @@
-# Probe results
+# Results
+
+What has been measured, newest first. Each entry keeps the date it was measured
+and the numbers it found. If a later run changes a number, correct it here too.
+
+The goal is parity: the same probes, against the same glaze version, on both
+platforms. A pass on one OS proves nothing on its own. The probes are built from
+`examples/probe/` (native capabilities), and `examples/verify` and
+`examples/verify-events` (glaze's `app://` scheme and its Events bridge).
+
+## At a glance
+
+| date | result |
+|---|---|
+| 30 Sep 2026 | [GoReleaser rebuilds v0.4.1 byte for byte](#goreleaser-reproduces-the-published-v041-byte-for-byte--verified-30-sep-2026) |
+| 16 Aug 2026 | [an agent uploaded and ran a binary over HTTP](#an-agent-uploaded-pushed-and-ran-a-binary-over-http--verified-16-aug-2026) |
+| 14 Aug 2026 | [an agent drove every step over MCP](#an-agent-drove-the-whole-thing-over-mcp--verified-14-aug-2026) |
+| 13 Aug 2026 | [the ISO architecture check went from 77.2 s to 0.0 s](#the-iso-scan-verdict-is-recorded-at-build-time--13-aug-2026) |
+| 12 Aug 2026 | [an ISO this repo built installs Windows](#a-self-built-iso-installs-windows--verified-12-aug-2026) |
+| 12 Aug 2026 | [suspend and resume takes 400 ms](#suspend-and-resume--400-ms-verified-12-aug-2026) |
+| 12 Aug 2026 | [glaze and native work on Windows ARM64](#glaze-and-native-on-windows-arm64--measured-12-aug-2026), with one upstream bug |
+| 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
+| — | [the macOS baseline](#macos--verified) |
+| not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
 
 ## GoReleaser reproduces the published v0.4.1 byte for byte — verified 30 Sep 2026
 
-The release build moved from a shell loop in `mise.toml` to `.goreleaser.yaml`.
-To show the move changed nothing a user downloads, a scratch clone checked out
-v0.4.1, added only `.goreleaser.yaml`, re-tagged it locally, and ran
-`goreleaser release --clean --skip=publish` (GoReleaser 2.18.2, Go 1.26.5 as
-that tag's `mise.toml` pins):
+**Result:** moving the release build from a shell loop in `mise.toml` to
+`.goreleaser.yaml` changed nothing a user downloads.
+
+**Method:** in a scratch clone, check out v0.4.1, add only `.goreleaser.yaml`,
+re-tag it locally, and run `goreleaser release --clean --skip=publish`
+(GoReleaser 2.18.2, and Go 1.26.5 as that tag's `mise.toml` pins).
 
 | file | published SHA256SUMS | GoReleaser rebuild |
 |---|---|---|
 | `irgo-winvm-darwin-arm64` | `ce0f9f0a…3f29c2` | `ce0f9f0a…3f29c2` |
 | `irgo-winvm-darwin-amd64` | `55f2de63…3496c5` | `55f2de63…3496c5` |
 
-Identical. And the negative case: the same commit tagged `v9.9.9` instead
-hashed differently (arm64 `3f058b88…`), because the version is compiled in — so
-the match above is the tag and the source, not a comparison that cannot fail.
+**Negative control:** the same commit tagged `v9.9.9` hashed differently (arm64
+`3f058b88…`), because the version is compiled in. So the match above depends on
+the tag and the source, and the comparison can fail.
+
 Two snapshot builds of one commit, each with an empty `GOCACHE`, also produced
 identical `SHA256SUMS`.
 
 ## An agent uploaded, pushed, and ran a binary over HTTP — verified 16 Aug 2026
 
-The upload path — content-addressed, chunked `app-upload` — was driven end to
-end over the HTTP transport (`irgo-winvm mcp -http :8129`), not the spawned
-stdio client. A client chunked a cross-compiled probe, sent the chunks, pushed
-the staged result into the already-installed VM, and removed it again.
+**Result:** a client with no shared filesystem can upload a binary and run it in
+the VM. The chunked, content-addressed `app-upload` was driven end to end over
+the HTTP transport (`irgo-winvm mcp -http :8129`), not the spawned stdio client.
 
 | step | what happened |
 |---|---|
-| `app-upload` | `probe.exe`, 3,320,832 bytes, SHA-256 `7fe27641…cf130`, sent as 4 chunks of ≤1 MiB; the final chunk verified the digest and committed `bin/7fe27641….exe` |
-| `app-create` | pushed and ran on windows/arm64: 5 capabilities OK, 3 missing, 12.6 s — the same report the 14 Aug stdio run produced, which is the point: the upload feeds the same path a local file does |
-| `app-delete` | cleared `bin/` on the host and the guest binary, so the undo covers both sides |
+| `app-upload` | `probe.exe`, 3,320,832 bytes, SHA-256 `7fe27641…cf130`, sent as 4 chunks of ≤1 MiB. The final chunk verified the digest and committed `bin/7fe27641….exe` |
+| `app-create` | pushed and ran on windows/arm64: 5 capabilities OK, 3 missing, 12.6 s. The same report as the 14 Aug stdio run: an upload feeds the same path a local file does |
+| `app-delete` | cleared `bin/` on the host and the binary in the guest, so the undo covers both sides |
 
 The hash is verified before the committed file exists, so a truncated or
-corrupted upload is removed rather than run — the oldest category of bug this
-repository keeps re-fixing. The transport framing (SSE over HTTP) and bearer
-authentication are exercised by `mcpserver`'s tests; this entry proves the
-binary-staging half against a real guest.
+corrupted upload is removed, never run. Unverified downloads are the oldest
+category of bug this repository keeps re-fixing.
+
+Scope: this entry proves the binary-staging half against a real guest. The
+transport framing (SSE over HTTP) and bearer authentication are covered by
+`mcpserver`'s tests.
 
 ## An agent drove the whole thing over MCP — verified 14 Aug 2026
 
-Everything below was measured by connecting a real MCP client to
-`irgo-winvm mcp` as a spawned subprocess, on this machine, against the VM that
-was already installed. Nothing here is from a test double.
+**Result:** a real MCP client, spawning `irgo-winvm mcp` as a subprocess on this
+machine, ran every kind of call against the installed VM. No test doubles.
 
 | call | what happened |
 |---|---|
 | connect | 9 tools listed |
 | `doctor` | the full report came back **as the tool result** |
-| `vm-screen` | a **4,447,777-byte PNG**, valid header, a live Windows 11 desktop |
-| `iso-create -fetch` | detached, returned job `iso-create-20260814-151113`, survived the client exiting |
+| `vm-screen` | a **4,447,777-byte PNG** with a valid header: a live Windows 11 desktop |
+| `iso-create -fetch` | detached, returned job `iso-create-20260814-151113`, and survived the client exiting |
 | `app-create probe.exe` | pushed and ran on **windows/arm64**: 5 capabilities OK, 3 missing, 12.7 s |
 
-The `doctor` row is the one that proves the design. Over stdio, stdout is the
-JSON-RPC channel, and every command in this tool announces its progress by
-printing. That whole report arriving as a *result* is what shows `utmvm.Capture`
-is doing its job — had a single line reached stdout, the client would have
-failed on a parse error instead.
+What each row proves:
 
-The screenshot was looked at, not just measured: Windows 11 logged in as `dev`,
-Start menu open, `unattend-complete` still in Recommended from the unattended
-install. That is the one thing no test can check, because the test would have to
-supply the pixels it is verifying.
+- **`doctor`** proves the output capture works. Over stdio, stdout is the
+  JSON-RPC channel, and every command prints its progress. Had one line reached
+  stdout, the client would have failed with a parse error. The whole report
+  arriving as a result shows `utmvm.Capture` doing its job.
+- **`vm-screen`** was looked at, not just measured: Windows 11 logged in as
+  `dev`, Start menu open, `unattend-complete` still under Recommended from the
+  unattended install. No test can check this, because the test would have to
+  supply the pixels it verifies.
+- **`app-create`** is the point of the repository, reached from an agent: a Go
+  binary cross-compiled on a Mac, pushed into real Windows on ARM64, run, and
+  its answers returned. The three missing capabilities (`native/notify`,
+  keychain, fswatch) are planned upstream but not built, so they are not
+  failures of this path.
+- **The job** survived the client exiting, which is what jobs are for. Its log
+  shows the real command running and stopping because the media was already
+  there, so idempotency holds through the detached path too.
 
-The `app-create` row is the point of the repository, reached from an agent: a Go
-binary cross-compiled on a Mac, pushed into real Windows on ARM64, run, and its
-answers returned. The three missing capabilities are missing upstream —
-`native/notify`, keychain and fswatch are planned, not built — and are not
-failures of this path.
+**Not verified: a long job.** `iso-create -fetch` finished in under a second
+because the ISO was already built. `vm-create -install`, the 45-minute case jobs
+were written for, has not been run over MCP. The mechanism is proven; the
+duration is not. See the [roadmap](ROADMAP.md).
 
-The job survived the client exiting, which is the property jobs exist for. Its
-log shows the real command running and stopping because the media was already
-there, so idempotency holds through the detached path too.
+## The ISO scan verdict is recorded at build time — 13 Aug 2026
 
-**Not verified: a genuinely long job.** `iso-create -fetch` finished in under a
-second because the ISO was already built, and `vm-create -install` — the
-45-minute case jobs were written for — has not been run over MCP. What is proven
-is the mechanism, not the duration.
+**Result:** checking whether an ISO is ARM64 went from 77.2 s to 0.0 s.
 
+The check reads the whole file. On a 4.9 GB ISO that took **77 seconds**, on
+every `iso-create`, with nothing printed while it ran. The verdict is now cached
+beside the ISO, keyed by size and mtime, and written by the build itself, which
+knows the answer because it just mastered the ISO from an ARM64 `.esd`.
+
+| | |
+|---|---|
+| first check of a fresh ISO, before | 77.2 s |
+| same check, after | **0.0 s** |
+| rebuild from a kept `.esd`, no network | 39.5 s |
+| full fetch + expand + master from nothing | 250 s |
+
+The rebuild figure is why `iso-delete` keeps the `.esd` by default: the ISO
+costs 39 seconds of local work to recreate, while the `.esd` costs 4.2 GB from a
+source that rate-limits.
+
+**Not covered by a test:** that the build still records the verdict. That path
+needs a real `.esd`, so deleting the call leaves the unit tests green. This
+measurement is the check.
 
 ## A self-built ISO installs Windows — verified 12 Aug 2026
 
+**Result:** macOS can master bootable Windows ARM64 media with `xorriso` alone,
+so CrystalFetch is no longer needed.
+
 ![Windows 11 installing from an ISO this repo built](screens/vm/copying.png)
 
-That is UTM, booted from an ISO mastered by `irgo-winvm iso-create`, installing
-unattended. It settles every open question about replacing CrystalFetch:
+That is UTM booted from an ISO mastered by `irgo-winvm iso-create`, installing
+unattended.
 
 | question | answer |
 |---|---|
 | can macOS master bootable Windows ARM64 media? | **yes**, with `xorriso` |
 | does `hdiutil` work? | **no.** Two images, one hiding everything from ISO9660 and one hiding nothing, both enumerate as `FS0: /CDROM(0x0)` and both refuse to boot |
-| is UDF required for the 4.099 GiB `install.wim`? | **no.** ISO9660 level 3 multi-extent is enough — Setup read it and installed |
-| so is `cdrtools` needed? | **no.** `xorriso` alone. One Homebrew formula |
-| does `efisys_noprompt.bin` skip "Press any key to boot from CD"? | **yes** — it went straight into Setup |
+| is UDF required for the 4.099 GiB `install.wim`? | **no.** ISO9660 level 3 multi-extent is enough: Setup read it and installed |
+| so is `cdrtools` needed? | **no.** `xorriso` alone, one Homebrew formula |
+| does `efisys_noprompt.bin` skip "Press any key to boot from CD"? | **yes**, straight into Setup |
 
-The last row matters beyond convenience. Booting currently depends on typing
-`\efi\boot\bootaa64.efi` at the UEFI shell and firing eight keypresses over six
-seconds — a hack DEVELOPMENT.md documents as costing hours and as having once
-destroyed an install when surplus presses reached Setup's UI. Media built with
-the no-prompt loader does not need it.
+The last row matters most. Booting otherwise depends on typing
+`\efi\boot\bootaa64.efi` at the UEFI shell with eight keypresses over six
+seconds. That hack cost hours, and once destroyed an install when surplus
+presses reached Setup's UI. Media built with the no-prompt loader doesn't need
+it.
 
-Full detail, including the two failed attempts and why they failed, is in
-the trap table in [DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
-
----
-
-The point of this repo is parity: the same probes, the same glaze version, on
-both platforms. A pass on one OS proves nothing on its own. Probes are built
-from `examples/probe/` (native capabilities) and `examples/verify`,
-`examples/verify-events` (glaze.s `app://` scheme and its Events bridge).
+The two failed attempts, and why they failed, are in the trap table in
+[DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
 
 ## Suspend and resume — 400 ms, verified 12 Aug 2026
 
-Three consecutive cycles on Windows 11 ARM64, each measured to a live guest
-agent, with the guest's own boot time as the fingerprint:
+**Result:** a suspended VM resumes in 400 ms with its state intact. A cold boot
+takes **59 seconds**.
+
+Three consecutive cycles on Windows 11 ARM64, each timed until the guest agent
+answered, using the guest's own boot time as the fingerprint:
 
 ```
 baseline  System Boot Time: 8/12/2026, 10:33:36 AM
@@ -122,22 +167,148 @@ cycle 2   resumed in 400ms   boot time unchanged -> STATE PRESERVED
 cycle 3   resumed in 400ms   boot time unchanged -> STATE PRESERVED
 ```
 
-The boot time is the proof rather than the speed: it changes on a reboot and
-not on a resume, so an unchanged value means the guest genuinely continued
-rather than quietly restarting. A cold boot for comparison was **59 seconds**,
-and additionally has to be driven through the UEFI shell with eight keypresses —
-which needs an unlocked Mac and a visible display window.
+The boot time is the proof, not the speed. It changes on a reboot and not on a
+resume, so an unchanged value means the guest continued rather than quietly
+restarting.
 
-`irgo-winvm vm-create` resumes a suspended VM rather than rebooting it, so the
-idempotent path is the fast one.
+- A cold boot also has to be driven through the UEFI shell with eight
+  keypresses, which needs an unlocked Mac and a visible display window.
+- `irgo-winvm vm-create` resumes a suspended VM rather than rebooting it, so the
+  idempotent path is the fast one.
 
-**The state is in memory** and does not survive quitting UTM. The durable
-version is not offered; `utmctl suspend --save-state` either refuses (naming GPU
-acceleration, then NVMe) or *reports success and power-cuts the guest* — exit 0,
-no state file, next boot through "Diagnosing your PC". See the trap table in
-[DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
+**The state lives in memory** and doesn't survive quitting UTM. The durable
+version isn't offered: `utmctl suspend --save-state` either refuses (naming GPU
+acceleration, then NVMe) or *reports success and power-cuts the guest*: exit 0,
+no state file, and the next boot goes through "Diagnosing your PC". See the trap
+table in [DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
+
+## glaze and native on Windows ARM64 — measured 12 Aug 2026
+
+**Result:** every capability that works on macOS works on Windows ARM64, and
+glaze's Events bridge works. The `app://` scheme works except for absolute
+sub-resource URLs, an upstream bug.
+
+Host: Apple M2 Pro, UTM 4.7.5. Guest: Windows 11 ARM64 build 26100, run headless
+through the QEMU guest agent, with no GUI, keystrokes or screen.
+
+### The inner loop works
+
+```
+$ irgo-winvm app-create -vm irgo-win11 hello-arm64.exe alpha beta
+hello from windows/arm64
+args: [alpha beta]
+```
+
+- **10.8 seconds** end to end.
+- Cross-compiled on macOS with plain `GOOS=windows GOARCH=arm64` and **no
+  toolchain at all**. That is what being cgo-free buys, and what irgo can't do
+  today, because mingw pins it to amd64.
+- A failing guest binary fails the command, but the host does **not** exit with
+  the guest's code. A binary exiting 3 exits `app-create` **1**, with "exited 3
+  in the guest" in the message. The two must differ, because a missing VM exits
+  3 and a busy guest agent exits 4. See the contract in
+  [DEVELOPMENT.md](DEVELOPMENT.md#what-it-exits-with).
+
+### Native capabilities — windows/arm64, native
+
+| capability | result |
+|---|---|
+| `clipboard.write` / `clipboard.read` | **OK**: round trip verified |
+| `power.preventSleep` | **OK**: acquired and released |
+| `singleinstance.acquire` | **OK**: lock held, re-acquire correctly refused |
+| `mmap.map` | **OK**: mapped and wrote through |
+| `notifications`, `keychain`, `fswatch` | missing from the ecosystem |
+
+Identical to the [macOS results](#macos--verified).
+
+### The windowed half — `examples/glaze-all`, windows/arm64, `-gui`
+
+These rows used to read *skipped*. Run in the VM with
+`irgo-winvm app-create -vm irgo-win11 .bin/glaze-all-arm64.exe`, exit code 0:
+
+| capability | windows/arm64 | darwin/arm64 |
+|---|---|---|
+| `openurl.Open` (`file://`) | **OK** | **OK** |
+| `openurl.Open` refusing a custom scheme | **OK** | **OK** |
+| `openurl.Reveal` | **OK** | **OK** |
+| `menu.Set` (native menu bar) | **OK** | **OK** |
+| `tray.Run` (icon raised and removed) | **OK** | **OK** |
+| `glaze.OpenFile` (native file dialog) | **OK** | **OK** |
+| `nocapture.Protect` | **OK** | UNSUPPORTED, by design |
+| `glaze.SetAppIcon` | UNSUPPORTED, by design | **OK** |
+
+The last two rows are mirror images: each platform lacks exactly what the other
+has, and neither is a failure.
+
+- `nocapture` on macOS is right to refuse: Apple removed the API.
+- Windows takes an app's icon from the executable's resources, fixed before the
+  process starts.
+
+Getting the report to *say* so needed a fix in glaze and native themselves
+([UPSTREAM.md](UPSTREAM.md) §2). Every package defined its own `ErrUnsupported`
+without wrapping the standard one, so both rows read FAILED and a wholly correct
+run exited non-zero.
+
+This is the first time the whole native surface has run together on Windows:
+not in this repo before, not in glaze's examples, and not in `crgimenes/native`,
+all of which test one capability per binary.
+
+### glaze probes — measured 12 Aug 2026
+
+Both ran on Windows 11 ARM64 via `irgo-winvm app-create -gui`. With these,
+everything glaze does is measured on both platforms, which was the project's
+stated goal.
+
+**Events bridge: fully working.**
+
+```
+PASS: JS -> Go   : "js-listener-installed"
+PASS: Go -> JS   : 3 unsolicited pushes delivered
+PASS: round trip : received=["tick:1","tick:2","tick:3"] domChildren=3
+```
+
+**`app://` scheme: works, with one serious upstream bug.**
+
+```
+origin:        https://app.localhost      (macOS reports app://home)
+secureContext: true
+relative sub-resources:  served
+absolute app:// sub-resources:  NEVER REQUESTED
+```
+
+The handler works and the origin is secure, but **absolute `app://` URLs inside
+a page don't load on Windows**, silently, with no error. glaze emulates the
+scheme there with a virtual host, so the document loads from
+`https://app.localhost/`, and an absolute `app://home/app.js` names a scheme
+WebView2 doesn't know.
+
+So a glaze app that works on macOS loses every stylesheet and script on
+Windows, with nothing to say why.
+
+- **Workaround for app authors:** reference assets relatively and both
+  platforms work. `verifyevents` now does this, which is why it passes.
+- **Fix:** WebView2's real custom-scheme registration, written up in
+  [UPSTREAM.md](UPSTREAM.md) §1b.
+
+This is exactly the class of bug the project was built to find: invisible from a
+Mac, invisible in glaze's own CI (`windows-latest` is x64 and has no ARM64
+desktop), and silent when it happens.
+
+### Two constraints learned getting there
+
+Both were guessed at first, then understood:
+
+- **The guest agent runs without a desktop session.** A GUI app started through
+  it has no window station, so the glaze probes must be launched into the
+  interactive session with a scheduled task using `/it`, not a plain exec.
+- **Keystrokes don't reach the VM while the Mac is locked.** Boot recovery
+  depends on typing at the UEFI shell, so a locked screen blocks it. This is the
+  strongest argument for suspend and resume: resuming restores RAM and never
+  reaches the firmware, so it needs no keystrokes and works while locked.
 
 ## macOS — verified
+
+The baseline the Windows results are compared against.
 
 Host: Apple M2 Pro, macOS 26.5, `glaze v0.0.47`, `CGO_ENABLED=0`.
 
@@ -145,11 +316,11 @@ Host: Apple M2 Pro, macOS 26.5, `glaze v0.0.47`, `CGO_ENABLED=0`.
 
 | capability | result |
 |---|---|
-| `clipboard.write` / `clipboard.read` | OK — round trip verified, original clipboard restored |
-| `power.preventSleep` | OK — acquired and released |
-| `singleinstance.acquire` | OK — lock held, re-acquire correctly refused |
-| `mmap.map` | OK — mapped and wrote through |
-| `openurl` / `tray` / `filedialog` / `menu` / `nocapture` / app icon | covered by `examples/glaze-all` — see the windows/arm64 table below, which lists both platforms |
+| `clipboard.write` / `clipboard.read` | OK: round trip verified, original clipboard restored |
+| `power.preventSleep` | OK: acquired and released |
+| `singleinstance.acquire` | OK: lock held, re-acquire correctly refused |
+| `mmap.map` | OK: mapped and wrote through |
+| `openurl` / `tray` / `filedialog` / `menu` / `nocapture` / app icon | covered by `examples/glaze-all`; see the [windowed half](#the-windowed-half--examplesglaze-all-windowsarm64--gui), which lists both platforms |
 | `notifications`, `keychain`, `fswatch` | **missing from the ecosystem** (`native/notify` is planned, not built) |
 
 ### glaze `app://` scheme
@@ -163,13 +334,12 @@ pushState:     /deep/link/route
 css:           32px
 ```
 
-`pushState` succeeding is the load-bearing result: it means client-side routing
-works. The same probe over `file://` fails with `SecurityError`, which is why
-the `app://` scheme handler matters and `file://` is not a substitute.
-
-`css: 32px` is `getComputedStyle` returning the stylesheet's `2rem`, proving the
-asset was fetched through the Go handler *and* applied by the engine — not
-merely served.
+- **`pushState` succeeding** means client-side routing works. The same probe over
+  `file://` fails with `SecurityError`, which is why the `app://` handler
+  matters and `file://` is no substitute.
+- **`css: 32px`** is `getComputedStyle` returning the stylesheet's `2rem`. The
+  asset was fetched through the Go handler *and* applied by the engine, not
+  merely served.
 
 ### glaze Events bridge
 
@@ -180,246 +350,79 @@ PASS: round trip : received=["tick:1","tick:2","tick:3"] domChildren=3
 sockets during run: NONE
 ```
 
-`domChildren=3` shows server-initiated pushes actually mutated the DOM. With
-zero sockets, this is a genuine SSE substitute for a desktop app — relevant
-because glaze's `SchemeResponse` is a buffered `[]byte` on the UI thread and so
-cannot stream SSE itself.
-
-## Windows ARM64 — MEASURED (native capabilities), 12 Aug 2026
-
-Host: Apple M2 Pro / UTM 4.7.5, guest Windows 11 ARM64 build 26100, run headless
-through the QEMU guest agent — no GUI, no keystrokes, no screen.
-
-### The inner loop works
-
-```
-$ irgo-winvm app-create -vm irgo-win11 hello-arm64.exe alpha beta
-hello from windows/arm64
-args: [alpha beta]
-```
-
-10.8 seconds end to end. The binary was cross-compiled on macOS with plain
-`GOOS=windows GOARCH=arm64` and **no toolchain at all** — which is what cgo-free
-buys, and what irgo cannot currently do because mingw pins it to amd64.
-
-A failing guest binary fails the command. The host does **not** exit with the
-guest's code — a binary exiting 3 exits `app-create` **1**, with "exited 3 in
-the guest" in the message. The two must not look alike, because a missing VM
-exits 3 and a busy guest agent exits 4; see the contract in
-[DEVELOPMENT.md](DEVELOPMENT.md#what-it-exits-with).
-
-### Native capabilities — windows/arm64, native
-
-| capability | result |
-|---|---|
-| `clipboard.write` / `clipboard.read` | **OK** — round trip verified |
-| `power.preventSleep` | **OK** — acquired and released |
-| `singleinstance.acquire` | **OK** — lock held, re-acquire correctly refused |
-| `mmap.map` | **OK** — mapped and wrote through |
-| `notifications`, `keychain`, `fswatch` | missing from the ecosystem |
-
-Identical to the macOS column. Every capability that works on macOS works on
-Windows ARM64.
-
-### The windowed half — `examples/glaze-all`, windows/arm64, `-gui`
-
-The rows that used to say *skipped* here. Run in the VM with
-`irgo-winvm app-create -vm irgo-win11 .bin/glaze-all-arm64.exe`, exit code 0:
-
-| capability | windows/arm64 | darwin/arm64 |
-|---|---|---|
-| `openurl.Open` (`file://`) | **OK** | **OK** |
-| `openurl.Open` refusing a custom scheme | **OK** | **OK** |
-| `openurl.Reveal` | **OK** | **OK** |
-| `menu.Set` (native menu bar) | **OK** | **OK** |
-| `tray.Run` (icon raised and removed) | **OK** | **OK** |
-| `glaze.OpenFile` (native file dialog) | **OK** | **OK** |
-| `nocapture.Protect` | **OK** | UNSUPPORTED — by design |
-| `glaze.SetAppIcon` | UNSUPPORTED — by design | **OK** |
-
-The last two rows are the interesting ones, and they are mirror images: each
-platform is missing exactly what the other has. `nocapture` on macOS is right
-to refuse — Apple removed the API — and Windows takes its app icon from the
-executable's resources, decided before the process starts. Neither is a
-failure, and getting the report to *say* so needed a fix in glaze and native
-themselves ([UPSTREAM.md](UPSTREAM.md) §2): every package defined its own
-`ErrUnsupported` without wrapping the standard one, so both rows read FAILED
-and a wholly correct run exited non-zero.
-
-This is the first time the whole native surface has been run together on
-Windows — not in this repo, not in glaze's examples, and not in
-`crgimenes/native`, all of which test one capability per binary.
-
-### glaze probes — MEASURED, 12 Aug 2026
-
-Both ran on Windows 11 ARM64 via `irgo-winvm app-create -gui`. This closes the
-project's stated goal: everything glaze does is now measured on both platforms.
-
-**Events bridge — fully working.**
-
-```
-PASS: JS -> Go   : "js-listener-installed"
-PASS: Go -> JS   : 3 unsolicited pushes delivered
-PASS: round trip : received=["tick:1","tick:2","tick:3"] domChildren=3
-```
-
-**`app://` scheme — works, with one serious caveat that is an upstream bug.**
-
-```
-origin:        https://app.localhost      (macOS reports app://home)
-secureContext: true
-relative sub-resources:  served
-absolute app:// sub-resources:  NEVER REQUESTED
-```
-
-The scheme handler works and the origin is secure, but **absolute `app://` URLs
-inside a page do not load on Windows** — silently, with no error. glaze emulates
-the scheme there with a virtual host, so the document loads from
-`https://app.localhost/` and an absolute `app://home/app.js` names a scheme
-WebView2 does not know.
-
-A glaze app that works on macOS therefore loses every stylesheet and script on
-Windows, with nothing to say why. Written up in
-[UPSTREAM.md](UPSTREAM.md) §1b, with the fix (WebView2's real custom-scheme
-registration). **Reference assets relatively and both platforms work** — which
-is what `verifyevents` now does, and why it passes.
-
-This is exactly the class of bug the project was built to find: invisible from a
-Mac, invisible in glaze's own CI (`windows-latest` is x64 and has no ARM64
-desktop), and silent when it happens.
-
-### Two constraints learned getting there
-
-Both were guessed at first, then understood:
-
-- **The guest agent runs without a desktop session.** A GUI app started through
-  it has no window station, so the glaze probes need launching into the
-  interactive session — a scheduled task with `/it`, not a plain exec.
-- **Keystrokes do not reach the VM while the Mac is locked.** Boot recovery
-  depends on typing at the UEFI shell, so a locked screen blocks it. This is the
-  strongest argument for suspend/resume: resuming restores RAM and never reaches
-  the firmware, so it needs no keystrokes and works locked.
+`domChildren=3` shows server-initiated pushes actually changed the DOM. With
+zero sockets, this is a genuine SSE substitute for a desktop app. That matters
+because glaze's `SchemeResponse` is a buffered `[]byte` on the UI thread, so it
+can't stream SSE itself.
 
 ## The unattended install — verified 11 Aug 2026
 
-Windows 11 ARM64 (build 26100) reached a logged-in desktop as `dev` with no
-interaction after the boot command. That proves the answer file, the disk
-layout, the display device and the boot path:
+**Result:** Windows 11 ARM64 (build 26100) reached a logged-in desktop as `dev`
+with no interaction after the boot command. That proves the answer file, the
+disk layout, the display device and the boot path.
 
 | claim | status |
 |---|---|
-| ARM64 Windows installs unattended in UTM | **yes** — desktop reached, auto-login as `dev` |
-| answer file is read and applied | **yes** — GPT layout matched `DiskConfiguration` exactly |
-| `virtio-ramfb-gl` display works | **yes** — Setup and desktop both render |
+| ARM64 Windows installs unattended in UTM | **yes**: desktop reached, auto-login as `dev` |
+| answer file is read and applied | **yes**: GPT layout matched `DiskConfiguration` exactly |
+| `virtio-ramfb-gl` display works | **yes**: Setup and desktop both render |
 | NVMe system disk is visible to Setup | **yes** |
-| glaze runs on Windows | **yes** — measured 12 Aug, above |
+| glaze runs on Windows | **yes**: measured 12 Aug, [above](#glaze-probes--measured-12-aug-2026) |
 
 ### What it looked like
 
-Not mock-ups. A Mac built the installer, installed Windows on it unattended,
-and photographed the result — including the failure that put three Bing tabs on
-the desktop. Every one was taken by the tool itself, named for the stage that
-produced it; nothing was staged, cropped, or copied across by hand. Two more,
+The tool took every one of these itself and named each for the stage that
+produced it. Nothing was staged, cropped or copied in by hand. Two more,
 `copying` (mid-install, nobody clicking) and `ready` (the guest agent answers),
 are on the [front page](../README.md).
 
-**`booting-1`** — UEFI firmware, before Windows has started
+**`booting-1`**: UEFI firmware, before Windows has started
 
 ![booting-1](screens/vm/booting-1.png)
 
-**`booting-2`** — Windows starting
+**`booting-2`**: Windows starting
 
 ![booting-2](screens/vm/booting-2.png)
 
-**`finalising`** — the copy is done, first logon
+**`finalising`**: the copy is done, first logon
 
 ![finalising](screens/vm/finalising.png)
 
-**`stalled-1`** — an install that stopped moving, photographed so you can see why
+**`stalled-1`**: an install that stopped moving, photographed so you can see why
 
 ![stalled-1](screens/vm/stalled-1.png)
 
-**`running-no-agent`** — the failure it now refuses to cause: keystrokes meant
-for a boot prompt, landing in a logged-in desktop
+**`running-no-agent`**: the failure the tool now refuses to cause. Keystrokes
+meant for a boot prompt landed in a logged-in desktop and put three Bing tabs on
+it.
 
 ![running-no-agent](screens/vm/running-no-agent.png)
 
-`booting-N` repeats every few seconds until the agent answers, so a boot that
-hangs leaves a picture of exactly where it stopped. Every stage photographs
-itself as it runs, because from the host a stuck boot and a working one look
-identical. Those go to `shots/` outside the repository; the few kept as evidence
-are in `docs/screens/`, published by `mise run vm:shots`.
+Every stage photographs itself as it runs, because from the host a stuck boot
+and a working one look identical. `booting-N` repeats every few seconds until
+the agent answers, so a hung boot leaves a picture of exactly where it stopped.
+Those go to `shots/`, outside the repository. The few kept as evidence are in
+`docs/screens/`, published by `mise run vm:shots`.
 
 ## Still to measure: x64 under emulation
 
-One claim from the original list is genuinely unanswered. Every Windows result
-in this file is ARM64-native; nothing here has been run as an amd64 build under
-emulation.
+Every Windows result on this page is ARM64-native. Nothing has been run as an
+amd64 build under emulation. Last evidence gathered 13 Aug 2026, all of it
+ARM64.
 
-- **x64-under-emulation behaviour.** Whether an amd64 build behaves identically
-  on ARM Windows decides whether Mac-local testing has any fidelity at all, or
-  whether x64 testing must live on x86 hardware.
+**Why it matters:** whether an amd64 build behaves identically on ARM Windows
+decides whether testing on a Mac has any fidelity for x64, or whether x64
+testing must happen on x86 hardware.
 
-The tooling for it exists — `app-create` runs any build, so an x64 `examples/probe` can be pushed the same
-way as the ARM64 one — what is missing is the run and the record of it, not the
-means. (`probe/run-probe.cmd`, the hand-run script this once named, was removed
-30 Sep 2026.) Last evidence gathered 13 Aug 2026, all of it ARM64.
+**What's missing** is the run and its record, not the means. `app-create` runs
+any build, so an x64 `examples/probe` can be pushed the same way as the ARM64
+one. (`probe/run-probe.cmd`, the hand-run script this entry once named, was
+removed 30 Sep 2026.)
 
-One further item is **exercised but not recorded**. glaze's hand-written ARM64
-ABI code (`putbounds_arm64.go`, a 16-byte RECT passed in two registers per
-AAPCS64 rather than by hidden reference as on amd64) is necessarily executed by
-every `-gui` run above, since a window cannot be positioned without it. No run
-has been made that reports on it specifically, so this file does not claim one
-way or the other.
+**Exercised but not recorded:** glaze's hand-written ARM64 ABI code
+(`putbounds_arm64.go`, which passes a 16-byte RECT in two registers per AAPCS64,
+not by hidden reference as on amd64). Every `-gui` run above executes it, since
+a window can't be positioned without it. No run has reported on it
+specifically, so this page makes no claim either way.
 
-
-## Still open
-
-Everything the plan files tracked is done and measured above. What is left:
-
-- **Durable suspend.** Resume is 400 ms but the state is in memory, so it does
-  not survive quitting UTM. The blocker is the emulated NVMe device, and NVMe is
-  not optional — Windows ARM64 Setup has no inbox VirtIO storage driver. Getting
-  past it means switching the system disk to VirtIO and injecting the driver
-  into `boot.wim`, which is now reachable because `iso-create` already drives
-  wimlib over the media.
-- **`Delete` safety.** It removes files 30 seconds after asking QEMU to stop,
-  whether or not it actually did. (`Prune` was the worse half of this and is
-  fixed: it used to delete any `*.img`/`*.dmg` in the system temp directory
-  regardless of owner.)
-- **Dead code.** `BuildFATImage`, `OpenDisplay`, `BootAssist`,
-  `SchemaConfigurationVersion`, `IfaceVirtIO` and `GuestToolsInstallCommand` are
-  unreferenced; the last still carries a `start`-wildcard bug already fixed in
-  the answer file.
-- **Nothing found upstream has been reported upstream.** Patches for two of
-  them exist only as uncommitted edits in local clones. The status of every
-  finding is the table at the top of [UPSTREAM.md](UPSTREAM.md) — a count kept
-  here would be a second copy, and this one was already wrong.
-
-**No irgo integration until this works standalone with glaze.** Integrating a
-tool that does not yet work makes the framework absorb its failures.
-
-## The ISO scan verdict is recorded at build time — 13 Aug 2026
-
-Checking "is this media ARM64" reads the whole file. On a 4.9 GB ISO that is
-**77 seconds**, and it happened on every `iso-create`, printing nothing while
-it ran.
-
-The verdict is now cached beside the ISO, keyed by size and mtime, and written
-by the build itself — which knows the answer, having just mastered the ISO from
-an ARM64 `.esd`.
-
-| | |
-|---|---|
-| first check of a fresh ISO, before | 77.2 s |
-| same check, after | **0.0 s** |
-| rebuild from a kept `.esd`, no network | 39.5 s |
-| full fetch + expand + master from nothing | 250 s |
-
-The rebuild figure is why `iso-delete` keeps the `.esd` by default: the ISO
-costs 39 seconds of local work to recreate, the `.esd` costs 4.2 GB from a
-source that rate-limits.
-
-Not covered by a test: that the build still records the verdict. That path
-needs a real `.esd`, so deleting the call leaves the unit tests green. This
-measurement is the check.
+Open work that isn't a measurement is on the [roadmap](ROADMAP.md#known-gaps).

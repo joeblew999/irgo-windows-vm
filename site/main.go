@@ -66,31 +66,31 @@ var styleCSS []byte
 var pages = []struct {
 	Src, Out, Title, Nav, Blurb string
 }{
-	{"README.md", "index.html", "irgo-windows-vm", "", "What it is and what it is for"},
-	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, dated"},
-	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Glaze status", "Does glaze work on the Mac and on Windows: the last recorded run of each"},
-	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "What was found, and where it was fixed"},
-	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code is organised, and every trap that cost hours"},
-	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},
+	{"README.md", "index.html", "irgo-windows-vm", "", "What it does, and how to get started"},
+	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, and when"},
+	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Glaze status", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
+	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "Bugs found in glaze, native and UTM, and their status"},
+	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code works, and the traps that cost hours"},
+	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Set up, run the checks, land a change"},
 
 	// The only page that states intent rather than fact, and it says so in its
 	// first line. The check that every command named in the docs exists in the
 	// binary exempts it by name (cmd/irgo-winvm/docs_test.go) — naming what does
 	// not exist yet is the point of a roadmap.
-	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one thing not yet verified"},
+	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one claim not yet verified"},
 
 	// Written before the HTTP transport exists. Exempt from that check for the
 	// same reason as the roadmap: it names commands in the context of what an attacker could
 	// call, which is not the same as telling a reader to run them.
-	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "Threat model", "What someone who reaches the HTTP port can do"},
+	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "Threat model", "What anyone who reaches the HTTP port can do"},
 
 	// Generated, not read from disk. Src is empty and reference.go builds the
 	// markdown by running the binary — see generateReference.
-	{"", "reference.html", "Commands", "Commands", "Every command and every flag, captured from the binary"},
+	{"", "reference.html", "Commands", "Commands", "Every command and flag, captured from the binary"},
 
 	// Also generated: built by listing a live MCP server, so the page cannot
 	// describe a tool the server does not offer.
-	{"", "mcp.html", "MCP", "MCP", "Driving this from an agent, captured from a live server"},
+	{"", "mcp.html", "MCP", "MCP", "Drive it from an AI agent; captured from a live server"},
 }
 
 // siteName is the project's name: the wordmark, and the tail of every page's

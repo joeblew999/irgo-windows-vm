@@ -108,6 +108,16 @@ var All = []Command{
 	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Mutates: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
+	// Only in a checkout of this repository: they build and read examples/.
+	// See internal/glazecheck for why they are in the shipped binary at all.
+	//
+	// glaze-check is not Mutates: the Mac run touches no VM, and making it
+	// take the lock would refuse the fifteen-second inner loop for the whole of
+	// a 45-minute install. The Windows run takes the lock itself, once, around
+	// all four app-create runs. -windows is about a minute and a half, often
+	// more when the guest has to be recovered first, so over MCP it is a job.
+	{Name: "glaze-check", Summary: "does glaze work? run the four examples here or -windows, record the verdict", Detach: "-windows", OverMCP: true},
+	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},
 	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},

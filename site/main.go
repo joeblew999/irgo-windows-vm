@@ -73,6 +73,7 @@ var pages = []struct {
 }{
 	{"README.md", "index.html", "irgo-windows-vm", "", "What it is and what it is for"},
 	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, dated"},
+	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Glaze status", "Does glaze work on the Mac and on Windows: the last recorded run of each"},
 	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "What was found, and where it was fixed"},
 	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code is organised, and every trap that cost hours"},
 	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},

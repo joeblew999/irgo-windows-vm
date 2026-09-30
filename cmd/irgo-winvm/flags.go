@@ -143,6 +143,13 @@ func mcpFlags() *flag.FlagSet {
 	return fs
 }
 
+func glazeCheckFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("glaze-check", flag.ContinueOnError)
+	fs.Bool("windows", false, "run the four on the VM, through app-create, instead of natively on this Mac")
+	fs.String("vm", utmvm.DefaultVMName, "VM name, with -windows")
+	return fs
+}
+
 // flagSets is every command that takes flags.
 //
 // Keyed by name, which is a new way to be wrong — the same shape as `handlers`,
@@ -159,4 +166,6 @@ var flagSets = map[string]func() *flag.FlagSet{
 	"iso-create": isoCreateFlags,
 	"iso-delete": isoDeleteFlags,
 	"mcp":        mcpFlags,
+
+	"glaze-check": glazeCheckFlags,
 }

@@ -12,5 +12,6 @@ the repo is laid out, the rules, and every trap that cost hours.
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | setup, what to run, how to land a change |
 | [docs/UPSTREAM.md](docs/UPSTREAM.md) | glaze, native and UTM bugs found here, and their status |
 | [docs/RESULTS.md](docs/RESULTS.md) | what has been measured, dated |
+| [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | does glaze work on the Mac and on Windows: the last recorded run of each, generated |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | what is next |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | what the HTTP transport exposes |

@@ -88,6 +88,13 @@ func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 // ciphertext, which no golden image can compress. The value has to be set in
 // specialize, before OOBE ends, and in a command, not a comment.
 //
+// The comment beside it in autounattend.xml is one line on purpose. With a
+// twelve-line one (measured 30 Sep 2026, docs/RESULTS.md) Setup ignored the
+// whole answer file and stopped at "Select language settings"; the same
+// component under a one-line comment installed. The trigger was not isolated;
+// that comment was the only one in the file with "%" in it. This test passed
+// against the broken file: only an install shows it.
+//
 // Negative control, run by hand: move the RunSynchronousCommand into
 // oobeSystem, or delete it and leave the comment, and this fails.
 func TestAnswerFilePreventsDeviceEncryptionBeforeOOBE(t *testing.T) {

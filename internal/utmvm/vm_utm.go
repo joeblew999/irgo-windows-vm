@@ -3,17 +3,13 @@ package utmvm
 // UTM itself: finding it, installing it, and its guest tools.
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Install reports how UTM got onto the machine, for messages to the user.
@@ -207,7 +203,8 @@ func GuestToolsISO() (string, error) {
 // is about generating disk images, which this repo does do in Go; reading
 // somebody else's signed installer is a different problem with no Go answer.
 
-// InstallUTMFromRelease downloads UTM's .dmg and copies the app to
+// InstallUTMFromRelease downloads the .dmg of UTM's latest stable release
+// (never a pre-release; see latestStableUTMDMG) and copies the app to
 // /Applications.
 //
 // It refuses rather than overwrites if UTM is already there: replacing an
@@ -218,10 +215,11 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 		return fmt.Errorf("utmvm: %s already exists; not replacing it", AppPath)
 	}
 
-	url, err := latestUTMDMG()
+	rel, err := latestStableUTMDMG()
 	if err != nil {
 		return err
 	}
+	url := rel.DMG
 
 	tmp, err := os.MkdirTemp("", "irgo-utm-*")
 	if err != nil {
@@ -230,7 +228,8 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 	defer func() { _ = os.RemoveAll(tmp) }() // best effort; the download already succeeded or failed
 
 	dmg := filepath.Join(tmp, "UTM.dmg")
-	fmt.Fprintf(os.Stderr, "downloading UTM from %s\n", url)
+	fmt.Fprintf(os.Stderr, "downloading UTM %s, the latest stable release (%s), from %s\n",
+		rel.Version, rel.Published.Format("2 Jan 2006"), url)
 	if dErr := isoDownload(url, dmg, "", progress); dErr != nil {
 		return fmt.Errorf("utmvm: downloading UTM: %w", dErr)
 	}
@@ -273,50 +272,6 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 	return nil
 }
 
-// latestUTMDMG finds the macOS build in UTM's newest release.
-//
-// By name rather than by position: the release also carries .ipa builds for
-// iOS and visionOS and a .deb, and any of them would download happily and be
-// useless.
-func latestUTMDMG() (string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, utmReleaseAPI, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("utmvm: asking GitHub for UTM's latest release: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("utmvm: GitHub returned %s for UTM's releases", resp.Status)
-	}
-
-	var rel struct {
-		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return "", err
-	}
-	if err := json.Unmarshal(body, &rel); err != nil {
-		return "", fmt.Errorf("utmvm: parsing UTM's release: %w", err)
-	}
-	for _, a := range rel.Assets {
-		if strings.EqualFold(a.Name, "UTM.dmg") {
-			return a.URL, nil
-		}
-	}
-	return "", fmt.Errorf("utmvm: UTM release %s has no UTM.dmg among its %d assets",
-		rel.TagName, len(rel.Assets))
-}
-
 // VerifiedVersion is the UTM release this package's config schema was read
 // from — not guessed, but taken from utmapp/UTM at that tag.
 //
@@ -341,9 +296,3 @@ const VerifiedVersion = "4.7.5"
 // and skipping it produces a VM that boots perfectly and is then unreachable:
 // no network, no `utmctl exec`, no IP, and nothing saying why.
 const GuestToolsURL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
-
-// utmReleaseAPI is the GitHub release the .dmg comes from. Latest rather than a
-// pin: UTM's schema version is checked separately at DetectUTM, so a mismatch
-// is reported rather than silently accepted, and pinning here would install a
-// version older than the one a developer would get by hand.
-const utmReleaseAPI = "https://api.github.com/repos/utmapp/UTM/releases/latest"

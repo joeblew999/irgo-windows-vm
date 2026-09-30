@@ -10,7 +10,7 @@
 // Everything is reached through glaze's own bridges rather than a side channel:
 // buttons call Go through Bind, and Go pushes results back through the Events
 // bridge. So this exercises those two on Windows as well, which is what
-// examples/verify and examples/verify-events test in isolation.
+// TestAppScheme and TestEvents in examples/conformance test in isolation.
 
 package main
 
@@ -436,7 +436,7 @@ func (u *ui) bind() {
 		mu.Unlock()
 
 		// The windowed set only. The clipboard, power and mmap buttons above
-		// still exercise those by hand; the automated four live in examples/probe/.
+		// still exercise those by hand; the automated tests are examples/conformance.
 		probeOpenURL()
 		probeAppIcon(u.w)
 		probeNoCapture(u.w)

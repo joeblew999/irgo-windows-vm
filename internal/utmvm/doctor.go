@@ -87,7 +87,7 @@ func Externals() []External {
 		},
 		{
 			Name: "UTM guest tools ISO",
-			Path: mustGuestToolsPath(),
+			Path: guestToolsPathOrEmpty(),
 			Why: "the QEMU guest agent and the virtio-net driver. Without it a VM boots and " +
 				"is then unreachable: no network, no `utmctl exec`, no IP.",
 			Fix: "open UTM once and let it download them; there is no supported way to fetch them ourselves",
@@ -109,7 +109,7 @@ func Externals() []External {
 		},
 		{
 			Name: "the VM itself",
-			Path: mustVMDir(),
+			Path: vmDirOrEmpty(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
 			Fix: "irgo-winvm vm",
@@ -197,9 +197,9 @@ func (e *External) add(p string, seen map[uint64]bool) {
 	e.Bytes += used
 }
 
-// mustVMDir is UTM's bundle directory, or empty when it cannot be resolved.
+// vmDirOrEmpty is UTM's bundle directory, or empty when it cannot be resolved.
 // Only for the inventory, which reports rather than acts.
-func mustVMDir() string {
+func vmDirOrEmpty() string {
 	d, err := DefaultVMDir()
 	if err != nil {
 		return ""
@@ -207,10 +207,10 @@ func mustVMDir() string {
 	return d
 }
 
-// mustGuestToolsPath is where UTM caches its guest tools, or empty when it
+// guestToolsPathOrEmpty is where UTM caches its guest tools, or empty when it
 // cannot be resolved. Asked of the vm code rather than spelled out again:
 // doctor reports on UTM, it does not know where UTM keeps things.
-func mustGuestToolsPath() string {
+func guestToolsPathOrEmpty() string {
 	p, err := guestToolsPath()
 	if err != nil {
 		return ""

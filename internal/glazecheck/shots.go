@@ -147,9 +147,10 @@ func readManifestIn(dir string) (m Manifest, ok bool, err error) {
 	return m, true, nil
 }
 
-// thumbWidth is how wide a picture is drawn in the table. The file itself is
-// up to 800 pixels wide, and the picture links to it.
-const thumbWidth = 360
+// thumbWidth is how wide a picture is drawn in the table: two side by side
+// fit the site's text column without scrolling. The file itself is up to 800
+// pixels wide, and the picture links to it.
+const thumbWidth = 280
 
 // gallery is the Screenshots section: one row per test that took a picture on
 // either target, the Mac and Windows side by side, each with its result.

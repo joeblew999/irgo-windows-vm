@@ -123,7 +123,7 @@ func TestShotsFlowToTheStatusFileAndBack(t *testing.T) {
 	for _, want := range []string{
 		"- screenshots: 1 of the 3 tests that open a window took one",
 		"## Screenshots",
-		`| TestA | PASS<br><a href="screens/conformance/mac/TestA.png"><img src="screens/conformance/mac/TestA.png" width="360" alt="TestA on Mac"></a><br><sub>a &lt;note&gt;</sub> | — |`,
+		`| TestA | PASS<br><a href="screens/conformance/mac/TestA.png"><img src="screens/conformance/mac/TestA.png" width="280" alt="TestA on Mac"></a><br><sub>a &lt;note&gt;</sub> | — |`,
 		"| TestB | PASS<br>not captured: taken in the run, and not copied back: mac/TestB.png arrived as 9 bytes that are not a PNG | — |",
 		"| TestC | **FAIL**<br>not captured: no permission | — |",
 		"- Windows: no pictures recorded yet",

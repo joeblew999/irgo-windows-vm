@@ -51,7 +51,9 @@ itself took about half a second.
 `mise run glaze:windows` (conformance suite, 5 MB, `-gui`): **24.35 s**, down from
 31 s on the old path the same afternoon. The push took 1.09 s. Most of what is
 left is the two desktop resets (about 8.5 s each) and the tests (about 6 s).
-Verdict: KNOWN BUGS ONLY, as before.
+Verdict: KNOWN BUGS ONLY, as before. After main's windowed-test screenshots were
+merged in, the same gate took 32.5 s. The push was unchanged at 1.13 s. The test
+phase grew from about 6 s to 12.4 s, and pulling the seven pictures added 1.3 s.
 
 **Checked along the way:**
 

@@ -25,6 +25,17 @@ Set-ItemProperty -Path $au -Name NoAutoRebootWithLoggedOnUsers -Value 1 -Type DW
 Set-ItemProperty -Path $au -Name AUOptions -Value 2 -Type DWord
 'windows update: ok (no auto-restart, notify only)'
 
+# 4. ...and its restart prompt, "We've got an update for you", stayed on the
+#    desktop through every run and screenshot. No update notifications at all,
+#    restart warnings included (UpdateNotificationLevel 2, which needs
+#    SetUpdateNotificationLevel 1), and no auto-restart notifications. The
+#    desktop reset irgo-winvm runs afterwards closes a prompt already up.
+$wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+Set-ItemProperty -Path $wu -Name SetUpdateNotificationLevel -Value 1 -Type DWord
+Set-ItemProperty -Path $wu -Name UpdateNotificationLevel -Value 2 -Type DWord
+Set-ItemProperty -Path $wu -Name SetAutoRestartNotificationDisable -Value 1 -Type DWord
+'windows update notifications: ok (off, restart warnings included)'
+
 $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 $reg = (Get-ItemProperty -Path $key -Name EBWebView -ErrorAction SilentlyContinue).EBWebView
 if (-not $reg) {

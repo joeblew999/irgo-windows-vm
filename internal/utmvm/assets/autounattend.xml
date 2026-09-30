@@ -251,6 +251,30 @@
           <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v AUOptions /t REG_DWORD /d 2 /f</CommandLine>
           <Description>Windows Update: notify, do not install on its own</Description>
         </SynchronousCommand>
+        <!-- ...and must not put its prompts on the desktop either. Seen 30 Sep
+             2026: the restart prompt stayed on the screen through every run
+             and every screenshot. UpdateNotificationLevel 2 with
+             SetUpdateNotificationLevel 1 is "Display options for update
+             notifications: disable all notifications, including restart
+             warnings"; SetAutoRestartNotificationDisable is "Turn off
+             auto-restart notifications for update installations". vm-repair
+             applies the same to an existing VM, and its desktop reset closes a
+             prompt that is already up. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>10</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v SetUpdateNotificationLevel /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>Windows Update: the notification level is set by policy</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>11</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v UpdateNotificationLevel /t REG_DWORD /d 2 /f</CommandLine>
+          <Description>Windows Update: no notifications, restart warnings included</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>12</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v SetAutoRestartNotificationDisable /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>Windows Update: no auto-restart notifications</Description>
+        </SynchronousCommand>
         <!-- Marker the host can look for to know the install finished. -->
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
@@ -263,13 +287,13 @@
              simply never runs. `for` expands the version-stamped filename to a
              literal path first. -->
         <SynchronousCommand wcm:action="add">
-          <Order>10</Order>
+          <Order>13</Order>
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->
         <SynchronousCommand wcm:action="add">
-          <Order>11</Order>
+          <Order>14</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

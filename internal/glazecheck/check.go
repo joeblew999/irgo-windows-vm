@@ -59,6 +59,14 @@ type Options struct {
 	// result is recorded as NOT RUN, never as FAIL.
 	NotRun func(error) bool
 
+	// ResetDesktop, when set, is run before the first program and after the
+	// last, so the programs start on a clean desktop and the run leaves one.
+	// What it closed afterwards is printed, so a program that left something
+	// open is named in the log rather than silently tidied away. For Windows
+	// it is utmvm.DesktopReset; the Mac has none, because glaze-all closes what
+	// it opens and the owner's desktop is not this tool's to tidy.
+	ResetDesktop func() error
+
 	Say func(string, ...any)
 }
 
@@ -91,7 +99,7 @@ func Check(o Options) (Section, error) {
 	say("full log: %s", sec.Log)
 
 	var failed bool
-	var notRun error
+	var notRun, resetErr error
 	teeErr := utmvm.Tee(logFile, func() error {
 		say("checkout: %s", o.Root)
 		say("target:   %s", o.Platform)
@@ -123,6 +131,13 @@ func Check(o Options) (Section, error) {
 			failed = true
 		}
 
+		if bErr == nil && o.ResetDesktop != nil {
+			say("clearing the desktop before the run")
+			if err := o.ResetDesktop(); err != nil {
+				say("desktop reset before the run: %v", err)
+				resetErr = err
+			}
+		}
 		for _, p := range Programs {
 			if bErr != nil {
 				break
@@ -152,6 +167,13 @@ func Check(o Options) (Section, error) {
 			}
 			sec.Results = append(sec.Results, r)
 		}
+		if bErr == nil && o.ResetDesktop != nil {
+			say("clearing the desktop after the run (anything closed here was left open by a program above)")
+			if err := o.ResetDesktop(); err != nil {
+				say("desktop reset after the run: %v", err)
+				resetErr = err
+			}
+		}
 		sec.Elapsed = time.Since(start)
 
 		say("%s on %s", sec.Verdict(), o.Platform)
@@ -178,6 +200,10 @@ func Check(o Options) (Section, error) {
 		// The underlying error, so the exit code says why: a guest agent that
 		// went away is retryable, and a caller should be told so.
 		return sec, fmt.Errorf("%s: %w", sec.Verdict(), notRun)
+	case resetErr != nil:
+		// The verdict stands and is recorded; the desktop is a separate
+		// failure, returned so the run does not exit 0 over a mess.
+		return sec, fmt.Errorf("%s, but %w", sec.Verdict(), resetErr)
 	}
 	return sec, nil
 }

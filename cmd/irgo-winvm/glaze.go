@@ -78,6 +78,8 @@ func runGlazeCheck(v values, _ []string) error {
 			a = append(a, exe)
 			return appCreate.exec(append(a, p.Args...))
 		}
+		// dev: the account app-create -gui runs as by default.
+		o.ResetDesktop = func() error { return utmvm.DesktopReset(e.UUID, "dev", say) }
 		// These mean the program never ran. Anything else, including its own
 		// non-zero exit, is a result.
 		o.NotRun = func(err error) bool {

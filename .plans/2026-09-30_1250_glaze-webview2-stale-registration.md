@@ -53,11 +53,24 @@ Use the batch-file route (`utmctl file push` + `utmctl exec`), as in the passwor
 
 1. **Break it deliberately:** `reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v EBWebView /t REG_SZ /d "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\1.0.0.0" /f`
 2. `mise run app:create:verify` with released glaze → FAIL "not found (install it)" (reproduces).
-3. Point `glaze-probes` at the patched glaze (`replace github.com/crgimenes/glaze => <local clone>`
-   in a scratch copy, not committed) → `verify` PASS; the DLL comes from `154.0.4258.37`.
+3. `mise run upstream:link`, then `mise run app:create:verify` against the patched local glaze →
+   PASS; the DLL comes from `154.0.4258.37`. `mise run upstream:unlink` when done.
 4. **Restore:** run `…\Application\154.0.4258.37\Installer\setup.exe --msedgewebview --system-level`
    (exit 0 re-registers). Re-run `verify` with the patch → PASS (registry path, unchanged behaviour).
 5. Glaze's own checks: `CGO_ENABLED=0 go build` for every GOOS/GOARCH they list, `go vet`, their tests.
+
+## Where we work (this repo's own upstream workflow)
+
+- **Home base: this repo** — plans, `UPSTREAM.md` (the ledger: add this finding as `FOUND HERE`,
+  then `PATCHED LOCALLY`, then `reported` with the issue/PR links), probes, VM tasks.
+- **Code: the local clone** `$UPSTREAM_DIR/glaze` = `~/workspace/go/src/github.com/crgimenes/glaze`
+  (and `…/native`). The fork `joeblew999/glaze` is only a remote there, for the PR branch.
+- **Link: `mise run upstream:link` / `upstream:verify` / `upstream:unlink`** write and remove a
+  `go.work` so our probes build against the local clone (`go.work` is already gitignored).
+  **Step 0: restore these tasks** — they were deleted with the old `mise.toml` in `e533764`
+  (2026-08-13); recover them from `git show e533764^:mise.toml` (`UPSTREAM_DIR`, `upstream:link`,
+  `upstream:verify`, `upstream:unlink`) and point `upstream:verify` at today's tasks
+  (`app:create:verify` etc.) instead of the removed `vm:run`.
 
 ## Setup (glaze side — verified 2026-09-30)
 

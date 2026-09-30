@@ -21,6 +21,7 @@ rewritten later.
 | | finding | severity | status |
 |---|---|---|---|
 | **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) | high | `PATCHED LOCALLY` · reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
+| **glaze** | WebView2 "not found" when the registered runtime folder is stale (self-update left `EBWebView` pointing at a deleted version) — see `.plans/2026-09-30_1250_glaze-webview2-stale-registration.md` | high | `FOUND HERE` — not reported |
 | **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `FOUND HERE` — not reported |
 | **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — not reported |
 | **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported |

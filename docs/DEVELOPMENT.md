@@ -244,6 +244,12 @@ is captured from the binary at build time.
 
 ### For an agent: `mcp`
 
+An agent working **in this repository** gets it automatically: `.mcp.json`
+registers `irgo-winvm mcp`, rebuilding `.bin/irgo-winvm` first (mise's output
+goes to /dev/null, since stdout is the JSON-RPC channel). Before 30 Sep 2026
+there was no `.mcp.json`, so the server existed and no agent here was connected
+to it.
+
 **`irgo-winvm mcp`** serves the same commands over the Model Context Protocol,
 on stdin and stdout or over HTTP (`-http`, loopback by default). It is the point
 of the repository pointed at its most likely user: an agent writing a Go desktop

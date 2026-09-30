@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "irgo-winvm": {
+      "command": "sh",
+      "args": ["-c", "mise run -q go:tool >/dev/null 2>&1 && exec .bin/irgo-winvm mcp"]
+    }
+  }
+}

@@ -1018,9 +1018,16 @@ func runISODelete(args []string) error {
 	say("STEP 3/3  deleting")
 	for _, f := range files {
 		say("          clearing the immutable flag on %s", utmvm.Home(f))
-		_ = utmvm.ISOUnprotect(f) // uchg blocks unlink
+		// uchg blocks unlink. A failure to clear it is not fatal on its own —
+		// off macOS there is no flag and this always errors — but when the
+		// remove then fails with EPERM, it is the reason, and dropping it left
+		// "operation not permitted" with nothing saying the flag was why.
+		uErr := utmvm.ISOUnprotect(f)
 		if err := os.Remove(f); err != nil {
-			return err
+			if uErr != nil {
+				return fmt.Errorf("%w (clearing its immutable flag failed first: %v)", err, uErr)
+			}
+			return err // a *PathError: it names the file already
 		}
 		say("  · deleted %s", utmvm.Home(f))
 	}
@@ -1041,11 +1048,6 @@ func runISODelete(args []string) error {
 	return nil
 }
 
-// runVMScreen photographs the guest's display.
-//
-// The only thing that answers "what is it actually doing" when a VM is stuck:
-// a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
-// exactly like a working one from the host.
 // runVMRepair fixes an expired password and a stale WebView2 registration.
 //
 // Both leave the VM answering the agent while every -gui run fails, so it runs
@@ -1073,6 +1075,11 @@ func runVMRepair(args []string) error {
 	return utmvm.VMRepair(e.UUID, user, reboot, say)
 }
 
+// runVMScreen photographs the guest's display.
+//
+// The only thing that answers "what is it actually doing" when a VM is stuck:
+// a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
+// exactly like a working one from the host.
 func runVMScreen(args []string) error {
 	fs := vmScreenFlags()
 	if err := fs.Parse(args); err != nil {

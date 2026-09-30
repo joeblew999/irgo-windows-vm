@@ -160,7 +160,16 @@ func TestMenu(t *testing.T) {
 	if m == nil {
 		t.Fatal("menu.Set returned no menu and no error")
 	}
-	onUI(t, w, m.Release)
+	// Release from this goroutine, not the UI thread: with Dispatch set, the
+	// Windows Release hands its work to the UI thread and waits, so calling it
+	// there deadlocks (glaze menu_windows.go runOnUI). Found on the CI runner.
+	released := make(chan struct{})
+	go func() { m.Release(); close(released) }()
+	select {
+	case <-released:
+	case <-time.After(uiTimeout):
+		t.Fatalf("menu Release did not return within %s", uiTimeout)
+	}
 }
 
 // TestNoCapture excludes the window from screen capture, and on Windows reads

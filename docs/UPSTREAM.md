@@ -515,3 +515,4 @@ mistaken for upstream problems.
 | waiting on `tray.Run` | ours | documented as blocking |
 | `openurl.Open != nil` as a capability check | ours | a function value is never nil; `go vet` says so |
 | `file://` URL built by concatenation | ours | Windows needs `file:///C:/dir`; covered by `TestFileURL` |
+| `menu.Menu.Release` called on the UI thread with `Options.Dispatch` set | ours, but undocumented upstream | on Windows Release hands its work to the UI thread and waits (`menu_windows.go` `runOnUI`), so calling it there deadlocks; on macOS it does not. Found by the conformance suite on GitHub's Windows ARM64 runner, 30 Sep 2026. Worth a doc line in glaze: which thread Release may be called from |

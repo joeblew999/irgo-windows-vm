@@ -21,6 +21,7 @@ package utmvm
 import (
 	"crypto/rand"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,10 @@ type VMCreateOptions struct {
 	// Install drives the unattended Windows installation, which takes about 45
 	// minutes. Off by default for the same reason.
 	Install bool
+
+	// NoGolden installs from the ISO even when a golden image exists — which
+	// is how the VM a new golden image is sealed from gets made.
+	NoGolden bool
 }
 
 // VMCreateStage is one step, and what happened to it.
@@ -74,7 +79,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 	last := time.Now()
 	step := 0
-	const steps = 7
+	steps := 7 // 2 for a clone of the golden image
 
 	// bootWait is how long an already-installed VM gets to answer before
 	// vm-create gives up and says so. Two minutes, not ten: booting Windows
@@ -120,6 +125,31 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 	if err := stage("UTM", true, in.Version+" at "+in.Path, nil); err != nil {
 		return res, err
+	}
+
+	// A new VM comes from the golden image when there is one: a clone in
+	// seconds and a boot, instead of Setup for 45 minutes and a UTM restart
+	// that stops every other VM. No media, no guest-tools download, no bundle
+	// written by this process. When there is none it says so and installs,
+	// rather than silently taking the 45 minutes.
+	if _, fErr := Find(opts.VMName); errors.Is(fErr, ErrNoVM) {
+		if opts.NoGolden {
+			say("          -golden=false: installing from the ISO, whether or not there is a golden image")
+		} else if _, ok, gErr := goldenEntry(); gErr != nil {
+			return res, stage("the golden image", false, "", gErr)
+		} else if ok {
+			steps = 2
+			begin("a clone of the golden image, " + GoldenVMName)
+			if _, cErr := CloneFromGolden(opts.VMName, say); cErr != nil {
+				return res, stage("clone the golden image", false, "", cErr)
+			}
+			res.Ready = true
+			_ = stage("clone the golden image", false, "cloned, booted, agent answering", nil)
+			return res, nil
+		} else {
+			say("          no golden image (%s) — falling back to a full install from the ISO.", GoldenVMName)
+			say("          vm-golden-create makes one, and every VM after that is a clone")
+		}
 	}
 
 	// 2. The guest tools. Skipped VMs boot fine and are then unreachable —

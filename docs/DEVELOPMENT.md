@@ -227,6 +227,83 @@ They run in that order, and each is cheap to repeat: if it is already done, it
 says so and stops. The undo is what lets a step that failed be cleaned and
 re-run, rather than leaving the machine somewhere between two states.
 
+### A VM in minutes: the golden image
+
+| step | what it gets you | undo |
+|---|---|---|
+| **`vm-golden-create -vm <disposable>`** | that VM sealed into `irgo-golden`, which `vm-create` then clones | `vm-golden-delete` |
+
+Installing Windows is the 45 minutes, and nothing used to keep its result. So
+make one VM the slow way under a throwaway name (`vm-create -vm g1 -install
+-golden=false`), seal it once, and from then on **`vm-create -vm <name>`
+clones the golden image and boots the clone** — no media, no install, and no
+UTM restart, so every other VM keeps running. Each developer or agent takes its
+own name and gets its own VM; `vm-delete` removes it. With no golden image,
+`vm-create` says it is falling back to a full install and does that;
+`-golden=false` installs even when there is one.
+
+What sealing does, in the guest as SYSTEM (`assets/vm-golden-seal.ps1`, one
+step at a time, the disk's allocation printed after each): BitLocker off and
+`PreventDeviceEncryption` set, hibernation off, `DISM
+/StartComponentCleanup /ResetBase`, TRIM. Then Windows shuts itself down, UTM
+clones it as `irgo-golden` keeping only the NVMe system disk (the install,
+answer-file and guest-tools CDs are dropped), a throwaway clone of that is
+booted to prove it answers and deleted, and a manifest — Windows build,
+WebView2 version, sizes, seal and boot times — goes to `golden.json` under the
+application root. `doctor` reports both.
+
+Why it is built this way, each measured on 30 Sep 2026
+(`.plans/2026-09-30_1700_vm-golden-image.md`):
+
+- **Windows 11 24H2 encrypts the disk on its own**, and ciphertext does not
+  compress: every used block of `irgo-win11`'s disk was XTS-AES. The answer file
+  now sets `PreventDeviceEncryption` in specialize, and sealing decrypts VMs
+  made before that.
+- **This process cannot read or write UTM's container.** macOS App Data
+  protection refuses `ls`, `cat` and `touch` in
+  `~/Library/Containers/com.utmapp.UTM` even unsandboxed; `stat` on a known path
+  works. So every change to a bundle goes through UTM's AppleScript
+  (`assets/utm-clone.applescript`), which can, and needs no Full Disk Access.
+- **UTM's clone is `copyfile` with CLONE and DATA_SPARSE**: instant on APFS,
+  sparse, and costing nothing until the clone writes. It always gives a new
+  UUID, but keeps the MAC unless a global UTM setting that defaults to off says
+  otherwise — and two clones with one MAC fight over one DHCP lease. So every
+  clone gets `randomMAC()`, and the MAC UTM reports back is checked.
+- **The clone copies BSD flags**, so a bundle holding the immutable media's
+  inode would clone into one UTM cannot then tidy (`EPERM`). Sealing releases
+  that one known file for the clone and restores it.
+- **No sysprep.** It would re-run OOBE and risk the `dev` setup, for a machine
+  SID nothing standalone cares about. Every clone is `WIN11ARM` on the network.
+- **Only locally, only for yourself.** The Windows licence forbids passing the
+  image to anyone, and every running clone needs its own licence. There is no
+  public download of it and there will not be one.
+
+`vm-golden-create` refuses `irgo-win11` without `-force`, and refuses when it
+cannot find out which VM it was given. Over MCP it is always a job: sealing is
+many minutes even when there is nothing to decrypt.
+
+### Several VMs at once: the locks
+
+A mutation is refused, never queued, while another holds a lock it needs (exit
+6). There are three kinds (`internal/utmvm/lock.go`), and each command declares
+which it takes in `internal/command`:
+
+| lock | guards | taken by |
+|---|---|---|
+| machine | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` for the seconds its clone takes |
+| one per VM | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
+| stage | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+
+So `app-create` on two VMs runs side by side, and the same VM twice is refused.
+They are `flock`s under the application root, released when the holder dies,
+and never deleted: unlinking a lock file someone holds lets a third process lock
+a new file of the same name.
+
+The one full-install step that still restarts UTM (to make it see a bundle
+written to its folder) refuses while any other VM is running or paused, and when
+`utmctl list` cannot answer. Quitting UTM stops every VM it runs; before
+30 Sep 2026 nothing in the binary checked.
+
 Three more change nothing: **`vm-screen`** photographs the VM, **`doctor`**
 reports what is here, and **`status`** lists long-running work — what is still
 going, what finished, and how long it has been. Whether a job is alive is
@@ -252,9 +329,9 @@ and the agent most likely to ask "does glaze work on Windows?" is the one
 the examples are built by running `go`. Over MCP, `glaze-check -windows` is a
 job, like `vm-create -install`: call `status`, then `glaze-status`.
 
-The two calls that take a long time — `vm-create -install` and `iso-create
--fetch` — start the work and hand back a job id rather than blocking for 45
-minutes on a connection that will time out. The work outlives the client that
+The calls that take a long time — `vm-create -install`, `iso-create -fetch`
+and `vm-golden-create` — start the work and hand back a job id rather than
+blocking for 45 minutes on a connection that will time out. The work outlives the client that
 asked for it; `status` is how anyone finds out what happened.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
@@ -312,8 +389,9 @@ look the same to a script.
 **4 and 6 are the ones worth retrying.** Windows Update takes the agent away
 for minutes at a time; the VM is fine and will answer again. `app-create`
 already waits and tries to recover before giving up, which is why it can take
-several minutes to reach that code. 6 means another mutation holds the lock —
-the holder finishes on its own schedule, and waiting changes the answer.
+several minutes to reach that code. 6 means another mutation holds a lock this
+one needs — the message names which, the VM or the machine — and the holder
+finishes on its own schedule, so waiting changes the answer.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.

@@ -132,10 +132,15 @@ var All = []Command{
 	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
 	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, OverMCP: true},
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, OverMCP: true},
+	// A golden image is a sealed copy of an installed VM, which vm-create then
+	// clones in seconds instead of installing for 45 minutes. Optional, and a
+	// make like any other, so it has an undo.
+	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, OverMCP: true},
 	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, OverMCP: true},
+	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
 	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
@@ -196,19 +201,28 @@ func Find(name string) (Command, bool) {
 func UsageText() string {
 	var b strings.Builder
 	b.WriteString("irgo-winvm — build a Go program on your Mac, run it on real Windows.\n\n")
-	b.WriteString("  MAKE                                                 UNDO\n")
+	// Columns sized from the list, so a longer name (vm-golden-create) widens
+	// them rather than pushing its own row out of line.
+	name, summary := 0, 0
+	for _, c := range All {
+		name = max(name, len(c.Name))
+		if c.Undo != "" {
+			summary = max(summary, len(c.Summary))
+		}
+	}
+	fmt.Fprintf(&b, "  %-*s %-*s %s\n", name, "MAKE", summary, "", "UNDO")
 	for _, c := range All {
 		if c.Undo == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-12s %-39s %s\n", c.Name, c.Summary, c.Undo)
+		fmt.Fprintf(&b, "  %-*s %-*s %s\n", name, c.Name, summary, c.Summary, c.Undo)
 	}
 	b.WriteString("\n")
 	for _, c := range All {
 		if c.Undo != "" || c.IsUndo {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-12s %s\n", c.Name, c.Summary)
+		fmt.Fprintf(&b, "  %-*s %s\n", name, c.Name, c.Summary)
 	}
 	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
 	return b.String()

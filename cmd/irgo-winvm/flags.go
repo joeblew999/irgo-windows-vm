@@ -85,6 +85,22 @@ func vmCreateFlags() *flag.FlagSet {
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
 	fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
+	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
+	return fs
+}
+
+func vmGoldenCreateFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-golden-create", flag.ContinueOnError)
+	// No default, unlike every other -vm: the default is the shared VM, and
+	// sealing is not something to do to it by leaving a flag out.
+	fs.String("vm", "", "the installed, disposable VM to seal (required)")
+	fs.Bool("force", false, "allow sealing "+utmvm.DefaultVMName+", the shared VM")
+	return fs
+}
+
+func vmGoldenDeleteFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-golden-delete", flag.ContinueOnError)
+	fs.Bool("force", false, "actually delete; without this it only lists")
 	return fs
 }
 
@@ -166,6 +182,10 @@ var flagSets = map[string]func() *flag.FlagSet{
 	"vm-repair":  vmRepairFlags,
 	"vm-create":  vmCreateFlags,
 	"vm-delete":  vmDeleteFlags,
+
+	"vm-golden-create": vmGoldenCreateFlags,
+	"vm-golden-delete": vmGoldenDeleteFlags,
+
 	"app-create": appCreateFlags,
 	"app-delete": appDeleteFlags,
 	"app-upload": appUploadFlags,

@@ -122,6 +122,9 @@ var handlers = map[string]func([]string) error{
 	"vm-delete":  runVMDelete,
 	"app-delete": runAppDelete,
 
+	"vm-golden-create": runVMGoldenCreate,
+	"vm-golden-delete": runVMGoldenDelete,
+
 	"vm-screen": runVMScreen,
 	"vm-repair": runVMRepair,
 	"doctor":    runDoctor,
@@ -420,6 +423,14 @@ Undo, in the same shape:
      vm-delete    remove the VM
      app-delete   remove your .exe from the VM
 
+A VM in minutes, once one has been installed the slow way:
+
+     vm-golden-create  seal an installed, disposable VM into the golden
+                       image; from then on vm-create clones it and boots
+                       the clone instead of installing, and other VMs keep
+                       running. Each agent takes its own -vm name.
+     vm-golden-delete  remove the golden image
+
 When something is wrong:
 
      vm-screen    save a PNG of the VM's screen — the only way to see a
@@ -568,9 +579,10 @@ func runVMCreate(args []string) error {
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
-		VMName:  name,
-		Install: install,
-		Timeout: timeout,
+		VMName:   name,
+		Install:  install,
+		Timeout:  timeout,
+		NoGolden: !v.Bool("golden"),
 	}, func(line string) { say("%s", line) })
 	if err != nil {
 		return err
@@ -710,7 +722,107 @@ func doctorRows() []doctorRow {
 		}
 	}
 	add("jobs", jobState, job.Dir(), err == nil && len(all) > 0)
+
+	// The golden image is optional, so its absence is "none", never MISSING:
+	// a machine without one is not broken, it installs instead of cloning.
+	g := utmvm.Golden()
+	goldenState := "none"
+	if g.Present {
+		goldenState = utmvm.HumanBytes(g.Allocated) + " of " + utmvm.HumanBytes(g.Apparent)
+	}
+	add("golden image", goldenState, g.Bundle, g.Present)
+	sealed := "none"
+	if m := g.Manifest; m != nil {
+		sealed = fmt.Sprintf("Windows %s, %s old", m.Windows, age(time.Since(m.Created)))
+		if !g.Present {
+			sealed += "; the image is gone (vm-golden-delete clears this)"
+		}
+	}
+	add("golden sealed", sealed, g.ManifestPath, g.Manifest != nil)
 	return rows
+}
+
+// age is a duration a person reads at a glance: days once it is a day.
+func age(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	return d.Round(time.Minute).String()
+}
+
+// runVMGoldenCreate seals a disposable VM into the golden image.
+//
+// The guard is here, like every -force refusal: sealing turns BitLocker and
+// hibernation off and throws away the component store's backups, which is
+// fine for a disposable VM and not a decision to make for the shared one by
+// leaving a flag out. The VM is resolved first, so the guard answers yes, no
+// or could-not-tell — and could-not-tell refuses.
+func runVMGoldenCreate(args []string) error {
+	fs := vmGoldenCreateFlags()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	v := values{fs}
+	name, force := v.String("vm"), v.Bool("force")
+	if name == "" {
+		return fmt.Errorf("%w: irgo-winvm vm-golden-create -vm <installed disposable VM>\n"+
+			"  Make one with: irgo-winvm vm-create -vm <name> -install -golden=false", errUsage)
+	}
+	say := utmvm.Printer("vm-golden-create")
+
+	e, err := utmvm.Find(name)
+	if err != nil {
+		// ErrNoVM is exit 3. Anything else is UTM not answering, and then
+		// whether this is the shared VM cannot be told: refused, not guessed.
+		return err
+	}
+	switch {
+	case strings.EqualFold(e.Name, utmvm.GoldenVMName):
+		return fmt.Errorf("%w: %s is the golden image itself; seal the VM it should be made from", errUsage, e.Name)
+	case strings.EqualFold(e.Name, utmvm.DefaultVMName) && !force:
+		return fmt.Errorf("%s is the shared VM. Sealing it turns BitLocker and hibernation off\n"+
+			"  and removes the component store's backups, and it is stopped while that happens.\n"+
+			"  Seal a disposable VM instead, or pass -force (%w)", e.Name, errRefused)
+	}
+
+	b, _ := utmvm.BundlePath(e.Name)
+	g, _ := utmvm.BundlePath(utmvm.GoldenVMName)
+	say("from:     %s (%s)", e.Name, utmvm.Home(b))
+	say("golden:   %s (%s)", utmvm.GoldenVMName, utmvm.Home(g))
+	say("manifest: %s", utmvm.Home(utmvm.GoldenManifestPath()))
+	if _, err := utmvm.GoldenCreate(utmvm.GoldenCreateOptions{Source: e.Name, ToolVersion: version}, say); err != nil {
+		return err
+	}
+	say("vm-create -vm <name> now clones %s instead of installing", utmvm.GoldenVMName)
+	return nil
+}
+
+// runVMGoldenDelete removes the golden image: without -force it only lists.
+func runVMGoldenDelete(args []string) error {
+	fs := vmGoldenDeleteFlags()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	force := values{fs}.Bool("force")
+	say := utmvm.Printer("vm-golden-delete")
+
+	g := utmvm.Golden()
+	say("golden:   %s", utmvm.Home(g.Bundle))
+	say("manifest: %s", utmvm.Home(g.ManifestPath))
+	if !g.Present && g.Manifest == nil {
+		// Asked of UTM as well as the disk: a registered golden image whose
+		// disk cannot be stat'ed is still something to delete.
+		if _, err := utmvm.Find(utmvm.GoldenVMName); err != nil {
+			say("no golden image; nothing to delete")
+			return nil
+		}
+	}
+	if !force {
+		return fmt.Errorf("the golden image, %s on disk. VMs already cloned from it are not affected,\n"+
+			"  but a new one takes a full install until vm-golden-create makes another. Pass -force to do it (%w)",
+			utmvm.HumanBytes(g.Allocated), errRefused)
+	}
+	return utmvm.GoldenDelete(func(f string, a ...any) { say("  "+f, a...) })
 }
 
 func runVMDelete(args []string) error {

@@ -174,6 +174,10 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 			return r, fmt.Errorf("removing %s: %w", r.Path, rmErr)
 		}
 	}
+	// The remembered guest address goes with the VM, under either reference,
+	// so a later VM of the same name does not start by dialling this one's.
+	forgetGuestIP(r.UUID)
+	forgetGuestIP(r.Name)
 	return r, nil
 }
 

@@ -247,6 +247,14 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	say("          disk.img: %s", allocated())
 
 	say("STEP 2/6  sealing Windows, in the guest, as SYSTEM")
+	// vm-repair first, so every clone starts with what it sets: the password
+	// that never expires, Windows Update kept quiet, WebView2 registered, and
+	// the SMB share Push uses — a source installed before the answer file
+	// opened that share would otherwise give clones the 0.4 MB/s path.
+	say("          vm-repair: password, Windows Update, WebView2, the SMB share, the desktop")
+	if err := VMRepair(src.UUID, shareUser, true, false, func(f string, a ...any) { say("            "+f, a...) }); err != nil {
+		return m, fmt.Errorf("repairing %s before sealing: %w", src.Name, err)
+	}
 	guest := guestPublic + `\irgo-vm-golden-seal.ps1`
 	if err := pushScript(src.UUID, guest, sealScript); err != nil {
 		return m, fmt.Errorf("pushing the seal script: %w", err)

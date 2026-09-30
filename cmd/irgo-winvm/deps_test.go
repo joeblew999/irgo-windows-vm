@@ -1,16 +1,9 @@
 package main
 
-// What reaches the binary a user downloads.
-//
-// This repository exists to find bugs in glaze and native by running them on
-// real Windows. The tool that does the running must not link them: it would
-// mean the thing under test is part of the instrument, and a glaze bug could
-// break the tool that was supposed to report it.
-//
-// Nothing enforced that. The module split is what keeps them out — examples
-// is a separate module for this reason — and a split
-// is one `import` away from being undone, in a change that builds and passes
-// every other check.
+// The shipped binary must not link glaze or native, the libraries under test:
+// a glaze bug could then break the tool meant to report it. The module split
+// keeps them out, and this test keeps the split from being undone by one
+// import.
 
 import (
 	"os/exec"
@@ -21,10 +14,8 @@ import (
 )
 
 // modulePath reduces a package path to the module that provides it:
-// github.com/pierrec/lz4/v4/internal/lz4block -> github.com/pierrec/lz4.
-//
-// The licence table in docs/CONTRIBUTING.md is written in modules, so this counts the
-// same unit rather than a number nothing else uses.
+// github.com/pierrec/lz4/v4/internal/lz4block -> github.com/pierrec/lz4, the
+// unit docs/CONTRIBUTING.md's licence table is written in.
 var modulePath = regexp.MustCompile(`^(github\.com/[^/]+/[^/]+|golang\.org/x/[^/]+)`)
 
 // forbidden are the libraries under test. They belong in the guest programs,
@@ -34,21 +25,13 @@ var forbidden = []string{
 	"github.com/crgimenes/native",
 }
 
-// TestShippedBinaryLinksNothingUnderTest is the guard that makes the module
-// split mean something.
+// TestShippedBinaryLinksNothingUnderTest catches a require line added to
+// go.mod to make a glaze import build.
 //
-// Negative control, run by hand: add github.com/google/uuid to forbidden — a
-// module the binary really does link — and this fails naming the package. That
-// exercises the detector without fetching glaze, which the root module does not
-// require and should never be made to.
-//
-// Importing glaze for real would fail earlier, at go.mod, which is the outer
-// guard this one sits behind: it catches the case where somebody adds the
-// require line to make the import work.
+// Negative control: add github.com/google/uuid, which the binary does link, to
+// forbidden, and this fails naming the package.
 func TestShippedBinaryLinksNothingUnderTest(t *testing.T) {
-	// Run from the repository root: the test's own directory is cmd/irgo-winvm,
-	// where the pattern ./cmd/irgo-winvm resolves to nothing. The first version
-	// of this failed that way and looked like a real finding.
+	// From the repository root: in cmd/irgo-winvm the pattern matches nothing.
 	list := exec.Command("go", "list", "-deps", "./cmd/irgo-winvm")
 	list.Dir = repoRoot(t)
 	var stderr strings.Builder
@@ -78,9 +61,8 @@ func TestShippedBinaryLinksNothingUnderTest(t *testing.T) {
 		}
 	}
 
-	// Reported, not asserted against a hardcoded number. A count in a test is a
-	// second copy of the licence table, and it would be updated by whoever added
-	// the dependency — which is the person least likely to re-check the licence.
+	// Logged, not asserted: a hard-coded count would be a second copy of the
+	// licence table, bumped by whoever added the dependency without a re-check.
 	var names []string
 	for m := range mods {
 		names = append(names, m)

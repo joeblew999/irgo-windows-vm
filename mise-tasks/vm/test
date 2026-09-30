@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#MISE description="Create a VM and delete it, against a disposable name"
+#MISE depends=["go:tool"]
+set -euo pipefail
+VM=irgo-test-cycle
+
+# vm-create restarts UTM so it sees the new bundle, and quitting UTM takes any
+# running VM down with it. Refuse rather than cost somebody a 45-minute
+# install they had running.
+#
+# This was `irgo-winvm doctor | grep -q started`, and doctor never prints a VM's
+# status -- its rows are files, tools and records -- so the guard could not
+# fire and this task would have stopped a running VM. Asked of utmctl instead,
+# and "cannot tell" refuses: a failed list is not an empty one.
+if ! list=$(utmctl list); then
+  echo "cannot ask UTM which VMs are running (utmctl list failed); refusing" >&2
+  exit 1
+fi
+if awk 'NR > 1 && $2 == "started" { found = 1 } END { exit !found }' <<<"$list"; then
+  echo "a VM is running; vm-create restarts UTM and would stop it" >&2
+  exit 1
+fi
+
+echo "=== create ==="
+irgo-winvm vm-create -vm "$VM"
+
+echo
+echo "=== it exists ==="
+utmctl status "$VM" || { echo "UTM does not know $VM" >&2; exit 1; }
+
+echo
+echo "=== delete refuses without -force ==="
+if irgo-winvm vm-delete -vm "$VM"; then
+  echo "vm-delete deleted without -force" >&2; exit 1
+fi
+
+echo
+echo "=== delete ==="
+irgo-winvm vm-delete -vm "$VM" -force
+
+echo
+echo "=== it is gone, and no phantom entry is left ==="
+if utmctl status "$VM" 2>/dev/null; then
+  echo "$VM still registered with UTM" >&2; exit 1
+fi
+
+echo
+echo "=== deleting again is success, not an error ==="
+irgo-winvm vm-delete -vm "$VM"
+
+echo
+echo "create and delete cycle complete"

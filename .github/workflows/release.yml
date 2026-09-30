@@ -38,11 +38,19 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@v4.2.4
 
-      # Two Mac architectures; same cache as everywhere else so it is not doing
-      # that from cold.
+      # Two Mac architectures; same cache as check's macOS job so it is not
+      # doing that from cold.
+      #
+      # The path list must be check.yml's exactly, not just the key. actions/cache
+      # versions an entry by its paths as well as its key, so this listed two of
+      # check's three paths and, under the identical key, restored nothing check
+      # had saved — "same cache" in name only. Measured on v0.4.1: check's macOS
+      # job hit go-macOS-f475403d… at 09:11 on 14 Aug 2026, and this job, three
+      # minutes later on the same commit, logged "Cache not found" for that key.
       - uses: actions/cache@v6.1.0
         with:
           path: |
+            ~/.cache/go-build
             ~/Library/Caches/go-build
             ~/go/pkg/mod
           key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}

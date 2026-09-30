@@ -1,68 +1,10 @@
 package utmvm
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 )
 
-// ErrUTMNotInstalled is returned when UTM is absent and could not be installed.
-var ErrUTMNotInstalled = errors.New("UTM is not installed")
-
-// Installing UTM from nothing.
-//
-// The promise this project makes is that a developer runs one binary on a
-// machine with nothing on it. "First install a package manager" is one
-// prerequisites for a tool whose entire job is removing them.
-//
-// UTM publishes a signed .dmg on its GitHub releases, so there is nothing to
-// require — fetch it, mount it, copy the app out, unmount. That is the whole
-// procedure, and it is the same one a person performs by hand.
-//
-// `hdiutil` is used to mount, and it is the one place in this repository where
-// that is unavoidable: a .dmg is an APFS or HFS+ filesystem in a wrapper, and
-// there is no Go implementation that reads either. The README's "no hdiutil"
-// is about generating disk images, which this repo does do in Go; reading
-// somebody else's signed installer is a different problem with no Go answer.
-
-// ---- external tools ----
-// Installing the things this project needs, in one place.
-//
-// There are three of them — UTM, wimlib, xorriso — and before this they were
-// three different stories: UTM shelled out to a package manager inline, wimlib
-// and xorriso printed a line for the developer to copy, and each had its own
-// idea of what to say when it was missing. Same job, three implementations,
-// three behaviours.
-//
-// A developer running one binary should not be handed a shopping list. If the tool
-// is there, use it; if it is not, say so once, in one voice.
-
-// Everything this project depends on that does not live in the repository.
-//
-// There is a lot of it, it is large, and none of it is in git — so a clone is
-// nowhere near enough to run any of this, and the gap is invisible until
-// something fails a long way from the cause. A missing guest-tools ISO does not
-// say "missing guest-tools ISO"; it says the VM has no network and `utmctl
-// exec` does nothing.
-//
-// Each entry names what it is, where it is, why it is outside, and how to get
-// it back. `irgo-winvm doctor` prints them with their real sizes and whether
-// they are actually there, so the answer is measured rather than remembered.
-//
-// The sizes are the reason for most of it: ~33 GB of ISO and disk image, which
-// belongs in git under no circumstances, plus a VM bundle that is machine state
-// rather than source.
-
-// Externals returns every file and directory outside the repository that the
-// project relies on, in the order a new machine acquires them.
-//
-// repoRoot may be empty; the entries that live inside the working tree but
-// outside git are then skipped rather than guessed at.
-// Records are what a run leaves behind: the log, and the screenshots.
-//
-// Reported by doctor because a file nobody can find is a file nobody uses, and
-// both of these exist precisely for the moment something went wrong — which is
-// exactly when hunting for them is hardest.
 // mediaPath is the media doctor should report: whatever iso-create would use.
 //
 // It reported "MISSING" while iso-create resolved media in milliseconds,
@@ -78,6 +20,11 @@ func mediaPath() string {
 	return isoPath()
 }
 
+// Records are what a run leaves behind: the log, and the screenshots.
+//
+// Reported by doctor because a file nobody can find is a file nobody uses, and
+// both of these exist precisely for the moment something went wrong — which is
+// exactly when hunting for them is hardest.
 func Records() []External {
 	return []External{
 		{
@@ -96,6 +43,26 @@ func Records() []External {
 	}
 }
 
+// Externals returns every file and directory outside the repository that the
+// project relies on, in the order a new machine acquires them.
+//
+// There is a lot of it, it is large, and none of it is in git — so a clone is
+// nowhere near enough to run any of this, and the gap is invisible until
+// something fails a long way from the cause. A missing guest-tools ISO does not
+// say "missing guest-tools ISO"; it says the VM has no network and `utmctl
+// exec` does nothing.
+//
+// Each entry names what it is, where it is, why it is outside, and how to get
+// it back. `irgo-winvm doctor` prints them with their real sizes and whether
+// they are actually there, so the answer is measured rather than remembered.
+//
+// The sizes are the reason for most of it: ~33 GB of ISO and disk image, which
+// belongs in git under no circumstances, plus a VM bundle that is machine state
+// rather than source.
+//
+// It once took a repoRoot and skipped the entries inside the working tree when
+// that was empty. It takes nothing now: none of what it reports lives in the
+// tree.
 func Externals() []External {
 
 	// One layout, reported as it is. This used to rewrite Cache, Bin and Work
@@ -107,9 +74,10 @@ func Externals() []External {
 		{
 			Name: "Go toolchain",
 			Path: lookPath("go"),
-			Why: "deliberately not pinned by mise: each go.mod's `go` directive is a floor and " +
-				"the toolchain mechanism fetches what a module needs. Two managers on that job disagree.",
-			Fix: "install Go however you like; go.mod will say if it is too old",
+			Why: "pinned in mise.toml, which every go.mod's `go` directive matches, so CI and a " +
+				"maintainer build with the same Go. Outside mise the directive is a floor and the " +
+				"toolchain mechanism fetches what a module needs.",
+			Fix: "mise install, or any Go at least as new as go.mod says",
 		},
 		{
 			Name: "UTM.app",
@@ -119,7 +87,7 @@ func Externals() []External {
 		},
 		{
 			Name: "UTM guest tools ISO",
-			Path: mustGuestToolsPath(),
+			Path: guestToolsPathOrEmpty(),
 			Why: "the QEMU guest agent and the virtio-net driver. Without it a VM boots and " +
 				"is then unreachable: no network, no `utmctl exec`, no IP.",
 			Fix: "open UTM once and let it download them; there is no supported way to fetch them ourselves",
@@ -141,7 +109,7 @@ func Externals() []External {
 		},
 		{
 			Name: "the VM itself",
-			Path: mustVMDir(),
+			Path: vmDirOrEmpty(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +
 				"Rebuildable from the ISO in about an hour, unattended.",
 			Fix: "irgo-winvm vm",
@@ -157,7 +125,12 @@ func Externals() []External {
 	// reports 15 GB of ISO that does not exist, and the total is the number
 	// somebody compares against their free space.
 	//
-	// First entry to claim an inode owns it; the rest report it as shared. The
+	// Nothing prints a total any more — TotalBytes had no caller once doctor
+	// became one table, and was deleted on 30 Sep 2026 — but the rows still
+	// depend on this: without it the VM bundle's row counts the ISO it
+	// hardlinks as its own.
+	//
+	// First entry to claim an inode owns it; the rest do not count it again. The
 	// order above therefore matters, and the ISO is listed before the VM bundle
 	// deliberately, so the story reads "the bundle re-uses the cached ISO"
 	// rather than the reverse.
@@ -177,12 +150,10 @@ type External struct {
 	Why  string
 	Fix  string
 	Dir  bool
-	Skip bool
 
 	// Filled in by stat.
 	Present bool
 	Bytes   int64 // blocks this entry is the first to account for
-	Shared  int64 // blocks already accounted for by an earlier entry
 }
 
 // stat measures the entry, counting each inode's blocks once across the whole
@@ -219,7 +190,6 @@ func (e *External) add(p string, seen map[uint64]bool) {
 	ino, nlink, haveInode := inodeInfo(p)
 	if haveInode && nlink > 1 {
 		if seen[ino] {
-			e.Shared += used
 			return
 		}
 		seen[ino] = true
@@ -227,29 +197,9 @@ func (e *External) add(p string, seen map[uint64]bool) {
 	e.Bytes += used
 }
 
-// Missing reports the externals that are not present, most important first.
-func Missing(list []External) []External {
-	var out []External
-	for _, e := range list {
-		if !e.Present {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// TotalBytes is what all the present externals occupy on disk.
-func TotalBytes(list []External) int64 {
-	var n int64
-	for _, e := range list {
-		n += e.Bytes
-	}
-	return n
-}
-
-// mustVMDir is UTM's bundle directory, or empty when it cannot be resolved.
+// vmDirOrEmpty is UTM's bundle directory, or empty when it cannot be resolved.
 // Only for the inventory, which reports rather than acts.
-func mustVMDir() string {
+func vmDirOrEmpty() string {
 	d, err := DefaultVMDir()
 	if err != nil {
 		return ""
@@ -257,10 +207,10 @@ func mustVMDir() string {
 	return d
 }
 
-// mustGuestToolsPath is where UTM caches its guest tools, or empty when it
+// guestToolsPathOrEmpty is where UTM caches its guest tools, or empty when it
 // cannot be resolved. Asked of the vm code rather than spelled out again:
 // doctor reports on UTM, it does not know where UTM keeps things.
-func mustGuestToolsPath() string {
+func guestToolsPathOrEmpty() string {
 	p, err := guestToolsPath()
 	if err != nil {
 		return ""

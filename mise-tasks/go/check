@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#MISE description="Build, vet and test every module, and cross-compile every target"
+set -euo pipefail
+# Runs from the repository root. Each command is echoed before it runs, so a
+# failure names the module and the target it was on.
+run() { echo "\$ $*"; "$@"; }
+
+# Every root-module package, not just utmvm and cmd. This used to name the
+# two by hand, which is how mcpserver's tests went unrun: its malformed-
+# arguments guard was broken and every check stayed green, because the one
+# package that tested it was not in this list.
+run go build ./...
+run go vet ./...
+run go test ./...
+
+# The other two are separate modules and would be skipped by ./... above.
+# -o a directory because they are all main packages: a bare `go build` drops
+# binaries in the source tree, and in examples/ it fails outright because
+# `glaze-all` is already a directory there.
+for m in examples site; do
+  run go -C "$m" build -o "$MISE_PROJECT_ROOT/.bin/host/" ./...
+  run go -C "$m" vet ./...
+  run go -C "$m" test ./...
+done
+
+# The CLI must compile for every host a developer might be on: `targets`
+# exists to tell someone on Windows or Linux what their machine can do, and a
+# tool that will not build for them is no use. A macOS-only syscall with no
+# counterpart broke this once and was invisible from a Mac.
+for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64; do
+  run env GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -o /dev/null ./...
+done
+
+# And the probes must cross-compile with no C toolchain. If that ever needs
+# one, something has taken a cgo dependency and this project's central claim
+# has quietly stopped being true.
+run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./...

@@ -29,6 +29,9 @@ type Install struct {
 	Compatible bool
 }
 
+// ErrUTMNotInstalled is returned when UTM is absent and could not be installed.
+var ErrUTMNotInstalled = errors.New("UTM is not installed")
+
 // DetectUTM reports the installed UTM, or ErrUTMNotInstalled.
 func DetectUTM() (Install, error) {
 	var in Install
@@ -175,6 +178,34 @@ func GuestToolsISO() (string, error) {
 	}
 	return p, nil
 }
+
+// ---- external tools ----
+// Installing the things this project needs, in one place.
+//
+// There are three of them — UTM, wimlib, xorriso — and before this they were
+// three different stories: UTM shelled out to a package manager inline, wimlib
+// and xorriso printed a line for the developer to copy, and each had its own
+// idea of what to say when it was missing. Same job, three implementations,
+// three behaviours.
+//
+// A developer running one binary should not be handed a shopping list. If the tool
+// is there, use it; if it is not, say so once, in one voice.
+
+// Installing UTM from nothing.
+//
+// The promise this project makes is that a developer runs one binary on a
+// machine with nothing on it. "First install a package manager" is one
+// prerequisites for a tool whose entire job is removing them.
+//
+// UTM publishes a signed .dmg on its GitHub releases, so there is nothing to
+// require — fetch it, mount it, copy the app out, unmount. That is the whole
+// procedure, and it is the same one a person performs by hand.
+//
+// `hdiutil` is used to mount, and it is the one place in this repository where
+// that is unavoidable: a .dmg is an APFS or HFS+ filesystem in a wrapper, and
+// there is no Go implementation that reads either. The README's "no hdiutil"
+// is about generating disk images, which this repo does do in Go; reading
+// somebody else's signed installer is a different problem with no Go answer.
 
 // InstallUTMFromRelease downloads UTM's .dmg and copies the app to
 // /Applications.

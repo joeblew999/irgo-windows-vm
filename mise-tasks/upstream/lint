@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="golangci-lint glaze and native (their make lint), for darwin and windows"
+set -euo pipefail
+# Their `make lint`, for both targets glaze and native exist for: the Windows
+# code only compiles, and so only lints, with GOOS=windows.
+for repo in glaze native; do
+  for goos in darwin windows; do
+    echo "--- $repo  GOOS=$goos ---"
+    (cd "$UPSTREAM_DIR/$repo" && GOOS=$goos golangci-lint run ./...)
+  done
+done

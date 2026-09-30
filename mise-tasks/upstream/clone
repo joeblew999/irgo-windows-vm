@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Clone glaze and native into $UPSTREAM_DIR, or bring existing clones to trunk"
+set -euo pipefail
+mkdir -p "$UPSTREAM_DIR"
+for repo in glaze native; do
+  d="$UPSTREAM_DIR/$repo"
+  [ -d "$d/.git" ] || git clone "https://github.com/crgimenes/$repo.git" "$d"
+  git -C "$d" fetch --quiet origin
+  git -C "$d" remote set-head origin -a >/dev/null
+  def=$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||')
+  cur=$(git -C "$d" branch --show-current)
+  if [ -n "$(git -C "$d" status --porcelain)" ]; then
+    echo "$repo: uncommitted changes on $cur — commit them to a branch first; not switching"
+    continue
+  fi
+  # never move a fix branch: only a clone on a stale or current default is switched
+  if [ "$cur" = "master" ] || [ "$cur" = "$def" ]; then
+    git -C "$d" switch --quiet "$def" && git -C "$d" pull --quiet --ff-only
+  fi
+  echo "$repo: on $(git -C "$d" branch --show-current) (upstream default: $def)"
+done

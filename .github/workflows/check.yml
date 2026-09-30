@@ -58,9 +58,13 @@ jobs:
       # difference being that the host build had already warmed the cache for
       # that one pair.
       #
-      # Keyed on every go.sum in the repository; there are five modules, and a
-      # key covering only the root one would serve a stale cache whenever a
-      # sub-module's dependencies moved.
+      # Keyed on every go.sum in the repository; there are three modules (root,
+      # examples, site — it said five, from before the probes were folded into
+      # examples), and a key covering only the root one would serve a stale
+      # cache whenever a sub-module's dependencies moved.
+      #
+      # Not a duplicate of mise-action's cache: that one holds the tools mise
+      # installs (Go, golangci-lint, GoReleaser), not Go's build cache.
       - uses: actions/cache@v6.1.0
         with:
           path: |

@@ -1,28 +1,17 @@
 package utmvm
 
 // The golden image: an installed Windows, sealed once, that every new VM is
-// cloned from instead of installed.
+// cloned from instead of installed, so a VM of one's own is a clone and a boot
+// rather than 45 minutes of Setup.
 //
-// The expensive part of a VM is Windows Setup, about 45 minutes, and nothing
-// kept its result: the only installed VM was the shared one, and making
-// another meant restarting UTM, which stopped it. So a developer, a CI runner
-// or an agent that wanted its own VM waited most of an hour and interrupted
-// everybody else. The plan and its measurements are in
-// .plans/2026-09-30_1700_vm-golden-image.md.
+// It is a VM like any other, registered with UTM as GoldenVMName, stopped,
+// holding only its system disk. Everything that touches a bundle goes through
+// UTM's AppleScript, never the filesystem: macOS App Data protection refuses
+// this process ls, cat and touch in UTM's container, and UTM can do all three.
 //
-// A golden image is a VM like any other, registered with UTM under
-// GoldenVMName, stopped, holding only its system disk. vm-golden-create seals
-// a disposable VM and clones it there; vm-create clones from it, which on
-// APFS costs nothing and takes seconds; vm-golden-delete removes it.
-//
-// Everything that touches the bundle goes through UTM (AppleScript), never
-// through the filesystem: macOS App Data protection refuses this process
-// ls, cat and touch in UTM's container — measured, unsandboxed — while UTM
-// can do all three to its own files. So no Full Disk Access is needed.
-//
-// It is built locally, never downloaded from anywhere public. The Windows
-// licence forbids redistribution (the plan's "Legal" section quotes it), and
-// every running clone needs a licence of its own.
+// Built locally only: the Windows licence forbids redistribution, and every
+// running clone needs its own licence. docs/DEVELOPMENT.md, "The golden
+// image", has the rest.
 
 import (
 	_ "embed"

@@ -10,32 +10,20 @@ import (
 	"strings"
 )
 
-// The mutation locks, shared by every command that changes state on disk.
+// The mutation locks. A command that changes state on disk takes the ones it
+// touches, and is refused (never queued) while another holds one:
 //
-// There was one, machine-wide, and every mutation took it: two clients could
-// not mutate anything at once, and the loser was refused rather than queued.
-// That was right while there was one VM. It is wrong for several agents on one
-// Mac, each with its own VM cloned from the golden image
-// (.plans/2026-09-30_1700_vm-golden-image.md): every app-create on every VM
-// took the same lock, so N agents ran one at a time.
+//   - MachineLock: what every VM shares, the media (iso-*) and the golden
+//     image (vm-golden-*). vm-create takes it only while it writes or clones
+//     the bundle, seconds, so it cannot race vm-golden-delete and does not hold
+//     other VMs up for the length of a boot.
+//   - VMLock(name): one VM. vm-create, vm-delete, vm-repair, app-create and
+//     app-delete on different VMs run side by side, which is what several
+//     agents each with their own VM need.
+//   - StageLock: bin/, which app-upload writes and app-delete clears.
 //
-// So there are three kinds now, and a command takes the ones it touches:
-//
-//   - MachineLock, for what every VM shares: the media (iso-*) and the golden
-//     image (vm-golden-*). vm-create also takes it, but only around making the
-//     bundle — the clone call is seconds — so it cannot race vm-golden-delete
-//     and does not hold every other VM up for the length of a boot.
-//   - VMLock(name), for one VM: vm-create on that name, vm-delete, vm-repair,
-//     app-create, app-delete. Two of those on the same VM are refused; on two
-//     different VMs they run side by side.
-//   - StageLock, for the staged binaries under bin/, which app-upload writes
-//     and app-delete clears, whichever VM it names.
-//
-// Still refused rather than queued, still flock, still "cannot tell" refuses.
-//
-// ErrMutationInProgress is the refusal. The lock itself is platform-specific —
-// see lock_darwin.go and lock_other.go — because the primitive that releases
-// on process death is a different syscall on every platform.
+// The primitive that releases on process death differs per platform, hence
+// lock_darwin.go and lock_other.go.
 
 // ErrMutationInProgress is the refusal to start work while another mutation
 // holds a lock this one needs.

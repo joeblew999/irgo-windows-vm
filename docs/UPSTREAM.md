@@ -185,7 +185,10 @@ The document therefore loads from `https://app.localhost/`, and an absolute
 `app://home/app.js` inside it names a scheme WebView2 has never heard of.
 
 **Reproduction.** Windows 11 ARM64, `examples/verify` loading the same asset
-twice, once absolutely and once relatively:
+twice, once absolutely and once relatively (the output below is that program's;
+it is now `TestAppScheme` in `examples/conformance`, where
+`TestAppScheme/absolute_subresources` fails on Windows and is listed in
+`glazecheck.KnownUpstream`):
 
 ```
 scheme handler served: app://home/index.html -> text/html
@@ -222,8 +225,8 @@ one browser process. Design, checks and the upstream text:
 `.plans/2026-09-30_1745_glaze-1b-upstream.md`.
 
 **Workaround for glaze users today:** reference assets **relatively**. It works
-on both platforms. `examples/verify-events` does exactly that, and with it the
-Events bridge passes completely on Windows.
+on both platforms. `TestEvents` in `examples/conformance` does exactly that,
+and with it the Events bridge passes completely on Windows.
 
 **Status.** `PATCHED LOCALLY` — branch `fix/windows-custom-scheme` (`75f3ea1`,
 on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed. Checked on
@@ -343,7 +346,8 @@ regression. The likely trigger — inferred, not proven — is an update interru
 by a shutdown, which end users can hit after a power cut.
 
 **Reproduction** (in the VM, as SYSTEM): point the registration at a folder that
-does not exist, then run `examples/verify` against released glaze.
+does not exist, then run `examples/verify` (now `TestAppScheme` in
+`examples/conformance`) against released glaze.
 
 ```
 reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v EBWebView /t REG_SZ /d "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\1.0.0.0" /f
@@ -379,15 +383,16 @@ goroutine 1 on `m=4`, not the main thread `m0`. glaze pins the thread with
 whatever thread the goroutine is on at that moment. Nothing pins the main
 goroutine to the main thread before then, so the scheduler is free to move it.
 
-Measured 30 Sep 2026 with `examples/glaze-all -probe`, when the openurl probe
-(several seconds of `osascript` subprocesses and sleeps) ran before `New`: two
-crashes in fourteen runs, exit status 2. After moving `New` first: none in ten.
-Nothing in glaze's documentation says `New` must come first.
+Measured 30 Sep 2026 with `examples/glaze-all -probe` (since replaced by the
+conformance suite), when an openurl probe taking several seconds of `osascript`
+subprocesses and sleeps ran before `New`: two crashes in fourteen runs, exit
+status 2. With `New` moved first: none in ten. Nothing in glaze's
+documentation says `New` must come first.
 
 Fix, in glaze: `func init() { runtime.LockOSThread() }` in `webview_darwin.go`,
 which pins the main goroutine to the main thread before `main` runs, as Cocoa
-bindings generally do. Until then glaze-all calls `New` first, which is what a
-released glaze requires, and says so where it does.
+bindings generally do. Until then, call `New` before anything slow on the main
+goroutine.
 
 ## UTM
 

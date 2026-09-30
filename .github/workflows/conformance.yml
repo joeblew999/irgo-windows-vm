@@ -1,0 +1,103 @@
+# Does glaze work? The conformance suite (examples/conformance) on GitHub's
+# own macOS and Windows ARM64 machines, on every push and pull request.
+#
+# It is the same suite, run the same way, as `mise run glaze:mac` on a desk and
+# `mise run glaze:windows` on the VM: `irgo-winvm glaze-check` compiles it with
+# `go test -c`, runs the binary with -test.v=test2json, converts the output
+# with `go tool test2json`, and records every test. Nothing here reimplements
+# that; the job only runs it and keeps what it wrote.
+#
+# Why this exists beside the VM. Until it did, "does glaze work on Windows?"
+# was answered on exactly one machine — the owner's Mac, one UTM VM — so a
+# result nobody else could reproduce, and one nobody saw for a pull request.
+# The VM stays the reference (a known image, a known WebView2, an interactive
+# user session set up by this repo), and this is the second opinion that runs
+# for everyone.
+#
+# Both runners have a desktop session: glaze's own CI opens real WKWebView and
+# WebView2 windows on GitHub's hosted macOS and Windows runners, and WebView2
+# ships with Windows 11. So the whole suite runs on both, GUI tests included —
+# nothing is -short here.
+#
+# Known upstream bugs. The suite does not skip them: TestAppScheme/
+# absolute_subresources FAILS on Windows (docs/UPSTREAM.md §1b), and the table
+# in the job summary shows it failing, with its reference. glaze-check exits 0
+# when the ONLY failures are ones listed in glazecheck.KnownUpstream (verdict
+# "KNOWN BUGS ONLY"), so this job stays green for a change that broke nothing
+# and goes red for any new failure. It also goes red when a known failure
+# starts passing ("UNEXPECTED PASS"): the fix has landed and the list is out of
+# date, or the test stopped testing what it names. Either needs a person.
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    # The suite takes seconds and bounds itself (-test.timeout=3m inside
+    # glaze-check). Fifteen minutes is the build plus a hang, not a wait.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # macOS: the maintainer's own route — mise installs the pinned Go, and
+      # glaze:mac is the task a maintainer runs.
+      - if: runner.os == 'macOS'
+        uses: jdx/mise-action@v4.2.4
+      - if: runner.os == 'macOS'
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-conformance-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-conformance-${{ runner.os }}-
+      - if: runner.os == 'macOS'
+        run: mise run glaze:mac
+
+      # Windows: setup-go rather than mise. mise.toml is written for the Mac —
+      # its [env] reads $HOME and its tasks are bash — and the tool is a macOS
+      # program that only glaze-check makes sense of on Windows. The Go version
+      # is the same pin: every go.mod says the version mise.toml pins
+      # (docs/DEVELOPMENT.md, Tasks), and go-version-file reads it from there.
+      - if: runner.os == 'Windows'
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: '**/go.sum'
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: go run ./cmd/irgo-winvm glaze-check
+
+      # What glaze-check wrote, kept whatever the verdict: the record (the
+      # same table the job summary shows), the full log, and the test2json
+      # events. The log directory is the tool's fixed one, under the home
+      # directory on both.
+      - name: Collect the record
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p conformance-results
+          cp docs/GLAZE-STATUS.md conformance-results/
+          cp "$HOME/Library/Application Support/irgo-winvm/logs/"glaze-* conformance-results/
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: conformance-${{ matrix.os }}
+          path: conformance-results/
+          if-no-files-found: error

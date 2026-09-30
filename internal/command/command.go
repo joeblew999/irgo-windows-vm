@@ -68,7 +68,7 @@ var All = []Command{
 	// glaze-check is not Mutates: the Mac run touches no VM, and taking the
 	// lock would block it for the whole of an install. -windows takes the lock
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
-	{Name: "glaze-check", Summary: "does glaze work? run the four examples here or -windows, record the verdict", Detach: "-windows", OverMCP: true},
+	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},

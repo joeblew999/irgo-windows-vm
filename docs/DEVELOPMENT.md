@@ -62,8 +62,8 @@ Each top-level directory has one job:
 ```
 cmd/irgo-winvm/   the CLI: flags, handlers, exit codes. The one thing users install
 internal/         the CLI's packages (see Architecture). internal/ so nothing outside can import them
-examples/         the four programs run on Windows and the Mac: probe, verify,
-                  verify-events, glaze-all. mise run glaze:mac / glaze:windows
+examples/         conformance, the glaze and native test suite (mise run glaze:mac /
+                  glaze:windows), and glaze-all, the demo you drive by hand
 site/             renders docs/ into the website
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
 .plans/           work in progress, one file per plan
@@ -114,7 +114,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
-| `internal/glazecheck` | whether glaze works: build the four examples, run them here or through `app-create`, record the verdict. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
+| `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
@@ -331,9 +331,11 @@ measurement you correct.
 
 A bug in glaze or native is fixed in [crgimenes](https://github.com/crgimenes),
 not worked around here. A workaround in an example still ships the bug to every
-user of those libraries and hides it. Example: `examples/glaze-all` carries one
-marked stand-in for the `ErrUnsupported` fix, to be deleted when a release
-contains it. [UPSTREAM.md](UPSTREAM.md) is the ledger.
+user of those libraries and hides it. Example: `examples/conformance` (and
+`glaze-all`) carry one marked stand-in for the `ErrUnsupported` fix, to be
+deleted when a release contains it. A test for an upstream bug is never
+skipped to make a run green: it fails, and `glazecheck.KnownUpstream` names it
+as already reported (see [the conformance suite](#the-conformance-suite)). [UPSTREAM.md](UPSTREAM.md) is the ledger.
 
 ### Do not
 
@@ -364,16 +366,17 @@ reports what is installed and where, and **`status`** lists long-running
 Two work only **in a checkout of this repository**, because they build and read
 `examples/`:
 
-- **`glaze-check`** builds the four [example programs](#the-example-programs)
-  and runs them, natively on this Mac or, with `-windows`, in the VM through
-  `app-create`. It records the verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md), a
-  generated file: when, which commit, which glaze and native were built against
-  (from `go list -m`, so a `go.work` pointing at local clones is named with the
-  clone's branch and commit), and each program's PASS or FAIL with the first
-  line that said FAIL. The Mac and Windows sections are separate, so one run
-  never erases the other. Each run keeps its full output as
-  `glaze-<target>-<stamp>.log` in the log directory `doctor` names, and prints
-  that path first and last.
+- **`glaze-check`** builds [the conformance suite](#the-conformance-suite) into
+  one test binary and runs it, natively on this machine (macOS, or Windows —
+  which is how CI runs it) or, with `-windows`, in the VM through
+  `app-create -gui`. It records the verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md),
+  a generated file: when, which commit, which glaze and native were built
+  against (from `go list -m`, so a `go.work` pointing at local clones is named
+  with the clone's branch and commit), and every test's PASS, FAIL or skip with
+  the first message it wrote. The Mac and Windows sections are separate, so one
+  run never erases the other. Each run keeps its full output as
+  `glaze-<target>-<stamp>.log`, and the test2json events as `.json` beside it,
+  in the log directory `doctor` names, and prints both paths first and last.
 - **`glaze-status`** prints the recorded file and says, per section, whether it
   still describes the tree: current, stale (and why), or cannot tell.
 
@@ -381,7 +384,7 @@ Outside a checkout both exit 2 and say where they looked. They ship in the
 binary anyway because an MCP tool can only be a command, and the agent most
 likely to ask "does glaze work on Windows?" is the one `.mcp.json` starts in
 this repository; the reasoning is in `internal/glazecheck/doc.go`. glaze and
-native still never reach the binary: the examples are built by running `go`.
+native still never reach the binary: the suite is built by running `go`.
 Over MCP, `glaze-check -windows` is a job: call `status`, then `glaze-status`.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
@@ -500,22 +503,51 @@ operating system enforces that split.
 refuses up front, naming the problem, when nobody is logged in, instead of
 waiting out its timeout.
 
-## The example programs
+## The conformance suite
 
-Each capability is probed by exactly one program, split by what the capability
-needs. A capability probed in two places is two things to fix when upstream
-changes and two reports to reconcile when they disagree.
+`examples/conformance` is a `go test` suite, and the only thing that answers
+"does glaze work?". It is the same tests everywhere: `go test` on the Mac, the
+same package compiled with `go test -c` for Windows ARM64 and run on the VM's
+desktop by `app-create -gui`, and the CI job `conformance` on GitHub's
+`macos-latest` and `windows-11-arm`. What each test proves, and what it
+deliberately does not, is in its comment.
 
-| program | library | needs |
+| tests | library | needs |
 |---|---|---|
-| `examples/probe/` | native — clipboard, power, single-instance, mmap | headless; runs under the guest agent in session 0 |
-| `examples/glaze-all` | native + glaze — openurl, tray, no-capture, menu, file dialogs, app icon | `-gui` |
-| `examples/verify` | glaze — the portless `app://` path | `-gui` |
-| `examples/verify-events` | glaze — the Events bridge | `-gui` |
+| `TestClipboard`, `TestPowerPreventSleep`, `TestSingleInstance`, `TestMmap` | native | nothing: headless |
+| `TestOpenURL` | native — the scheme allow-list and Reveal's refusal only | nothing: no side effect |
+| `TestAppScheme`, `TestEvents` | glaze — the portless `app://` path, the Events bridge | a desktop session |
+| `TestTray`, `TestMenu`, `TestNoCapture`, `TestAppIcon`, `TestFileDialog` | native + glaze | a desktop session |
 
-`glaze-all` opens its window and waits by default, because it is an example
-before it is a test. `-probe` gives the unattended report, and `glaze-check`
-passes it.
+How it is built, and why:
+
+- **The main thread.** AppKit takes UI work only on the main OS thread, and
+  the testing package runs each test on a goroutine of its own. `init` locks
+  the main goroutine to the main thread, `TestMain` runs `m.Run` elsewhere and
+  then serves a queue, and a test opens its window through that queue — so a
+  test is an ordinary test, with `t.Fatal` and subtests, while the window's run
+  loop has the main thread.
+- **Nothing is left open.** Every window is torn down in `t.Cleanup`; the tray
+  is stopped; the file dialog is found through the OS (the modal panel, the
+  owned popup) and cancelled. `openurl.Open` and `Reveal` on a real target are
+  not in the suite at all: they open a window in another process that the test
+  cannot close, and "the call returned nil" is all it could assert. Drive them
+  by hand in `glaze-all`.
+- **A skip says why, and there are two reasons.** `-short` skips what needs a
+  desktop (it is what `go:check` and `app:test` run). And a package's own
+  `ErrUnsupported` skips only on an OS where the capability is documented as
+  unsupported (`nocapture` on macOS, `SetAppIcon` on Windows); the same error
+  anywhere else is a failure.
+- **Known upstream bugs fail.** `TestAppScheme/absolute_subresources` fails on
+  Windows until glaze fixes [§1b](UPSTREAM.md). `glazecheck.KnownUpstream`
+  lists it, so a run whose only failures are known answers `KNOWN BUGS ONLY`
+  and exits 0 — the VM gate and the CI job stay green for changes that broke
+  nothing — and a known failure that starts passing answers `UNEXPECTED PASS`
+  and exits non-zero, because the list is then out of date.
+
+`examples/glaze-all` is the demo: every capability is a button, and
+`mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
+not a test and nothing reads its output.
 
 ## Desktop hygiene
 
@@ -526,16 +558,11 @@ onto `$TMPDIR` had piled up on the Mac, six `explorer.exe` processes on the VM),
 a "Location is not available" box, and a file dialog that went only because
 the process exited under it.
 
-**Programs close what they open.** `glaze-all -probe` closes each window
-`openurl.Open` and `Reveal` opened and checks it is gone, found by difference
-against the file manager's windows before the call and filtered to the
-directory it passed, so a window the owner had open is never touched; Finder
-through `osascript`, Explorer through `user32`. It removes the temp directory
-only after that. It cancels its file dialog (`abortModal` on the Mac,
-`WM_CLOSE` on Windows) and requires `OpenFile` to return. A window left behind
-is a FAILED row, and a FAILED row exits 1. That last part was not true before:
-the exit code raced `main` returning, and a FAILED run exited 0. The code is in
-`examples/glaze-all/cleanup*.go`.
+**Tests do not open what they cannot close.** The conformance suite checks
+openurl's refusals only, which ask the OS for nothing; `Open` and `Reveal` on a
+real target hand it to Finder or Explorer, whose window the test does not own
+(`TestOpenURL` says why). `TestFileDialog` cancels its dialog and requires
+`OpenFile` to return. Opening a real folder is for `glaze-all`, by hand.
 
 **The VM's desktop is reset around every Windows check.** `utmvm.DesktopReset`
 runs `internal/utmvm/assets/desktop-reset.ps1` in dev's session, through the
@@ -633,7 +660,5 @@ detail there and only the reminder here.
 | a notification toast (OneDrive's "Turn On Windows Backup") | an uncloaked `CoreWindow` of `ShellExperienceHost` titled "New notification". Stopping that host brings it straight back | stop the sending app and clear its notification history (`ToastNotificationManager.History.Clear`) |
 | `$null` passed to a `string` parameter of a .NET method from PowerShell | PowerShell passes `""`, so `FindWindow('Shell_TrayWnd', $null)` asks for an empty title and `FindWindowEx(0, h, $null, $null)` finds nothing | call from C# (`Add-Type`) or pass `[NullString]::Value` |
 | the Mac's Command key | UTM forwards it as the Windows key, so Cmd-Tab on the Mac opens Start in the guest, over screenshots and `-gui` windows | `Scancode Map` remaps both Windows keys (answer file, `vm-repair`); a reboot applies it |
-| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §4](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` first |
-| an exit code set by `os.Exit` in a goroutine after `Terminate` | `Run` returns, `main` returns, and the process exits 0 first, so a FAILED report exited 0 | take the code on the main goroutine after `Run` returns |
-| deleting a directory just handed to `openurl` | Explorer is still navigating to it and shows "Location is not available" | close the window first, then delete |
+| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §5](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` before anything slow on the main goroutine |
 | an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([UPSTREAM.md §1b](UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |

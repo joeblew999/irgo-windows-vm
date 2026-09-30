@@ -27,20 +27,25 @@ const (
 
 var targets = []string{TargetMac, TargetWindows}
 
-// Result is one program's outcome.
+// Result is one test's or subtest's outcome, from its test2json events.
 type Result struct {
-	Name string
-	Pass bool
+	Name    string // TestAppScheme/absolute_subresources
+	Outcome string // Pass, Fail, Skip or Unfinished
 
-	// NotRun is a program that could not be run at all — the guest agent
-	// went away, the lock was held. That is not a glaze failure and must not
-	// be recorded as one, and it is not a pass either: "cannot tell".
-	NotRun bool
+	// Detail is the first line the test wrote itself — its t.Error, t.Fatal
+	// or t.Skip message. Empty on a pass.
+	Detail string
 
-	// FirstFail is the first line the program printed that says FAIL, FAILED
-	// or ERROR, or failing that the error that ended it. Empty on a pass.
-	FirstFail string
+	// Known is the docs/UPSTREAM.md reference when this test is a known
+	// upstream failure on this target (KnownUpstream), whatever its outcome.
+	Known string
+
+	// Inherited is a parent that failed only because a subtest did, and
+	// printed nothing of its own. It is shown, and not counted again.
+	Inherited bool
 }
+
+func (r Result) failed() bool { return r.Outcome == Fail || r.Outcome == Unfinished }
 
 // Section is one run, as recorded.
 type Section struct {
@@ -52,37 +57,68 @@ type Section struct {
 	GoWork   string
 	Deps     []Dep
 
-	// BuildError is set when the examples did not compile, in which case
+	// BuildError is set when the suite did not compile, in which case
 	// nothing ran and Results is empty.
 	BuildError string
-	Results    []Result
-	Log        string
+
+	// NotRun is why the suite never got to run — the guest agent went away,
+	// the lock was held. That is not a glaze failure and must not be recorded
+	// as one, and it is not a pass either: "cannot tell".
+	NotRun string
+
+	Results []Result
+	Log     string
+	JSON    string // the test2json events, beside the log
 }
 
-// Verdict is YES, NO, or CANNOT TELL, and the names behind the last two.
+// Verdict is one line: YES, KNOWN BUGS ONLY, NO, UNEXPECTED PASS, or CANNOT
+// TELL, with the names behind anything but YES.
 func (s Section) Verdict() string {
 	if s.BuildError != "" {
-		return "NO: the examples did not build"
+		return "NO: the conformance suite did not build"
 	}
-	var failed, notRun []string
+	if s.NotRun != "" {
+		return "CANNOT TELL: the suite did not run: " + s.NotRun
+	}
+	var failed, known, xpass []string
+	passed, skipped := 0, 0
 	for _, r := range s.Results {
 		switch {
-		case r.NotRun:
-			notRun = append(notRun, r.Name)
-		case !r.Pass:
+		case r.Inherited:
+		case r.failed() && r.Known != "":
+			known = append(known, r.Name+" ("+r.Known+")")
+		case r.failed():
 			failed = append(failed, r.Name)
+		case r.Known != "":
+			xpass = append(xpass, r.Name+" ("+r.Known+")")
+		}
+		switch r.Outcome {
+		case Pass:
+			passed++
+		case Skip:
+			skipped++
 		}
 	}
 	switch {
 	case len(failed) > 0:
 		return "NO: failed: " + strings.Join(failed, " ")
-	case len(notRun) > 0:
-		return "CANNOT TELL: did not run: " + strings.Join(notRun, " ")
+	case len(xpass) > 0:
+		return "UNEXPECTED PASS: known upstream failure now passes: " + strings.Join(xpass, " ") +
+			" — if the fix is released, remove it from glazecheck.KnownUpstream and update docs/UPSTREAM.md"
+	case len(known) > 0:
+		return "KNOWN BUGS ONLY: " + strings.Join(known, " ") + " fail, as already reported upstream; nothing else did"
 	case len(s.Results) == 0:
 		return "CANNOT TELL: nothing ran"
 	default:
-		return fmt.Sprintf("YES: all %d passed", len(s.Results))
+		return fmt.Sprintf("YES: %d passed, %d skipped", passed, skipped)
 	}
+}
+
+// Passed reports whether the verdict should let a gate through: YES, or
+// only the known upstream failures.
+func (s Section) Passed() bool {
+	v := s.Verdict()
+	return strings.HasPrefix(v, "YES") || strings.HasPrefix(v, "KNOWN BUGS ONLY")
 }
 
 func title(target string) string {
@@ -121,21 +157,38 @@ func (s Section) markdown() string {
 	if s.GoWork != "" {
 		fmt.Fprintf(&b, "- workspace: `%s` (go.work — `mise run upstream:unlink` removes it)\n", s.GoWork)
 	}
-	fmt.Fprintf(&b, "- full log: `%s`\n\n", s.Log)
+	fmt.Fprintf(&b, "- full log: `%s`\n", s.Log)
+	if s.JSON != "" {
+		fmt.Fprintf(&b, "- test2json events: `%s`\n", s.JSON)
+	}
+	b.WriteString("\n")
 
-	if s.BuildError != "" {
-		fmt.Fprintf(&b, "The examples did not build, so nothing ran:\n\n```\n%s\n```\n", s.BuildError)
-	} else {
-		b.WriteString("| program | result | first failure |\n|---|---|---|\n")
+	switch {
+	case s.BuildError != "":
+		fmt.Fprintf(&b, "The suite did not build, so nothing ran:\n\n```\n%s\n```\n", s.BuildError)
+	case s.NotRun != "":
+		fmt.Fprintf(&b, "The suite did not run, which says nothing about glaze:\n\n```\n%s\n```\n", s.NotRun)
+	default:
+		b.WriteString("| test | result | first message |\n|---|---|---|\n")
 		for _, r := range s.Results {
-			res, line := "PASS", ""
+			var res string
 			switch {
-			case r.NotRun:
-				res, line = "NOT RUN", cell(r.FirstFail)
-			case !r.Pass:
-				res, line = "**FAIL**", cell(r.FirstFail)
+			case r.Inherited:
+				res = "fail (a subtest failed)"
+			case r.failed() && r.Known != "":
+				res = "**FAIL** — known upstream: " + r.Known
+			case r.Outcome == Unfinished:
+				res = "**UNFINISHED**"
+			case r.failed():
+				res = "**FAIL**"
+			case r.Outcome == Skip:
+				res = "skip"
+			case r.Known != "":
+				res = "PASS — **known failure " + r.Known + " no longer fails**"
+			default:
+				res = "PASS"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, res, line)
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, res, cell(r.Detail))
 		}
 	}
 	b.WriteString(closeMarker(s.Target) + "\n")
@@ -166,8 +219,9 @@ Does glaze work on the Mac and on Windows? The last recorded answer for each,
 written by ` + "`irgo-winvm glaze-check`" + ` (` + "`mise run glaze:mac`" + ` and
 ` + "`mise run glaze:windows`" + `) and read back by ` + "`irgo-winvm glaze-status`" + `,
 which also says whether it still describes the tree. Generated: do not edit it by
-hand. Each run replaces only its own section. What each program checks is in
-[CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
+hand. Each run replaces only its own section. Every row is one test of
+` + "`examples/conformance`" + `, from its test2json events; what each checks is in its
+comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
 
 `
 

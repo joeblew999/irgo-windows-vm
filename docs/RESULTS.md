@@ -4,9 +4,12 @@ What has been measured, newest first. Each entry keeps the date it was measured
 and the numbers it found. If a later run changes a number, correct it here too.
 
 The goal is parity: the same probes, against the same glaze version, on both
-platforms. A pass on one OS proves nothing on its own. The probes are built from
-`examples/probe/` (native capabilities), and `examples/verify` and
-`examples/verify-events` (glaze's `app://` scheme and its Events bridge).
+platforms. A pass on one OS proves nothing on its own. Entries up to 30 Sep
+2026 name the probes they ran: `examples/probe/` (native capabilities), and
+`examples/verify` and `examples/verify-events` (glaze's `app://` scheme and its
+Events bridge). Since then the same checks are the test suite
+`examples/conformance`, and [GLAZE-STATUS.md](GLAZE-STATUS.md) holds its latest
+run per platform.
 
 ## At a glance
 

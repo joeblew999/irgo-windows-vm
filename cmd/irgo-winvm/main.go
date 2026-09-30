@@ -154,15 +154,17 @@ func init() {
 // either side names something the other does not.
 func join(all []command.Command, impls map[string]impl) ([]cmd, error) {
 	out := make([]cmd, 0, len(all))
+	declared := make(map[string]bool, len(all))
 	for _, c := range all {
 		im, ok := impls[c.Name]
 		if !ok || im.run == nil {
 			return nil, fmt.Errorf("command %q is declared but has no implementation", c.Name)
 		}
 		out = append(out, cmd{c, im})
+		declared[c.Name] = true
 	}
 	for name := range impls {
-		if _, ok := command.Find(name); !ok {
+		if !declared[name] {
 			return nil, fmt.Errorf("%q is implemented but not declared in package command", name)
 		}
 	}

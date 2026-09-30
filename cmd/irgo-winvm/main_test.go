@@ -86,6 +86,8 @@ func TestEveryCommandIsReachable(t *testing.T) {
 
 // TestJoinRejectsMismatch checks both directions of the check init relies on
 // to pair package command's list with this package's implementations.
+//
+// Negative control: disabling join's second loop fails the undeclared case.
 func TestJoinRejectsMismatch(t *testing.T) {
 	noop := impl{run: func(values, []string) error { return nil }}
 	all := []command.Command{{Name: "iso-create"}, {Name: "vm-create"}}

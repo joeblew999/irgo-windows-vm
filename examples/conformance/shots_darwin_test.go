@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,16 @@ func screencapture(args ...string) (image.Image, error) {
 		return nil, fmt.Errorf("screencapture %s wrote no readable PNG: %w", strings.Join(args, " "), err)
 	}
 	return img, nil
+}
+
+// readPNG decodes the picture screencapture wrote.
+func readPNG(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	return png.Decode(f)
 }
 
 func windowNumber(win objc.ID) int {

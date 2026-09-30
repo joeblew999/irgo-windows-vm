@@ -254,16 +254,6 @@ func writePNG(path string, img image.Image) error {
 	return f.Close()
 }
 
-// readPNG decodes a picture another process wrote.
-func readPNG(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }() // read-only
-	return png.Decode(f)
-}
-
 // labelled is a load function that puts the test's name in its window, so the
 // picture of a window that has no page of its own says which test it is.
 func labelled(t *testing.T) func(glaze.WebView) {

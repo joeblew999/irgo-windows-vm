@@ -1,34 +1,45 @@
+# Tools, environment, and the tasks. A task longer than one line is a script
+# in mise-tasks/ (the path is the name: mise-tasks/go/check is go:check), and
+# its findings are comments in that script. `mise tasks` lists them all; the
+# reasons behind the ones below are in docs/DEVELOPMENT.md under "Tasks".
+
 [tools]
-# Pinned here and nowhere else, so CI installs what a maintainer has; mise-action
-# reads this. Every go.mod says `go 1.27.1` to match. Reading the version from
-# go.mod is deprecated in mise (removed 2026.11.0), hence the pin here.
 go = "1.27.1"
 golangci-lint = "2.14.0"
-# The release build: .goreleaser.yaml, run by go:build and by release.yml.
 goreleaser = "2.18.2"
 
 [env]
-# Where local clones of glaze and native live. A bug in either is fixed THERE,
-# not worked around here — docs/UPSTREAM.md tracks each one. The upstream:* tasks
-# read it; restored from the mise.toml deleted in e533764.
+# Local glaze/native clones, for upstream:*. Bugs there are fixed there.
 UPSTREAM_DIR = "{{env.HOME}}/workspace/go/src/github.com/crgimenes"
-
-# The tool itself is on PATH in this directory: `irgo-winvm doctor`,
-# `irgo-winvm vm-create`, and so on. It is .bin/irgo-winvm, built by go:tool,
-# which every task here depends on. After editing cmd/ or internal/, run any
-# task or `mise run go:tool` before calling it by hand.
+# irgo-winvm on PATH: .bin/irgo-winvm, built by go:tool.
 _.path = ["{{config_root}}/.bin"]
 
-# Only what the binary cannot do on its own: checks, builds, the glaze gates,
-# upstream work. No task just wraps a command — call the command.
-#
-#   glaze:*     does glaze work? the four examples, on this Mac or on the VM
-#   go:*        build, test, lint, cross-compile; go:tool builds the binary
-#   upstream:*  local glaze/native clones: clone, link, verify, lint, unlink
-#   iso:test, vm:test, app:test   create-and-delete cycles for each stage
-#   vm:shots    publish the newest screenshot of each stage into docs/
-#   site:*      the docs website
-#   ci:watch    wait for GitHub Actions
+[tasks."go:tool"]
+description = "Build irgo-winvm into .bin/ — the binary every task here runs"
+sources = ["go.mod", "go.sum", "cmd/**/*", "internal/**/*"]
+outputs = [".bin/irgo-winvm"]
+run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
+
+[tasks."go:lint"]
+description = "The analysers, with everything they found already fixed"
+run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
+
+[tasks."site:build"]
+description = "Render the markdown into site/dist"
+run = "go -C site run . -root .. -out dist"
+
+[tasks."site:serve"]
+description = "Build the site and serve it at http://localhost:8127 to check it"
+run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8127}"
+
+[tasks."vm:shots"]
+description = "Publish the newest shot of each stage into docs/screens/vm"
+depends = ["go:tool"]
+run = "irgo-winvm vm-screen -promote {{config_root}}/docs/screens/vm"
+
+[tasks."upstream:unlink"]
+description = "Go back to the released glaze and native modules"
+run = "rm -f go.work go.work.sum && echo 'unlinked — back to the versions in each go.mod'"
 
 [tasks."glaze:hands"]
 description = "glaze-all on the VM with its window left up, to drive by hand"
@@ -40,89 +51,6 @@ run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags='-s -w' -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
   "irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
 ]
-
-[tasks."app:test"]
-description = "Put a binary on a VM, run it, and remove it"
-depends = ["go:tool"]
-run = '''
-set -e
-exe="{{config_root}}/.bin/win/probe.exe"
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags="-s -w" -o "$exe" ./probe
-# No precondition check here any more. It shelled out to `utmctl ip-address` to
-# decide whether the guest agent was up, which meant this file held both the
-# VM's name and a second opinion about what "ready" means -- and app-create
-# already answers that, recovers a VM that has rebooted, and says what to run
-# if Windows is not installed yet.
-#
-# examples/probe, not a throwaway: this once ran `go build` into a mktemp
-# hello.exe, which tested a path no user takes.
-echo "=== create: push it and run it ==="
-irgo-winvm app-create "$exe"
-
-echo
-echo "=== delete: take it off again ==="
-irgo-winvm app-delete "$exe"
-
-echo
-echo "=== deleting again is success, not an error ==="
-irgo-winvm app-delete "$exe"
-
-echo
-echo "app create and delete cycle complete"
-'''
-
-[tasks."ci:watch"]
-description = "Wait for GitHub Actions on a commit and report; SHA= to pick one"
-# The one way to wait for CI. Hand-rolled `gh run list` loops were used five
-# times before this existed and two of them were wrong, so this is here to stop
-# there being a second implementation nobody can fix.
-#
-# The trap it removes: `gh run list --commit` matches on the full 40-character
-# SHA only. Given an abbreviated one it returns an empty list -- not an error --
-# which reads exactly like "the run has not started yet". A loop waiting on that
-# waits forever for a run that already passed. Measured: `--commit 7c96e78`
-# returned 0 rows while `--commit 7c96e78d16f...` returned two, both green.
-#
-# The waiting itself is `gh run watch`, which polls at 3s and returns when the
-# run ends. Loops here slept 20-30s a tick, so a 63s check was reported up to
-# half a minute late. Nothing below re-implements waiting.
-run = '''
-set -e
-# Always resolved, never taken abbreviated -- see above.
-SHA=$(git rev-parse "${SHA:-HEAD}")
-
-# A run takes a few seconds to appear after a push. This is the ONE case where
-# an empty list really does mean "not yet", which is why it is bounded and
-# separate from everything else.
-n=0
-until [ "$(gh run list --commit "$SHA" --json databaseId --jq 'length')" != "0" ]; do
-  n=$((n + 1))
-  if [ "$n" -gt 20 ]; then
-    echo "no run for $SHA after 60s"
-    # Nearly always the real reason, and invisible from the empty list.
-    if ! git branch -r --contains "$SHA" 2>/dev/null | grep -q .; then
-      echo "  that commit is not on any remote branch -- push it first"
-    fi
-    exit 1
-  fi
-  sleep 3
-done
-
-# Every workflow, not just check: a push starts check AND pages, and watching
-# one of them and declaring success is how a broken deploy gets missed. A run
-# that has already finished returns immediately, so this is not serial waiting.
-failed=0
-for id in $(gh run list --commit "$SHA" --json databaseId --jq '.[].databaseId'); do
-  gh run watch "$id" --exit-status --compact >/dev/null 2>&1 || failed=1
-done
-
-gh run list --commit "$SHA" --json workflowName,conclusion,url \
-  --jq '.[] | "  \(.workflowName): \(.conclusion)  \(.url)"'
-
-# Non-zero on failure. A wait-for-CI that exits 0 when CI failed is a check that
-# cannot fail, which is the one thing docs/DEVELOPMENT.md says a check must never be.
-exit $failed
-'''
 
 [tasks."glaze:mac"]
 # The inner loop. glaze and native run natively on macOS, cgo-free, so the same
@@ -146,348 +74,3 @@ run = "irgo-winvm glaze-check"
 description = "Does glaze work on Windows? All four examples on the VM, verdict recorded in docs/GLAZE-STATUS.md"
 depends = ["go:tool"]
 run = "irgo-winvm glaze-check -windows"
-
-[tasks."go:build"]
-description = "Build irgo-winvm for every Mac a user could have, into dist/, as a release would"
-# .goreleaser.yaml is the build: targets, flags, names, SHA256SUMS, and why each
-# is what it is. This only picks the mode.
-#
-# The version is compiled in, so it is part of the bytes. A clean checkout of a
-# tag builds what release.yml published for that tag -- same version string,
-# same checksums -- which is the point of a maintainer being able to run this.
-# Anything else is a snapshot and says `dev`.
-#
-# That was false once. CI set VERSION from the tag it was building; a maintainer
-# checking what would be published ran the same task by hand, got `dev`, and so
-# got different bytes. Everything published said the checksums were
-# reproducible with this command; they were reproducible with
-# `VERSION=v0.2.0 mise run go:build`, which nothing said.
-#
-# --exact-match, so only a commit that *is* a release claims to be one. A commit
-# after the tag is a snapshot rather than claiming the tag below it. --dirty is
-# not available with it, which is why the tree check is separate: uncommitted
-# changes are not the release, whatever the tag says.
-#
-# --skip=publish builds and checksums without touching GitHub.
-run = '''
-set -e
-if git describe --tags --exact-match HEAD >/dev/null 2>&1 && [ -z "$(git status --porcelain)" ]; then
-  goreleaser release --clean --skip=publish
-else
-  goreleaser release --clean --snapshot
-fi
-cat dist/SHA256SUMS
-'''
-
-[tasks."go:check"]
-description = "Build, vet and test every module, and cross-compile every target"
-run = [
-  "go build ./...",
-  "go vet ./...",
-  # Every root-module package, not just utmvm and cmd. This used to name the
-  # two by hand, which is how mcpserver's tests went unrun: its malformed-
-  # arguments guard was broken and every check stayed green, because the one
-  # package that tested it was not in this list.
-  "go test ./...",
-
-  # The other two are separate modules and would be skipped by ./... above.
-  # -o a directory because they are all main packages: a bare `go build` drops
-  # binaries in the source tree, and in examples/ it fails outright because
-  # `glaze-all` is already a directory there.
-  "go -C examples build -o {{config_root}}/.bin/host/ ./...",
-  "go -C examples vet ./...",
-  "go -C examples test ./...",
-  "go -C site build -o {{config_root}}/.bin/host/ ./...",
-  "go -C site vet ./...",
-  "go -C site test ./...",
-
-  # The CLI must compile for every host a developer might be on: `targets`
-  # exists to tell someone on Windows or Linux what their machine can do, and a
-  # tool that will not build for them is no use. A macOS-only syscall with no
-  # counterpart broke this once and was invisible from a Mac.
-  "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
-  "GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./...",
-  "GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./...",
-  "GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./...",
-
-  # And the probes must cross-compile with no C toolchain. If that ever needs
-  # one, something has taken a cgo dependency and this project's central claim
-  # has quietly stopped being true.
-  "CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./...",
-]
-
-[tasks."go:lint"]
-description = "The analysers, with everything they found already fixed"
-# GOOS=darwin, pinned, so a Mac and the Linux CI runner lint the same code. The
-# tool only runs on macOS; on Linux statfsAvailable is a stub that always errors,
-# and staticcheck rightly calls `fErr == nil && free < n` in iso_create.go never
-# true (SA4023). That failed CI on every push from e1a4243 to 79f8a55 while the
-# same command passed on the Mac that wrote it.
-run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
-
-[tasks."go:tool"]
-# Every task runs this binary rather than `go run ./cmd/irgo-winvm`, so there is
-# one build of the tool, in one place you can see. sources/outputs mean mise
-# skips the build when nothing under cmd/ or internal/ changed.
-description = "Build irgo-winvm into .bin/ — the binary every task here runs"
-sources = ["go.mod", "go.sum", "cmd/**/*", "internal/**/*"]
-outputs = [".bin/irgo-winvm"]
-run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
-
-[tasks."iso:test"]
-description = "Delete the ISO and rebuild it, keeping the .esd"
-depends = ["go:tool"]
-# A real create/delete cycle, like vm:test and app:test. It named a list of unit
-# tests, every one of which `go test ./utmvm/...` in go:check already runs -- so
-# the one stage whose undo destroys 4.9 GB was the one stage with no test of its
-# undo, and the task that looked like it covered it covered nothing new.
-#
-# Disposable without needing a disposable location, which is the whole reason
-# iso-delete has two levels: the default keeps the .esd and only -all removes
-# it. So the cycle costs a rebuild from a file that is already there, and never
-# a second 4.2 GB download.
-#
-# -all is therefore never used here, and must not be. It deletes the one thing
-# that cannot be rebuilt from anything local.
-#
-# It costs 4.9 GB of real disk, once, and measurably: an existing VM's
-# Data/install.iso is a HARDLINK to the media ISO, so the two share one inode
-# and 4.9 GB. The rebuilt ISO is a new inode, and the bundle keeps holding the
-# old one -- 4.9 GB shared becomes 9.8 GB in two files. The space comes back
-# when that VM is deleted. Nothing is broken by it: the VM boots from a disk it
-# installed long ago and the ISO it holds is already spent.
-run = '''
-set -e
-state() { irgo-winvm doctor | grep "$1" | awk '{print $5}'; }
-
-if [ "$(state 'ARM64 .esd')" = "MISSING" ]; then
-  echo "no .esd, so a rebuild would mean downloading 4.2 GB again." >&2
-  echo "run: irgo-winvm iso-create -fetch" >&2
-  exit 1
-fi
-
-echo "=== create: idempotent, so this starts from a known-good ISO ==="
-irgo-winvm iso-create
-
-echo
-echo "=== delete without -force lists, changes nothing, and does NOT report success ==="
-# Non-zero on purpose, and asserted rather than tolerated: a dry run that exited
-# 0 would be indistinguishable from a delete that had happened, and every
-# `set -e` script treating it as one. vm-delete does the same.
-if irgo-winvm iso-delete; then
-  echo "a dry run exited 0; a script cannot tell that from a real delete" >&2
-  exit 1
-fi
-[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "a dry run deleted the ISO" >&2; exit 1; }
-
-echo
-echo "=== delete: the ISO goes, the .esd stays ==="
-irgo-winvm iso-delete -force
-[ "$(state 'ARM64 ISO')" = "MISSING" ] || { echo "ISO survived the delete" >&2; exit 1; }
-[ "$(state 'ARM64 .esd')" != "MISSING" ] || { echo "the .esd was deleted; only -all may do that" >&2; exit 1; }
-
-echo
-echo "=== deleting again is success, not an error ==="
-irgo-winvm iso-delete -force
-
-echo
-echo "=== create: rebuilt from the .esd, no download ==="
-irgo-winvm iso-create
-[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "the ISO was not rebuilt" >&2; exit 1; }
-
-echo
-echo "iso create and delete cycle complete"
-'''
-
-[tasks."site:build"]
-description = "Render the markdown into site/dist"
-# Generated from the markdown that is already the source of truth for each
-# subject, never hand-written, so the site cannot drift from the repository.
-# If a page is wrong, the markdown is wrong -- fix it there.
-run = "go -C site run . -root .. -out dist"
-
-[tasks."site:serve"]
-description = "Build the site and serve it at http://localhost:8127 to check it"
-# Building and serving are one command on purpose: a separate server can be
-# pointed at a stale dist from an earlier run, and checking a site that no
-# longer matches the markdown is worse than not checking it.
-run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8127}"
-
-[tasks."upstream:clone"]
-description = "Clone glaze and native into $UPSTREAM_DIR, or bring existing clones to trunk"
-run = '''
-set -e
-mkdir -p "$UPSTREAM_DIR"
-for repo in glaze native; do
-  d="$UPSTREAM_DIR/$repo"
-  [ -d "$d/.git" ] || git clone "https://github.com/crgimenes/$repo.git" "$d"
-  git -C "$d" fetch --quiet origin
-  git -C "$d" remote set-head origin -a >/dev/null
-  def=$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||')
-  cur=$(git -C "$d" branch --show-current)
-  if [ -n "$(git -C "$d" status --porcelain)" ]; then
-    echo "$repo: uncommitted changes on $cur — commit them to a branch first; not switching"
-    continue
-  fi
-  # never move a fix branch: only a clone on a stale or current default is switched
-  if [ "$cur" = "master" ] || [ "$cur" = "$def" ]; then
-    git -C "$d" switch --quiet "$def" && git -C "$d" pull --quiet --ff-only
-  fi
-  echo "$repo: on $(git -C "$d" branch --show-current) (upstream default: $def)"
-done
-'''
-
-[tasks."upstream:link"]
-# One go.work at the root listing every module. `use` alone is not enough:
-# without the replaces the workspace still resolves glaze from the module cache
-# at the version in go.mod, and the edit being tested is silently ignored — a
-# build that looks like it proves something and proves nothing.
-description = "Point every module at the LOCAL glaze/native clones"
-run = '''
-set -e
-for repo in glaze native; do
-  if [ ! -d "$UPSTREAM_DIR/$repo" ]; then
-    echo "missing $UPSTREAM_DIR/$repo — run: mise run upstream:clone" >&2
-    exit 1
-  fi
-done
-cd "$MISE_PROJECT_ROOT"
-rm -f go.work go.work.sum
-# Every module in the repo (site/ was added after these tasks were first
-# written; a hand list goes stale), then the two replaces.
-go work init
-go work use -r .
-go work edit -replace "github.com/crgimenes/glaze=$UPSTREAM_DIR/glaze" \
-             -replace "github.com/crgimenes/native=$UPSTREAM_DIR/native"
-echo "linked. every module now builds against:"
-echo "  $UPSTREAM_DIR/glaze ($(git -C "$UPSTREAM_DIR/glaze" branch --show-current))"
-echo "  $UPSTREAM_DIR/native ($(git -C "$UPSTREAM_DIR/native" branch --show-current))"
-echo "undo with: mise run upstream:unlink"
-'''
-
-[tasks."upstream:lint"]
-# Their `make lint`, for both targets glaze and native exist for: the Windows
-# code only compiles, and so only lints, with GOOS=windows.
-description = "golangci-lint glaze and native (their make lint), for darwin and windows"
-run = '''
-set -e
-for repo in glaze native; do
-  for goos in darwin windows; do
-    echo "--- $repo  GOOS=$goos ---"
-    (cd "$UPSTREAM_DIR/$repo" && GOOS=$goos golangci-lint run ./...)
-  done
-done
-'''
-
-[tasks."upstream:test:windows"]
-# Their own test suites, on the Windows they claim to support. glaze's tests
-# open windows (TestMain runs GUI scenarios unless -short), so everything runs
-# in dev's desktop session via -gui. A package whose binary exits non-zero
-# fails the task.
-description = "Build glaze's and native's own test suites for Windows and run them on the VM"
-depends = ["go:tool"]
-run = '''
-set -e
-out="$MISE_PROJECT_ROOT/.bin/win/upstream-tests"
-rm -rf "$out"; mkdir -p "$out"
-for repo in glaze native; do
-  for pkg in $(go -C "$UPSTREAM_DIR/$repo" list ./...); do
-    name="$repo-$(echo "${pkg#github.com/crgimenes/$repo}" | tr '/' '-' | sed 's/^-//')"
-    name="${name%-}"
-    GOOS=windows GOARCH=${ARCH:-arm64} CGO_ENABLED=0 \
-      go -C "$UPSTREAM_DIR/$repo" test -c -ldflags="-s -w" -o "$out/$name.test.exe" "$pkg"
-  done
-done
-fail=0
-for exe in "$out"/*.test.exe; do
-  [ -e "$exe" ] || continue   # packages without tests produce no binary
-  echo "=== $(basename "$exe")"
-  if ! irgo-winvm app-create -gui "$exe" -- -test.v -test.timeout 300s; then
-    echo "FAILED: $(basename "$exe")"; fail=1
-  fi
-done
-exit $fail
-'''
-
-[tasks."upstream:unlink"]
-description = "Go back to the released glaze and native modules"
-run = '''
-set -e
-rm -f "$MISE_PROJECT_ROOT/go.work" "$MISE_PROJECT_ROOT/go.work.sum"
-echo "unlinked — back to the versions in each go.mod"
-'''
-
-[tasks."upstream:verify"]
-# The measurement behind a claim that an upstream fix works: their tests, our
-# tests, and (next) Windows binaries built from the edit. Nothing here is taken
-# on faith from a diff that compiles.
-description = "Run glaze's and native's own tests, then build and test this repo against them"
-depends = ["upstream:link"]
-run = '''
-set -e
-echo "--- glaze's own tests ---";  go -C "$UPSTREAM_DIR/glaze"  test ./...
-echo "--- native's own tests ---"; go -C "$UPSTREAM_DIR/native" test ./...
-echo "--- this repo, against them ---"
-mise run go:check
-echo
-echo "prove it on Windows (still LINKED):"
-echo "  mise run upstream:lint && mise run upstream:test:windows   # their lint + their tests, on the VM"
-echo "  mise run glaze:mac && mise run glaze:windows   # the four examples, against your clones"
-echo "then: mise run upstream:unlink"
-'''
-
-[tasks."vm:shots"]
-description = "Publish the newest shot of each stage into docs/screens/vm"
-depends = ["go:tool"]
-# The tool photographs every stage into ~/Library/.../shots as it runs, but
-# those names carry a timestamp, so nothing in a README can point at one. This
-# copies the newest of each stage in under its stage name, which is what the
-# docs reference. No file is ever copied by hand.
-run = "irgo-winvm vm-screen -promote {{config_root}}/docs/screens/vm"
-
-[tasks."vm:test"]
-description = "Create a VM and delete it, against a disposable name"
-depends = ["go:tool"]
-run = '''
-set -e
-VM=irgo-test-cycle
-
-# vm-create restarts UTM so it sees the new bundle, and quitting UTM takes any
-# running VM down with it. Refuse rather than cost somebody a 45-minute
-# install they had running.
-if irgo-winvm doctor 2>/dev/null | grep -q started; then
-  echo "a VM is running; vm-create restarts UTM and would stop it" >&2
-  exit 1
-fi
-
-echo "=== create ==="
-irgo-winvm vm-create -vm "$VM"
-
-echo
-echo "=== it exists ==="
-utmctl status "$VM" || { echo "UTM does not know $VM" >&2; exit 1; }
-
-echo
-echo "=== delete refuses without -force ==="
-if irgo-winvm vm-delete -vm "$VM"; then
-  echo "vm-delete deleted without -force" >&2; exit 1
-fi
-
-echo
-echo "=== delete ==="
-irgo-winvm vm-delete -vm "$VM" -force
-
-echo
-echo "=== it is gone, and no phantom entry is left ==="
-if utmctl status "$VM" 2>/dev/null; then
-  echo "$VM still registered with UTM" >&2; exit 1
-fi
-
-echo
-echo "=== deleting again is success, not an error ==="
-irgo-winvm vm-delete -vm "$VM"
-
-echo
-echo "create and delete cycle complete"
-'''

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run glaze's and native's own tests, then build and test this repo against them"
+#MISE depends=["upstream:link"]
+set -euo pipefail
+# The measurement behind a claim that an upstream fix works: their tests, our
+# tests, and (next) Windows binaries built from the edit. Nothing here is taken
+# on faith from a diff that compiles.
+echo "--- glaze's own tests ---";  go -C "$UPSTREAM_DIR/glaze"  test ./...
+echo "--- native's own tests ---"; go -C "$UPSTREAM_DIR/native" test ./...
+echo "--- this repo, against them ---"
+mise run go:check
+echo
+echo "prove it on Windows (still LINKED):"
+echo "  mise run upstream:lint && mise run upstream:test:windows   # their lint + their tests, on the VM"
+echo "  mise run glaze:mac && mise run glaze:windows   # the four examples, against your clones"
+echo "then: mise run upstream:unlink"

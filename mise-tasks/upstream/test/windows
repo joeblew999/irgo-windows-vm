@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#MISE description="Build glaze's and native's own test suites for Windows and run them on the VM"
+#MISE depends=["go:tool"]
+set -euo pipefail
+# Their own test suites, on the Windows they claim to support. glaze's tests
+# open windows (TestMain runs GUI scenarios unless -short), so everything runs
+# in dev's desktop session via -gui. A package whose binary exits non-zero
+# fails the task.
+out="$MISE_PROJECT_ROOT/.bin/win/upstream-tests"
+rm -rf "$out"; mkdir -p "$out"
+for repo in glaze native; do
+  for pkg in $(go -C "$UPSTREAM_DIR/$repo" list ./...); do
+    name="$repo-$(echo "${pkg#github.com/crgimenes/"$repo"}" | tr '/' '-' | sed 's/^-//')"
+    name="${name%-}"
+    GOOS=windows GOARCH=${ARCH:-arm64} CGO_ENABLED=0 \
+      go -C "$UPSTREAM_DIR/$repo" test -c -ldflags="-s -w" -o "$out/$name.test.exe" "$pkg"
+  done
+done
+fail=0
+for exe in "$out"/*.test.exe; do
+  [ -e "$exe" ] || continue   # packages without tests produce no binary
+  echo "=== $(basename "$exe")"
+  if ! irgo-winvm app-create -gui "$exe" -- -test.v -test.timeout 300s; then
+    echo "FAILED: $(basename "$exe")"; fail=1
+  fi
+done
+exit $fail

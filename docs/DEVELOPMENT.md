@@ -171,7 +171,8 @@ examples/         the four programs run on Windows and the Mac: probe, verify,
 site/             renders docs/ into the website
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
 .plans/           work in progress, one file per plan
-mise.toml         every task. They run .bin/irgo-winvm, built once by go:tool
+mise.toml         tools, environment, one-line tasks. They run .bin/irgo-winvm, built by go:tool
+mise-tasks/       every task longer than a line, one script each; the path is the name
 ```
 
 and one rule decides the packages:
@@ -471,6 +472,53 @@ about three sections above.
 | `openurl.Open != nil` as a capability check | a function value is never nil. `go vet` says so outright — the check checked nothing |
 | an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` sub-resource names a scheme WebView2 has never heard of. Fails silently: no error, no console message, no stylesheet |
 
+## Tasks
+
+`mise tasks` lists them. `mise.toml` holds the tools, the environment and the
+one-line tasks; anything longer is an executable script in `mise-tasks/`, where
+the path is the name (`mise-tasks/go/check` is `go:check`), `#MISE` lines at the
+top declare its description and dependencies, and its findings are comments
+beside the lines they explain. Until 30 Sep 2026 all of it was shell inside TOML
+strings: 516 lines, where no editor, `bash -n` or shellcheck could see it.
+
+A task exists only for what the binary cannot do on its own: checks, builds,
+the glaze gates, upstream work, the create-and-delete cycles. No task just wraps
+a command — call the command.
+
+The reasons behind the one-liners, which have nowhere else to live:
+
+- **The tools are pinned in `mise.toml` and nowhere else**, so CI installs what a
+  maintainer has; `jdx/mise-action` reads it. Every `go.mod` says `go 1.27.1` to
+  match. Reading the Go version from `go.mod` is deprecated in mise (removed in
+  2026.11.0), hence the pin.
+- **`go:tool` is the one build of the tool.** Every task runs `.bin/irgo-winvm`
+  rather than `go run ./cmd/irgo-winvm`, and `.bin` is on `PATH` in this
+  directory, so `irgo-winvm doctor` works by hand. `sources` and `outputs` let
+  mise skip the build when nothing under `cmd/` or `internal/` changed — which
+  is also how it went wrong: from 977136e to 30 Sep 2026 the task built
+  `./irgo-winvm` while `outputs` named `.bin/irgo-winvm`, so every task and
+  `.mcp.json` ran whatever stale binary `.bin` happened to hold (in a fresh
+  clone, none). mise said so on every run — `did not generate expected output`
+  — and nobody read it. After editing `cmd/` or `internal/`, run any task or
+  `mise run go:tool` before calling the binary by hand.
+- **`go:lint` pins `GOOS=darwin`**, so a Mac and the Linux CI runner lint the same
+  code. The tool only runs on macOS; on Linux `statfsAvailable` is a stub that
+  always errors, and staticcheck rightly calls `fErr == nil && free < n` in
+  `iso_create.go` never true (SA4023). That failed CI on every push from e1a4243
+  to 79f8a55 while the same command passed on the Mac that wrote it.
+- **`site:build` renders the markdown, never hand-written pages**, so the site
+  cannot drift from the repository: if a page is wrong, the markdown is wrong.
+  **`site:serve` builds and serves in one command** on purpose — a separate
+  server can be pointed at a stale `dist` from an earlier run, and checking a
+  site that no longer matches the markdown is worse than not checking it.
+- **`vm:shots` copies, so nothing is copied by hand.** The tool photographs every
+  stage into `shots/` as it runs, but those names carry a timestamp, so no
+  document can point at one; this copies the newest of each stage into
+  `docs/screens/vm` under its stage name, which is what the docs reference.
+- **`UPSTREAM_DIR`** is where the local glaze and native clones live, read by the
+  `upstream:*` tasks. A bug in either is fixed there, not worked around here
+  (`UPSTREAM.md`). It was restored from the `mise.toml` deleted in e533764.
+
 ## Do not
 
 - Split the package up. Its parts are coupled.
@@ -478,6 +526,6 @@ about three sections above.
   install. UTM rejects a bad config with one generic *"cannot import this VM"*
   that names no field.
 - Export anything nothing uses.
-- Put logic in `mise.toml`. Tasks call the binary; if a task needs to do more
-  than that, it belongs in the binary.
+- Put logic in a task, in `mise.toml` or `mise-tasks/` alike. Tasks call the
+  binary; if a task needs to do more than that, it belongs in the binary.
 - Land a refactor in one commit. One concern per commit, each verified.

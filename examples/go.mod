@@ -2,11 +2,11 @@
 // tooling's dependency graph.
 module github.com/joeblew999/irgo-windows-vm/examples
 
-go 1.26.5
+go 1.27.1
 
 require (
-	github.com/crgimenes/glaze v0.0.47
-	github.com/crgimenes/native v0.1.7
+	github.com/crgimenes/glaze v0.0.61
+	github.com/crgimenes/native v0.1.15
 )
 
-require github.com/ebitengine/purego v0.10.2 // indirect
+require github.com/ebitengine/purego v0.11.0 // indirect

@@ -1,6 +1,6 @@
-github.com/crgimenes/glaze v0.0.47 h1:1k80adEXUsO7z8aGhmXi8gZZv+M60jL9Hd+23p16a9g=
-github.com/crgimenes/glaze v0.0.47/go.mod h1:01e3XdFpYoifpLRriaAoUbL7laZTh0WQmHTTAMd3tFc=
-github.com/crgimenes/native v0.1.7 h1:L2HddYZsTQhQRlNvNo+J9bElAeJJk9t8r1sryE00zTM=
-github.com/crgimenes/native v0.1.7/go.mod h1:zc2jhRIKpfoqaOIPgND5BX5ZM/hx4WWS6hNP02ppxi8=
-github.com/ebitengine/purego v0.10.2 h1:W809HbnvzAxgdm+aOvlSekrM16wGCdT/e76+9tS7gzE=
-github.com/ebitengine/purego v0.10.2/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/crgimenes/glaze v0.0.61 h1:h5SsJFuS14rm7Ed9kmM1qhgJwKeIBuyQS3PQW/ngoLo=
+github.com/crgimenes/glaze v0.0.61/go.mod h1:NRW4zIYUZeJgkfzdYQkSY+psZhudhlbZw6SvEhrziWw=
+github.com/crgimenes/native v0.1.15 h1:o7WZMQAgdpqxkhQLQ1sMAQEsOOn+z9xsU23pNGIS8NQ=
+github.com/crgimenes/native v0.1.15/go.mod h1:Z+AGFxyW5htcS1+VnF/tAokG+o4JcPOlkcfbyAd1hes=
+github.com/ebitengine/purego v0.11.0 h1:jhp/D+Nyv7UUW8HAcmcjt2N2rYrYi9m3SL21k0Ua/NI=
+github.com/ebitengine/purego v0.11.0/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=

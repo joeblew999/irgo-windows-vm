@@ -2,7 +2,7 @@ module github.com/joeblew999/irgo-windows-vm
 
 go 1.25.0
 
-toolchain go1.26.5
+toolchain go1.27.1
 
 require (
 	github.com/diskfs/go-diskfs v1.9.4

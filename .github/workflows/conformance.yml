@@ -85,15 +85,25 @@ jobs:
         run: go run ./cmd/irgo-winvm glaze-check
 
       # What glaze-check wrote, kept whatever the verdict: the record (the
-      # same table the job summary shows), the full log, and the test2json
-      # events. The log directory is the tool's fixed one, under the home
-      # directory on both.
+      # same table the job summary shows), this runner's screenshots with
+      # their manifest, the full log, and the test2json events. The log
+      # directory is the tool's fixed one, under the home directory on both.
+      #
+      # Only this runner's target's screenshots: docs/screens/conformance also
+      # holds the other target's committed ones, and `glaze-check -import` in
+      # pages.yml takes a target's section from whichever artifact carries
+      # its screenshots. The layout (GLAZE-STATUS.md beside
+      # screens/conformance/<target>/) is what Import looks for.
       - name: Collect the record
         if: always()
         shell: bash
         run: |
-          mkdir -p conformance-results
+          mkdir -p conformance-results/screens/conformance
           cp docs/GLAZE-STATUS.md conformance-results/
+          target=mac; [ "$RUNNER_OS" = Windows ] && target=windows
+          if [ -d "docs/screens/conformance/$target" ]; then
+            cp -R "docs/screens/conformance/$target" conformance-results/screens/conformance/
+          fi
           cp "$HOME/Library/Application Support/irgo-winvm/logs/"glaze-* conformance-results/
       - if: always()
         uses: actions/upload-artifact@v7.0.1

@@ -14,6 +14,12 @@ name: pages
 on:
   push:
     branches: [main]
+  # Again when a conformance run on main finishes, so the Glaze status page
+  # shows its record and screenshots without waiting for the next push.
+  workflow_run:
+    workflows: [conformance]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Read the repo, write Pages. Nothing else — this workflow publishes docs and
@@ -22,6 +28,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read # gh run download: the conformance artifacts
 
 # One deployment at a time, and let a running one finish. Cancelling a
 # half-finished deploy is how a site ends up serving a partial upload — so this
@@ -64,6 +71,37 @@ jobs:
       # or Settings > Pages > Source > GitHub Actions. After that this step
       # only reads the configuration and succeeds.
       - uses: actions/configure-pages@v6.0.0
+
+      # The Glaze status page shows the latest conformance run on main —
+      # its record and its screenshots, for macOS and Windows — rather than
+      # whatever was last committed. The latest COMPLETED run, failed ones
+      # included: a failing test, with the picture of its window, is exactly
+      # what that page is for, and "latest green" would hide it. Cancelled
+      # runs are skipped. With no such run, or no artifacts left (they
+      # expire), the committed docs/GLAZE-STATUS.md and
+      # docs/screens/conformance/ are published as they are.
+      #
+      # glaze-check -import does the merging (internal/glazecheck, Import):
+      # each artifact's section replaces its target's, its screenshots replace
+      # that target's directory, and the Screenshots table is redrawn. Nothing
+      # is committed; this changes only the tree the site is built from.
+      - name: take the latest conformance run's record and screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow conformance.yml --branch main \
+            --status completed --limit 20 --json databaseId,conclusion \
+            --jq '[.[] | select(.conclusion == "success" or .conclusion == "failure")][0].databaseId // empty')
+          if [ -z "$run" ]; then
+            echo "no completed conformance run on main: publishing the committed record"
+            exit 0
+          fi
+          echo "conformance run $run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run"
+          if ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'conformance-*' --dir ci-conformance; then
+            echo "run $run has no conformance artifacts left: publishing the committed record"
+            exit 0
+          fi
+          go run ./cmd/irgo-winvm glaze-check -import ci-conformance
 
       - name: build the site
         run: mise run site:build

@@ -39,13 +39,15 @@ go.work.sum
 # Every name below was measured by running the build, not worked out. The
 # obvious rule — "the binary is named after its directory" — is wrong here:
 # probe/ was once its own module, `module nativeprobe`, so building it dropped
-# `nativeprobe` and an entry reading /probe/probe silently guarded nothing. All
-# four now live in the examples module, and each binary is named after its
-# directory — measured 30 Sep 2026 with a bare `go build` in each.
-/examples/probe/probe
-/examples/verify/verify
-/examples/verify-events/verify-events
+# `nativeprobe` and an entry reading /probe/probe silently guarded nothing.
+# probe, verify and verify-events are gone, replaced by the conformance suite;
+# glaze-all's binary is named after its directory, and `go test -c` names the
+# suite's conformance.test in whatever directory it ran in — measured 30 Sep
+# 2026 with `go -C examples test -c ./conformance`, which wrote
+# examples/conformance.test.
 /examples/glaze-all/glaze-all
+/examples/conformance.test
+/examples/conformance/conformance.test
 
 # The tool itself, from `go build ./cmd/irgo-winvm` at the root. This one was
 # not caught by the pass above, and was not hypothetical: an 11 MB Mach-O binary

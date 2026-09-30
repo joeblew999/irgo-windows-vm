@@ -129,6 +129,9 @@ var handlers = map[string]func([]string) error{
 	"commands":  runCommands,
 	"status":    runStatus,
 	"mcp":       runMCP,
+
+	"glaze-check":  runGlazeCheck,
+	"glaze-status": runGlazeStatus,
 }
 
 func init() {
@@ -423,7 +426,12 @@ When something is wrong:
 
 Your .exe is anything you built with GOOS=windows GOARCH=arm64. The programs
 in examples/ are examples of that, and what this repository
-uses to find out what breaks in glaze and native on Windows.
+uses to find out what breaks in glaze and native on Windows. In a checkout
+of this repository:
+
+     glaze-check  build the four and run them here (-windows: on the VM),
+                  and record the verdict in docs/GLAZE-STATUS.md
+     glaze-status print that record, and whether it still holds
 
 Every command takes -h for its flags.
 `, utmvm.ISODownloadSize())

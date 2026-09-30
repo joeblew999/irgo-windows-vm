@@ -186,3 +186,30 @@ func Reporter(command string) func(string, ...any) {
 		log.Info(msg)
 	}
 }
+
+// Tee runs fn with command output copied to w as well as going wherever it
+// already goes, and restores the destination afterwards.
+//
+// Capture replaces the destination, so a caller sees nothing until fn returns;
+// that is right for an MCP result and wrong for a glaze check, which runs for a
+// minute and a half and must keep saying what it is doing while it also keeps
+// every line for a log file. Tee adds rather than replaces, so it composes
+// with Capture: inside an MCP call the output still reaches the tool result,
+// and the copy still reaches w.
+//
+// It does not take captureMu. A Tee inside a Capture — glaze-check driven over
+// MCP — would deadlock on it, and Tee cannot mis-restore a Capture's buffer:
+// it restores exactly what it found, which is the Capture's buffer.
+func Tee(w io.Writer, fn func() error) error {
+	outMu.Lock()
+	prev := out
+	out = io.MultiWriter(prev, w)
+	outMu.Unlock()
+
+	defer func() {
+		outMu.Lock()
+		out = prev
+		outMu.Unlock()
+	}()
+	return fn()
+}

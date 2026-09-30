@@ -129,46 +129,23 @@ exit $failed
 # four programs glaze:windows puts on the VM run here in seconds, no VM.
 # Windows stays the gate before a commit; this is for every edit before it.
 #
-# All four run even if one fails, so one run shows everything that is broken.
-# Works linked or not: after upstream:link it tests your local glaze/native.
-description = "Does glaze work on this Mac? All four examples, one verdict, ~15s, no VM"
-run = '''
-set -e
-out="{{config_root}}/.bin/mac"; mkdir -p "$out"
-[ -f "{{config_root}}/go.work" ] && echo "LINKED: building against $UPSTREAM_DIR" || echo "released glaze/native (the go.mod versions)"
-go -C "{{config_root}}/examples" build -o "$out/" ./...
-fail=""
-for p in probe verify verify-events "glaze-all -probe"; do
-  echo; echo "=== $p"
-  $out/$p || fail="$fail ${p%% *}"
-done
-echo
-if [ -z "$fail" ]; then echo "YES: all four passed on $(go env GOOS)/$(go env GOARCH)"; else echo "NO: failed:$fail"; exit 1; fi
-'''
+# A wrapper, which the rule above says a task should not be — kept because the
+# go:tool dependency rebuilds the binary first, and because these two names are
+# what every doc and habit says. The logic (all four run even if one fails,
+# works linked or not, the verdict recorded in docs/GLAZE-STATUS.md, the full
+# log kept in the log dir) is in internal/glazecheck. It was two shell scripts
+# here that printed YES or NO and threw it away.
+description = "Does glaze work on this Mac? All four examples, verdict recorded in docs/GLAZE-STATUS.md, ~15s, no VM"
+depends = ["go:tool"]
+run = "irgo-winvm glaze-check"
 
 [tasks."glaze:windows"]
-# Built stripped (-s -w): utmctl file push moves ~0.4 MB/s, so size is time.
-# Stripped and zipped (Push zips anything large), verify.exe is 2.0 MB, not 6.9.
-#
-# The gate. The same four programs, built for Windows ARM64, run on the VM
-# through app-create. -gui for the three that open a window; probe is headless
-# and runs as SYSTEM. All four run even if one fails.
-description = "Does glaze work on Windows? All four examples on the VM, one verdict"
+# The gate. The same four programs, built for Windows ARM64 (stripped, since
+# utmctl file push moves ~0.4 MB/s and size is time), run on the VM through
+# app-create: -gui for the three that open a window, probe headless as SYSTEM.
+description = "Does glaze work on Windows? All four examples on the VM, verdict recorded in docs/GLAZE-STATUS.md"
 depends = ["go:tool"]
-run = '''
-set -e
-out="{{config_root}}/.bin/win"; mkdir -p "$out"
-[ -f "{{config_root}}/go.work" ] && echo "LINKED: building against $UPSTREAM_DIR" || echo "released glaze/native (the go.mod versions)"
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C "{{config_root}}/examples" build -trimpath -ldflags="-s -w" -o "$out/" ./...
-fail=""
-run() { name=$1; shift; echo; echo "=== $name"; irgo-winvm app-create "$@" || fail="$fail $name"; }
-run probe                "$out/probe.exe"
-run verify        -gui   "$out/verify.exe"
-run verify-events -gui   "$out/verify-events.exe"
-run glaze-all     -gui   "$out/glaze-all.exe" -probe
-echo
-if [ -z "$fail" ]; then echo "YES: all four passed on windows/arm64"; else echo "NO: failed:$fail"; exit 1; fi
-'''
+run = "irgo-winvm glaze-check -windows"
 
 [tasks."go:build"]
 description = "Build irgo-winvm for every Mac a user could have, into dist/, as a release would"

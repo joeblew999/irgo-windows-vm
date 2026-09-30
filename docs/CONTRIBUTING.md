@@ -75,8 +75,18 @@ mise run glaze:mac       # all four natively on this Mac, ~15 s, no VM
 mise run glaze:windows   # all four on the VM, ~2 min, the real gate
 ```
 
-Each ends with one line, `YES` or `NO: failed: <names>`, and exits non-zero on
-NO. Run the Mac one on every edit and the Windows one before you commit.
+Both run `irgo-winvm glaze-check` (`-windows` for the VM). Each ends with one
+line, `YES`, `NO: failed: <names>` or `CANNOT TELL` (the guest agent went away,
+which says nothing about glaze), and exits non-zero unless YES. Run the Mac one
+on every edit and the Windows one before you commit.
+
+The verdict is not thrown away: each run rewrites its own section of
+[GLAZE-STATUS.md](GLAZE-STATUS.md) — commit, glaze and native versions (or the
+local clone's branch and commit when linked), and each program's first FAIL
+line — and keeps the complete output in the log directory, printing its path.
+Commit that file with the change it describes. `irgo-winvm glaze-status` prints
+it and says whether it still matches the tree; an agent gets the same through
+the `glaze-status` MCP tool, and can run the check with `glaze-check`.
 
 To work on glaze or native themselves, point everything at your local clones
 first. Both commands then test your edits:

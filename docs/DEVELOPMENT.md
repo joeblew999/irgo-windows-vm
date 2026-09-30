@@ -182,6 +182,7 @@ and one rule decides the packages:
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, and **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it — a 45-minute install an MCP client cannot wait on. Not in `utmvm` because all three stages start such work, and whoever owns it must be able to report a **dead** process |
+| `internal/glazecheck` | does glaze work: build the four examples, run them here or through app-create, record the verdict. Needs a checkout, so it is not in `utmvm`, which must work on a machine that has never seen this repo |
 | `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
 
 Three Go modules, and the split is load-bearing rather than organisational:
@@ -229,6 +230,26 @@ Three more change nothing: **`vm-screen`** photographs the VM, **`doctor`**
 reports what is here, and **`status`** lists long-running work — what is still
 going, what finished, and how long it has been. Whether a job is alive is
 answered by asking the operating system, not by reading a file that says so.
+
+Two more work only **in a checkout of this repository**, because they build
+and read `examples/`: **`glaze-check`** builds the four programs and runs them —
+natively on this Mac, or with `-windows` on the VM through `app-create` — and
+records the verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md), a generated file:
+when, which commit, which glaze and native were actually built against (from
+`go list -m`, so a go.work pointing at local clones is named with the clone's
+branch and commit), and each program's PASS or FAIL with the first line that
+said FAIL. The Mac and Windows sections are separate, so one run never erases
+the other's answer. Every run also keeps its complete output as
+`glaze-<target>-<stamp>.log` in the log directory `doctor` names, and prints
+that path first and last. **`glaze-status`** prints the recorded file and says,
+for each section, whether it still describes the tree — current, stale (and
+why), or cannot tell. Outside a checkout both exit 2 and say where they looked.
+They are in the shipped binary anyway because an MCP tool can only be a command,
+and the agent most likely to ask "does glaze work on Windows?" is the one
+`.mcp.json` starts inside this repository; the reasoning is in
+`internal/glazecheck/doc.go`. glaze and native still never reach the binary:
+the examples are built by running `go`. Over MCP, `glaze-check -windows` is a
+job, like `vm-create -install`: call `status`, then `glaze-status`.
 
 The two calls that take a long time — `vm-create -install` and `iso-create
 -fetch` — start the work and hand back a job id rather than blocking for 45
@@ -395,8 +416,8 @@ to reconcile when they disagree.
 | `examples/verify-events` | glaze — the Events bridge | `-gui` |
 
 `glaze-all` opens its window and waits by default, because it is an example
-before it is a test. `-probe` is the unattended report, and the mise task passes
-it.
+before it is a test. `-probe` is the unattended report, and `glaze-check`
+passes it.
 
 ## Things that cost hours
 

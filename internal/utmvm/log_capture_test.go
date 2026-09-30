@@ -195,3 +195,29 @@ func TestCaptureStillWritesTheLog(t *testing.T) {
 		t.Errorf("the log lost the command name: %q", logged.String())
 	}
 }
+
+// TestTeeAddsAndDoesNotReplace: inside an MCP call (a Capture), glaze-check's
+// Tee to its log file must leave the output going to the tool result as well,
+// and be undone when it returns.
+//
+// Negative control, run by hand: `out = w` instead of io.MultiWriter(prev, w)
+// fails this — the capture loses the line the tee kept.
+func TestTeeAddsAndDoesNotReplace(t *testing.T) {
+	var teed strings.Builder
+	got, err := Capture(func() error {
+		if err := Tee(&teed, func() error { printf("inside\n"); return nil }); err != nil {
+			return err
+		}
+		printf("after\n")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "inside\nafter\n" {
+		t.Errorf("capture got %q, want both lines", got)
+	}
+	if teed.String() != "inside\n" {
+		t.Errorf("tee got %q, want only the line written while it was in place", teed.String())
+	}
+}

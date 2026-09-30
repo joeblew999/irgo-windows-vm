@@ -135,6 +135,12 @@ func isoDeleteFlags() *flag.FlagSet {
 	return fs
 }
 
+func doctorFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.Bool("json", false, "print the rows as JSON, for scripts: what, state, absolute path, present")
+	return fs
+}
+
 func mcpFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
@@ -165,6 +171,7 @@ var flagSets = map[string]func() *flag.FlagSet{
 	"app-upload": appUploadFlags,
 	"iso-create": isoCreateFlags,
 	"iso-delete": isoDeleteFlags,
+	"doctor":     doctorFlags,
 	"mcp":        mcpFlags,
 
 	"glaze-check": glazeCheckFlags,

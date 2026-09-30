@@ -539,16 +539,65 @@ func runVMCreate(args []string) error {
 	return nil
 }
 
-func runDoctor([]string) error {
-	out := utmvm.Reporter("doctor")
+// doctorRow is one line of doctor's table, and one object of `doctor -json`.
+//
+// Path is absolute in the JSON and ~-abbreviated in the table. Present is its
+// own field so a script never has to know which STATE strings mean "absent":
+// the table says MISSING for a prerequisite and "not yet" for a record.
+type doctorRow struct {
+	What    string `json:"what"`
+	State   string `json:"state"`
+	Path    string `json:"path"`
+	Present bool   `json:"present"`
+}
 
+func runDoctor(args []string) error {
+	fs := doctorFlags()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rows := doctorRows()
+
+	// For scripts. iso:test parsed the table with `grep NAME | awk '{print $5}'`,
+	// which read the right column only because every name it asked about happened
+	// to be four words long, and would have read a size or a path the day one
+	// was renamed. Through utmvm.Out, not os.Stdout, so it is captured over MCP
+	// like every other command's output.
+	if (values{fs}).Bool("json") {
+		enc := json.NewEncoder(utmvm.Out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rows)
+	}
+
+	out := utmvm.Reporter("doctor")
+	out("%-22s %-10s %s", "WHAT", "STATE", "WHERE")
+	var missing int
+	for _, r := range rows {
+		out("%-22s %-10s %s", r.What, r.State, utmvm.Home(r.Path))
+		if r.State == "MISSING" {
+			missing++
+		}
+	}
+	out("")
+	if missing == 0 {
+		out("nothing missing.")
+		return nil
+	}
+	// What to run, once, rather than a paragraph per missing thing.
+	out("%d missing. In order: irgo-winvm iso-create -fetch, then vm-create -install.", missing)
+	return nil
+}
+
+// doctorRows is everything doctor reports, measured now.
+func doctorRows() []doctorRow {
 	// One table. It was five formats -- prose, a table, another prose block, a
 	// "N missing" list repeating what the table already said, and a records
 	// section -- so the same fact appeared twice in different words and the
 	// thing you were looking for was never where you looked.
-	type row struct{ what, state, where string }
-	var rows []row
-	add := func(what, state, where string) { rows = append(rows, row{what, state, where}) }
+	var rows []doctorRow
+	add := func(what, state, where string, present bool) {
+		rows = append(rows, doctorRow{what, state, where, present})
+	}
 
 	// The tool first, because it is the one thing in this table doctor cannot
 	// be wrong about and the first thing a bug report needs. It was the only
@@ -562,19 +611,19 @@ func runDoctor([]string) error {
 	if err != nil {
 		self = "(this binary)"
 	}
-	add("irgo-winvm", version, utmvm.Home(self))
+	add("irgo-winvm", version, self, true)
 
+	// Externals has already stat'ed each entry; asking the filesystem again
+	// here was a second answer to the same question, taken a moment later.
 	for _, e := range utmvm.Externals() {
 		state := "MISSING"
-		if e.Path != "" {
-			if _, sErr := os.Stat(e.Path); sErr == nil {
-				state = "ok"
-				if e.Bytes > 0 {
-					state = utmvm.HumanBytes(e.Bytes)
-				}
+		if e.Present {
+			state = "ok"
+			if e.Bytes > 0 {
+				state = utmvm.HumanBytes(e.Bytes)
 			}
 		}
-		add(e.Name, state, utmvm.Home(e.Path))
+		add(e.Name, state, e.Path, e.Present)
 	}
 
 	for _, t := range utmvm.ISOTools() {
@@ -582,18 +631,19 @@ func runDoctor([]string) error {
 		if t.Found() {
 			state = "ok"
 		}
-		add(t.Name, state, utmvm.Home(t.Where()))
+		add(t.Name, state, t.Where(), t.Found())
 	}
 
 	for _, r := range utmvm.Records() {
 		state := "not yet"
-		if fi, sErr := os.Stat(r.Path); sErr == nil {
+		fi, sErr := os.Stat(r.Path)
+		if sErr == nil {
 			state = "written"
 			if !r.Dir {
 				state = utmvm.HumanBytes(fi.Size())
 			}
 		}
-		add(r.Name, state, utmvm.Home(r.Path))
+		add(r.Name, state, r.Path, sErr == nil)
 	}
 
 	// Jobs are reported here rather than in utmvm.Records, because package job
@@ -602,9 +652,10 @@ func runDoctor([]string) error {
 	// — and a directory that grows should be visible before it is a problem.
 	// The size is what is kept after pruning, not what was ever written.
 	jobState := "none yet"
-	if n, err := job.All(); err == nil && len(n) > 0 {
+	all, err := job.All()
+	if err == nil && len(all) > 0 {
 		running := 0
-		for _, j := range n {
+		for _, j := range all {
 			if j.Alive {
 				running++
 			}
@@ -614,24 +665,8 @@ func runDoctor([]string) error {
 			jobState = fmt.Sprintf("%d running", running)
 		}
 	}
-	add("jobs", jobState, utmvm.Home(job.Dir()))
-
-	out("%-22s %-10s %s", "WHAT", "STATE", "WHERE")
-	var missing int
-	for _, r := range rows {
-		out("%-22s %-10s %s", r.what, r.state, r.where)
-		if r.state == "MISSING" {
-			missing++
-		}
-	}
-	out("")
-	if missing == 0 {
-		out("nothing missing.")
-		return nil
-	}
-	// What to run, once, rather than a paragraph per missing thing.
-	out("%d missing. In order: irgo-winvm iso-create -fetch, then vm-create -install.", missing)
-	return nil
+	add("jobs", jobState, job.Dir(), err == nil && len(all) > 0)
+	return rows
 }
 
 func runVMDelete(args []string) error {

@@ -380,36 +380,22 @@ func Create(opts Options) (string, error) {
 		return "", fmt.Errorf("install ISO: %w", err)
 	}
 
-	uuid, err := newUUID()
-	if err != nil {
-		return "", err
-	}
-	mac, err := randomMAC()
-	if err != nil {
-		return "", err
-	}
 	cfg := Config{
 		Name:       opts.Name,
-		UUID:       uuid,
+		UUID:       newUUID(),
 		MemoryMiB:  opts.MemoryMiB,
 		CPUCount:   opts.CPUCount,
-		MACAddress: mac,
+		MACAddress: randomMAC(),
 		NoGPUAccel: opts.NoGPUAccel,
 	}
 
-	// Checked: an empty Identifier renders a plist UTM rejects with the generic
-	// "cannot import this VM" that names no field (see config.go).
-	id1, err := newUUID()
-	if err != nil {
-		return "", err
-	}
-	id2, err := newUUID()
-	if err != nil {
-		return "", err
-	}
+	// Never empty: an empty Identifier renders a plist UTM rejects with the
+	// generic "cannot import this VM" that names no field (see config.go). That
+	// was once guarded by checking newUUID's error; it has none now, because
+	// crypto/rand.Read cannot fail (see newUUID).
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: id1, ImageName: diskImage, Type: DriveDisk, Interface: IfaceNVMe},
-		Drive{ID: id2, ImageName: installISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
+		Drive{ID: newUUID(), ImageName: diskImage, Type: DriveDisk, Interface: IfaceNVMe},
+		Drive{ID: newUUID(), ImageName: installISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
 	)
 
 	// The unattend medium is generated unless the caller supplied one. This is
@@ -424,12 +410,11 @@ func Create(opts Options) (string, error) {
 			return "", fmt.Errorf("building unattend medium: %w", err)
 		}
 	}
-	id3, _ := newUUID()
 	// A CD, not a removable disk. Attached as a FAT disk, Setup ignored
 	// autounattend.xml and ran interactively with no diagnostic; as a CD it is
 	// read and applied. Do not "improve" this back to a disk.
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: id3, ImageName: unattendISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
+		Drive{ID: newUUID(), ImageName: unattendISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
 
 	// Guest tools give the QEMU guest agent, and with it utmctl exec and
 	// ip-address. A VM without them boots but cannot be driven from the host,
@@ -443,9 +428,8 @@ func Create(opts Options) (string, error) {
 		if err := linkOrCopy(gt, filepath.Join(data, guestISO)); err != nil {
 			return "", fmt.Errorf("guest tools: %w", err)
 		}
-		id4, _ := newUUID()
 		cfg.Drives = append(cfg.Drives,
-			Drive{ID: id4, ImageName: guestISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
+			Drive{ID: newUUID(), ImageName: guestISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true})
 	}
 
 	plist, err := cfg.Plist()
@@ -520,26 +504,31 @@ func linkOrCopy(src, dst string) error {
 	}
 	return out.Close()
 }
-func newUUID() (string, error) {
+
+// newUUID returns a random (version 4) UUID in the upper case UTM writes.
+//
+// No error: since Go 1.24 crypto/rand.Read "never returns an error, and always
+// fills b entirely" (go doc crypto/rand Read) — it crashes the program instead.
+// The error this used to return could never be non-nil, and two of its four
+// callers already discarded it.
+func newUUID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
+	_, _ = rand.Read(b[:])
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
-	return fmt.Sprintf("%X-%X-%X-%X-%X", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+	return fmt.Sprintf("%X-%X-%X-%X-%X", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // randomMAC returns a QEMU-range locally administered address, so it can never
 // collide with real hardware on the network.
-func randomMAC() (string, error) {
+func randomMAC() string {
 	var b [3]byte
-	// Checked, unlike before: on failure every VM got 52:54:00:00:00:00, which
-	// is a guaranteed L2 collision between any two of them on a shared network.
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("utmvm: generating a MAC address: %w", err)
-	}
-	return fmt.Sprintf("52:54:00:%02X:%02X:%02X", b[0], b[1], b[2]), nil
+	// Once unchecked, and on failure every VM got 52:54:00:00:00:00, which is a
+	// guaranteed L2 collision between any two of them on a shared network. Then
+	// checked. Now neither: crypto/rand.Read cannot fail since Go 1.24 (see
+	// newUUID), so the zero address cannot happen and the check was unreachable.
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("52:54:00:%02X:%02X:%02X", b[0], b[1], b[2])
 }
 
 // Config describes a VM to generate. Zero values are not useful; use NewConfig.

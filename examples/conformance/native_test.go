@@ -49,7 +49,9 @@ func TestPowerPreventSleep(t *testing.T) {
 	if tok == nil {
 		t.Fatal("power.PreventSleep returned no token and no error")
 	}
-	tok.Release()
+	if err := tok.Release(); err != nil {
+		t.Fatalf("releasing the sleep assertion: %v", err)
+	}
 }
 
 // TestSingleInstance is the lock and the handoff: a second Acquire is refused
@@ -71,14 +73,16 @@ func TestSingleInstance(t *testing.T) {
 	released := false
 	t.Cleanup(func() {
 		if !released {
-			first.Release()
+			if err := first.Release(); err != nil {
+				t.Errorf("releasing the lock: %v", err)
+			}
 		}
 	})
 
 	t.Run("second_acquire_refused", func(t *testing.T) {
 		second, err := singleinstance.Acquire(id, singleinstance.Options{})
 		if err == nil {
-			second.Release()
+			_ = second.Release() // already failing, for the reason below
 			t.Fatal("a second Acquire succeeded while the first still held the lock")
 		}
 		if !errors.Is(err, singleinstance.ErrAlreadyRunning) {
@@ -102,13 +106,17 @@ func TestSingleInstance(t *testing.T) {
 	})
 
 	t.Run("release_frees_it", func(t *testing.T) {
-		first.Release()
 		released = true
+		if err := first.Release(); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
 		again, err := singleinstance.Acquire(id, singleinstance.Options{})
 		if err != nil {
 			t.Fatalf("Acquire after Release: %v", err)
 		}
-		again.Release()
+		if err := again.Release(); err != nil {
+			t.Fatalf("releasing the second lock: %v", err)
+		}
 	})
 }
 

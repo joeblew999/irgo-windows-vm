@@ -14,7 +14,8 @@
 #    NOT by MoNotificationUx.exe, which only asks for it (/NotificationType
 #    Reboot_Engaged). That is why killing MoNotificationUx left it on screen:
 #    the pixels were not stale, the window belonged to another process.
-#  - The Start menu, which was open behind that prompt once it was gone.
+#  - The Start menu, found open after that prompt was gone and again after a
+#    glaze-check run.
 #
 # explorer.exe is never killed: that takes the taskbar with it, and Windows did
 # not restart the shell when it was tried. Explorer's windows are asked to close
@@ -30,14 +31,12 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class IrgoDesk {
-  public delegate bool EnumProc(IntPtr h, IntPtr l);
-  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr p, IntPtr after, string c, string t);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
   public class Win { public IntPtr Hwnd; public uint Pid; public string Class; public string Title; }
@@ -47,18 +46,39 @@ public static class IrgoDesk {
     uint pid; GetWindowThreadProcessId(h, out pid);
     return new Win { Hwnd = h, Pid = pid, Class = c.ToString(), Title = t.ToString() };
   }
+  // FindWindowEx, not EnumWindows. EnumWindows lists only the desktop's own
+  // z-order band, and Windows 11 puts the taskbar, Start, Search and the
+  // update prompt in others: measured 30 Sep 2026, EnumWindows (and UI
+  // Automation) showed neither the taskbar nor the prompt that was on the
+  // screen, while FindWindowEx walked every band.
   public static List<Win> Visible() {
     var r = new List<Win>();
-    EnumWindows((h, l) => { if (IsWindowVisible(h)) r.Add(Describe(h)); return true; }, IntPtr.Zero);
+    IntPtr h = IntPtr.Zero;
+    while ((h = FindWindowEx(IntPtr.Zero, h, null, null)) != IntPtr.Zero) {
+      if (IsWindowVisible(h)) r.Add(Describe(h));
+    }
     return r;
   }
-  public static Win Foreground() { return Describe(GetForegroundWindow()); }
-  public static void Escape() { keybd_event(0x1B, 0, 0, UIntPtr.Zero); keybd_event(0x1B, 0, 2, UIntPtr.Zero); }
+  // Shown: visible AND not cloaked. The Start and Search panes are CoreWindows
+  // that stay "visible" all the time and are cloaked by DWM while closed.
+  public static List<Win> Shown() {
+    var r = new List<Win>();
+    foreach (var w in Visible()) {
+      int cloaked;
+      if (DwmGetWindowAttribute(w.Hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) continue;
+      r.Add(w);
+    }
+    return r;
+  }
 }
 '@
 
 $updateUx = 'MoNotificationUx', 'MusNotificationUx', 'MusNotification'
-$startHosts = 'StartMenuExperienceHost', 'SearchHost', 'ShellExperienceHost'
+$startHosts = 'StartMenuExperienceHost', 'SearchHost'
+# The shell's always-present immersive windows, left out of "other windows".
+# Explorer is among them: whatever of its windows is not an Explorer window or
+# error box (both handled above) is the shell itself.
+$immersive = 'explorer', 'ShellExperienceHost', 'ShellHost', 'TextInputHost'
 
 function ProcName([uint32]$id) {
   $p = Get-Process -Id $id -ErrorAction SilentlyContinue
@@ -80,9 +100,14 @@ function Junk {
   }
 }
 
-function StartIsOpen {
-  $fg = [IrgoDesk]::Foreground()
-  $fg.Class -eq 'Windows.UI.Core.CoreWindow' -and $startHosts -contains (ProcName $fg.Pid)
+# The Start or Search pane, if one is showing: an uncloaked CoreWindow of one
+# of their hosts. Not the foreground window: this script runs in a console of
+# its own, which has the foreground, while Start stays open behind it —
+# measured 30 Sep 2026, a check by foreground said "not open" over an open Start.
+function StartPanes {
+  [IrgoDesk]::Shown() | Where-Object {
+    $_.Class -eq 'Windows.UI.Core.CoreWindow' -and $startHosts -contains (ProcName $_.Pid)
+  }
 }
 
 function Say($label, $items) {
@@ -118,27 +143,28 @@ $session = (Get-Process -Id $PID).SessionId
 $uxStopped = @(Get-Process -Name $updateUx -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)
 $uxStopped | Stop-Process -Force
 
-# Escape closes Start, as it would for a person. Sent only when Start or Search
-# has the foreground, so it cannot land in someone's app.
-$startWasOpen = StartIsOpen
-if ($startWasOpen) {
-  [IrgoDesk]::Escape()
-  Start-Sleep -Milliseconds 800
-}
+# Its host is stopped: Escape needs the foreground, which this console has, and
+# a keystroke that misses lands in whatever does. StartMenuExperienceHost and
+# SearchHost are started again on demand, the next time Start is opened;
+# explorer.exe is not among them.
+$startPanes = @(StartPanes)
+$startNames = ($startPanes | ForEach-Object { ProcName $_.Pid } | Select-Object -Unique) -join ', '
+foreach ($id in ($startPanes | Select-Object -ExpandProperty Pid -Unique)) { Stop-Process -Id $id -Force }
+if ($startPanes) { Start-Sleep -Seconds 1 }
 
 Say 'explorer windows' ($found | Where-Object Kind -eq 'explorer window')
 Say 'explorer error boxes' ($found | Where-Object Kind -eq 'explorer error box')
 Say 'windows update prompts' ($found | Where-Object Kind -eq 'windows update prompt')
 if ($uxStopped) { "windows update notifier: stopped $(($uxStopped | ForEach-Object Name) -join ', ')" }
 else { 'windows update notifier: not running' }
-if ($startWasOpen) { 'start menu: closed' } else { 'start menu: not open' }
+if ($startPanes) { "start menu: closed ($startNames)" } else { 'start menu: not open' }
 
 $bad = $false
 foreach ($j in @(Junk)) {
   $bad = $true
   "STILL OPEN: $($j.Kind) '$($j.Title)' ($($j.Proc) pid $($j.Pid))"
 }
-if (StartIsOpen) {
+if (StartPanes) {
   $bad = $true
   'STILL OPEN: the Start menu'
 }
@@ -154,7 +180,7 @@ if ([IrgoDesk]::FindWindow('Shell_TrayWnd', $null) -eq [IntPtr]::Zero) {
 # purpose). The shell's own windows and this script's console are left out.
 $shell = 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'Progman', 'WorkerW', 'DummyDWMListenerWindow',
   'EdgeUiInputTopWndClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow', 'ConsoleWindowClass'
-$other = @([IrgoDesk]::Visible() | Where-Object { $shell -notcontains $_.Class })
+$other = @([IrgoDesk]::Shown() | Where-Object { $shell -notcontains $_.Class -and $immersive -notcontains (ProcName $_.Pid) })
 if ($other) {
   'other windows: ' + (($other | ForEach-Object { "'$($_.Title)' ($(ProcName $_.Pid), $($_.Class))" }) -join ', ')
 } else {

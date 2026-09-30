@@ -8,8 +8,10 @@ package main
 //
 // Captured rather than imported. Importing mcpserver would give the same data
 // with less machinery — and would drag the protocol SDK and its eight
-// dependencies into a module whose go.mod requires exactly one thing, a
-// markdown parser. The boundary is worth more than the machinery it saves.
+// dependencies into a module whose go.mod requires one kind of thing: a
+// markdown parser, and the goldmark extensions and syntax highlighter that
+// render it (render.go). The boundary is worth more than the machinery it
+// saves.
 
 import (
 	"encoding/json"

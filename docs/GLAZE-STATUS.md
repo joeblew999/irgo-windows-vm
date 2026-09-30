@@ -7,15 +7,15 @@ which also says whether it still describes the tree. Generated: do not edit it b
 hand. Each run replaces only its own section. What each program checks is in
 [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
 
-<!-- glaze-status:mac commit=8643df82d0c01699ff9301d14cfe71666a0cd53d examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
+<!-- glaze-status:mac commit=7ffb32fa73f8874e292a6b93a15d14499ed2b464 examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
 ## On the Mac — YES: all 4 passed
 
-- when: 2026-09-30 14:01 +0700, took 12s
+- when: 2026-09-30 15:08 +0700, took 18s
 - platform: darwin/arm64 (this machine, natively)
-- this repository: commit `8643df82d0c0`
+- this repository: commit `7ffb32fa73f8`
 - glaze v0.0.61 (released)
 - native v0.1.15 (released)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-140114.log`
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-150815.log`
 
 | program | result | first failure |
 |---|---|---|
@@ -25,15 +25,15 @@ hand. Each run replaces only its own section. What each program checks is in
 | glaze-all | PASS |  |
 <!-- /glaze-status:mac -->
 
-<!-- glaze-status:windows commit=8643df82d0c01699ff9301d14cfe71666a0cd53d examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
+<!-- glaze-status:windows commit=7ffb32fa73f8874e292a6b93a15d14499ed2b464 examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
 ## On Windows — NO: failed: verify
 
-- when: 2026-09-30 14:01 +0700, took 1m0s
+- when: 2026-09-30 15:08 +0700, took 1m11s
 - platform: windows/arm64, VM irgo-win11 (through app-create)
-- this repository: commit `8643df82d0c0`
+- this repository: commit `7ffb32fa73f8`
 - glaze v0.0.61 (released)
 - native v0.1.15 (released)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-140147.log`
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-150833.log`
 
 | program | result | first failure |
 |---|---|---|

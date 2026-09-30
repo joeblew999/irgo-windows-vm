@@ -233,7 +233,7 @@ run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticche
 description = "Build irgo-winvm into .bin/ — the binary every task here runs"
 sources = ["go.mod", "go.sum", "cmd/**/*", "internal/**/*"]
 outputs = [".bin/irgo-winvm"]
-run = "go build -o irgo-winvm ./cmd/irgo-winvm"
+run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
 
 [tasks."iso:test"]
 description = "Delete the ISO and rebuild it, keeping the .esd"

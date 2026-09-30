@@ -194,7 +194,8 @@ Three Go modules, and the split is load-bearing rather than organisational:
 | `site` | needs a markdown parser the tool has no business carrying |
 
 Check it with `go list -deps`, not by reading imports. The site module requires
-goldmark and nothing else, which is why the generated MCP page is captured from
+goldmark, its extensions and the chroma highlighter, and nothing else, which is
+why the generated MCP page is captured from
 the binary rather than produced by importing the server — importing it would
 drag the protocol SDK's dependency graph into the documentation generator.
 

@@ -1,6 +1,50 @@
 # A ready Windows VM in minutes: build a golden image once, then clone it
 
-Status: proposed, research only. Nothing is built yet · 2026-09-30
+Status: phase 1 built, not yet run against a VM; phase 0 measurements pending
+the VM · 2026-09-30
+
+## What was built (phase 1), and where it differs from the plan below
+
+Branch `worktree-agent-ab62bcd315eea9030`. Unit-tested with negative controls;
+nothing here has touched UTM or a VM yet.
+
+- **`autounattend.xml`**: `PreventDeviceEncryption` in specialize, under
+  `Microsoft-Windows-Deployment` (the only component whose `RunSynchronous`
+  runs in that pass). Test checks pass and component.
+- **Locks**: machine (`mutation.lock`, kept the old name), per VM
+  (`mutation-vm-<name>.lock`, case-folded, UUIDs resolved to names, odd names
+  hashed) and stage (`mutation-stage.lock`, for `bin/`, which `app-upload`
+  writes and `app-delete` clears). Declared per command as `Locks` in
+  `internal/command` (it replaced `Mutates`). All-or-nothing acquisition;
+  refusals name the busy lock.
+- **`vm-golden-create -vm <src>` / `vm-golden-delete`** as planned. Differences:
+  the clone is AppleScript `duplicate … with properties {configuration:{name,
+  drives, network interfaces}}`, not `utmctl clone` — one call that clones,
+  renames (UTM moves the bundle to `<name>.utm`), drops every drive but the NVMe
+  disk and sets the MAC, which is read back and compared. No per-region SHA-256
+  in the manifest: this process cannot read `disk.img` (App Data protection),
+  and the hashes are only needed for phase 2. `golden.json` lives under the
+  application root. Over MCP it is always a job (`command.DetachAlways`).
+- **`vm-create`**: clones the golden image when there is one (`-golden=false`
+  to install instead) and says when it falls back. Drive IDs are not
+  regenerated: UTM's scripting makes them read-only, and the plan called it
+  optional.
+- **Found while building, and fixed, beyond the plan**: this process is refused
+  *writes* to UTM's container too (`touch` → Operation not permitted), so the
+  old `vm-create` could not make a bundle at all from an agent session, and the
+  guest-tools ISO in UTM's cache could be neither read nor linked. So
+  `vm-create` now writes the bundle to `vm/staging/` and has UTM `import` it
+  (no restart), keeps the guest tools under `vm/`, ejects the install medium
+  with `update configuration` instead of a plist edit, and clones the media
+  instead of hardlinking it (a clone copies BSD flags, measured, so the clone's
+  `uchg` is cleared). **Nothing restarts UTM any more**; `RestartUTM` and the
+  guard it briefly had are gone. Also: `vm-delete` ran `utmctl` by bare name
+  (worked only where Homebrew linked it); self-booting was asked of the
+  bundle's ISO copy (a different inode, so "not self-booting", the answer that
+  types at Setup).
+
+Left: phase 0 on a disposable VM (next), then the numbers below replace the
+estimates. Phase 2 untouched.
 
 ## Symptom
 

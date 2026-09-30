@@ -420,7 +420,7 @@ func runReport() {
 	// fourteen runs on 30 Sep 2026, the stack showing goroutine 1 on m=4.
 	// glaze pins the thread when New is called rather than in an init, so
 	// whatever runs first decides. That is glaze's to fix (docs/UPSTREAM.md
-	// §4); this order is what a released glaze requires.
+	// §5); this order is what a released glaze requires.
 	w, err := glaze.New(false)
 	if err != nil {
 		record("glaze.New", err, "no window: the rest cannot be tested")

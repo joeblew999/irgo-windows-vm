@@ -24,6 +24,7 @@ so the distinction stays visible.
 | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | glaze + native | medium | `PATCHED LOCALLY`, not reported | branch `fix/errunsupported-wrap` (glaze `50cc331`, native `854cdb9`), not pushed |
 | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | native | low | `FOUND HERE` — a limitation, not reported | question drafted |
 | [WebView2 "not found" when its registration is stale](#4-glaze--webview2-not-found-when-its-registration-is-stale) | glaze | high | `FILED` 30 Sep 2026, no reply yet | [glaze#34](https://github.com/crgimenes/glaze/issues/34); branch `fix/webview2-stale-registration` (`ba8775b`) on the fork, **no PR** |
+| [`New` crashes if the main goroutine has moved thread](#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread) (macOS) | glaze | medium | `FOUND HERE` 30 Sep 2026, not reported, not patched | — |
 | [`utmctl` reports failure and exits 0](#utmctl-reports-failure-and-exits-0) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`utmctl exec` never returns the guest's output](#utmctl-exec-never-returns-the-guests-output) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`suspend --save-state` power-cuts the guest](#utmctl-suspend---save-state-reports-success-and-power-cuts-the-guest) | UTM | high | `FOUND HERE`, not reported | drafted |
@@ -368,6 +369,25 @@ on 30 Sep 2026, no reply yet. The fix is on branch
 `fix/webview2-stale-registration` (`ba8775b`), pushed to the fork
 `joeblew999/glaze`; **no PR opened**, because the maintainer fixes his own bugs
 and a PR is sent only if asked.
+
+## 5. glaze — `New` crashes if the main goroutine has moved thread
+
+On macOS, `glaze.New` called from `main` after other work crashes with SIGTRAP
+inside the temporary `[NSApp run]` that `windowInit` starts. The stack shows
+goroutine 1 on `m=4`, not the main thread `m0`. glaze pins the thread with
+`uiThreadOnce.Do(runtime.LockOSThread)` inside `NewWithOptions`, which pins
+whatever thread the goroutine is on at that moment. Nothing pins the main
+goroutine to the main thread before then, so the scheduler is free to move it.
+
+Measured 30 Sep 2026 with `examples/glaze-all -probe`, when the openurl probe
+(several seconds of `osascript` subprocesses and sleeps) ran before `New`: two
+crashes in fourteen runs, exit status 2. After moving `New` first: none in ten.
+Nothing in glaze's documentation says `New` must come first.
+
+Fix, in glaze: `func init() { runtime.LockOSThread() }` in `webview_darwin.go`,
+which pins the main goroutine to the main thread before `main` runs, as Cocoa
+bindings generally do. Until then glaze-all calls `New` first, which is what a
+released glaze requires, and says so where it does.
 
 ## UTM
 

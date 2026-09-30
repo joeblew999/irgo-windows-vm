@@ -131,48 +131,36 @@ func Check(o Options) (Section, error) {
 			failed = true
 		}
 
-		if bErr == nil && o.ResetDesktop != nil {
-			say("clearing the desktop before the run")
-			if err := o.ResetDesktop(); err != nil {
-				say("desktop reset before the run: %v", err)
-				resetErr = err
-			}
-		}
-		for _, p := range Programs {
-			if bErr != nil {
-				break
-			}
-			exe := filepath.Join(out, p.Name)
-			if o.Target == TargetWindows {
-				exe += ".exe"
-			}
-			say("=== %s", strings.TrimSpace(p.Name+" "+strings.Join(p.Args, " ")))
+		runAll := func() {
+			for _, p := range Programs {
+				exe := filepath.Join(out, p.Name)
+				if o.Target == TargetWindows {
+					exe += ".exe"
+				}
+				say("=== %s", strings.TrimSpace(p.Name+" "+strings.Join(p.Args, " ")))
 
-			var seen bytes.Buffer
-			runErr := utmvm.Tee(&seen, func() error {
-				if o.Run != nil {
-					return o.Run(p, exe)
+				var seen bytes.Buffer
+				runErr := utmvm.Tee(&seen, func() error {
+					if o.Run != nil {
+						return o.Run(p, exe)
+					}
+					return runHere(p, exe)
+				})
+				r := Result{Name: p.Name, Pass: runErr == nil}
+				if runErr != nil {
+					r.FirstFail = firstFail(seen.String(), runErr)
+					if o.NotRun != nil && o.NotRun(runErr) {
+						r.NotRun = true
+						notRun = runErr
+					} else {
+						failed = true
+					}
 				}
-				return runHere(p, exe)
-			})
-			r := Result{Name: p.Name, Pass: runErr == nil}
-			if runErr != nil {
-				r.FirstFail = firstFail(seen.String(), runErr)
-				if o.NotRun != nil && o.NotRun(runErr) {
-					r.NotRun = true
-					notRun = runErr
-				} else {
-					failed = true
-				}
+				sec.Results = append(sec.Results, r)
 			}
-			sec.Results = append(sec.Results, r)
 		}
-		if bErr == nil && o.ResetDesktop != nil {
-			say("clearing the desktop after the run (anything closed here was left open by a program above)")
-			if err := o.ResetDesktop(); err != nil {
-				say("desktop reset after the run: %v", err)
-				resetErr = err
-			}
+		if bErr == nil {
+			resetErr = resetAround(o.ResetDesktop, say, runAll)
 		}
 		sec.Elapsed = time.Since(start)
 
@@ -206,6 +194,30 @@ func Check(o Options) (Section, error) {
 		return sec, fmt.Errorf("%s, but %w", sec.Verdict(), resetErr)
 	}
 	return sec, nil
+}
+
+// resetAround runs run between two desktop resets, when there is a reset.
+// Both always run, whatever the first returned: the one after is the one that
+// names what a program left open. Its error is returned in preference to the
+// one before, for the same reason.
+func resetAround(reset func() error, say func(string, ...any), run func()) error {
+	if reset == nil {
+		run()
+		return nil
+	}
+	say("clearing the desktop before the run")
+	before := reset()
+	if before != nil {
+		say("desktop reset before the run: %v", before)
+	}
+	run()
+	say("clearing the desktop after the run (anything closed here was left open by a program above)")
+	after := reset()
+	if after != nil {
+		say("desktop reset after the run: %v", after)
+		return after
+	}
+	return before
 }
 
 // openLog creates the check's own log, beside the tool's log file.

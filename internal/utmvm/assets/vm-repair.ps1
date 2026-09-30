@@ -36,6 +36,33 @@ Set-ItemProperty -Path $wu -Name UpdateNotificationLevel -Value 2 -Type DWord
 Set-ItemProperty -Path $wu -Name SetAutoRestartNotificationDisable -Value 1 -Type DWord
 'windows update notifications: ok (off, restart warnings included)'
 
+# 5. UTM forwards the Mac's Command key as the Windows key, so each Cmd-Tab on
+#    the Mac opened Start in the guest, over screenshots and -gui windows.
+#    Scancode Map maps left and right Windows (E0 5B, E0 5C) to nothing. It is
+#    read at boot, so whether it is in effect is a question about when it was
+#    written: the marker records that, and is compared with the last boot.
+#    Without a marker (set by the answer file at install) that cannot be told.
+$kl = 'HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layout'
+$want = [byte[]](0,0,0,0, 0,0,0,0, 3,0,0,0, 0,0,0x5B,0xE0, 0,0,0x5C,0xE0, 0,0,0,0)
+$have = (Get-ItemProperty -Path $kl -Name 'Scancode Map' -ErrorAction SilentlyContinue).'Scancode Map'
+$mark = 'HKLM:\SOFTWARE\irgo-winvm'
+$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+if ($have -and (@(Compare-Object $have $want -SyncWindow 0).Count -eq 0)) {
+  $setAt = (Get-ItemProperty -Path $mark -Name ScancodeMapSetAt -ErrorAction SilentlyContinue).ScancodeMapSetAt
+  if (-not $setAt) {
+    'windows key: set (by the answer file); cannot tell whether this boot has it - vm-repair -reboot makes sure'
+  } elseif ([datetime]::FromFileTimeUtc([int64]$setAt) -lt $boot.ToUniversalTime()) {
+    'windows key: ok (disabled, in effect since the last boot)'
+  } else {
+    'windows key: set, NEEDS A REBOOT to take effect (vm-repair -reboot)'
+  }
+} else {
+  Set-ItemProperty -Path $kl -Name 'Scancode Map' -Value $want -Type Binary
+  New-Item -Path $mark -Force | Out-Null
+  Set-ItemProperty -Path $mark -Name ScancodeMapSetAt -Value ([datetime]::UtcNow.ToFileTimeUtc()) -Type QWord
+  'windows key: disabled now, NEEDS A REBOOT to take effect (vm-repair -reboot)'
+}
+
 $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 $reg = (Get-ItemProperty -Path $key -Name EBWebView -ErrorAction SilentlyContinue).EBWebView
 if (-not $reg) {

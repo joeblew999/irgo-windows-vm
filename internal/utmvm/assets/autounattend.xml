@@ -275,6 +275,17 @@
           <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v SetAutoRestartNotificationDisable /t REG_DWORD /d 1 /f</CommandLine>
           <Description>Windows Update: no auto-restart notifications</Description>
         </SynchronousCommand>
+        <!-- No Windows key. UTM forwards the Mac's Command key as the Windows
+             key, so every Cmd-Tab on the Mac opened Start in the guest: in
+             screenshots, over -gui windows, stealing their focus. Scancode Map
+             remaps E0 5B (left Windows) and E0 5C (right Windows) to nothing.
+             Read at boot, so it applies from the next restart. vm-repair sets
+             the same on an existing VM. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>13</Order>
+          <CommandLine>reg add "HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layout" /v "Scancode Map" /t REG_BINARY /d 00000000000000000300000000005BE000005CE000000000 /f</CommandLine>
+          <Description>No Windows key: the Mac's Command key is forwarded as it</Description>
+        </SynchronousCommand>
         <!-- Marker the host can look for to know the install finished. -->
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
@@ -287,13 +298,13 @@
              simply never runs. `for` expands the version-stamped filename to a
              literal path first. -->
         <SynchronousCommand wcm:action="add">
-          <Order>13</Order>
+          <Order>14</Order>
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->
         <SynchronousCommand wcm:action="add">
-          <Order>14</Order>
+          <Order>15</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

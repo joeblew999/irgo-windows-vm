@@ -517,6 +517,60 @@ changes and two reports to reconcile when they disagree.
 before it is a test. `-probe` gives the unattended report, and `glaze-check`
 passes it.
 
+## Desktop hygiene
+
+A check leaves nothing on a screen: not on the owner's Mac, where `glaze:mac`
+runs natively, and not on the VM's desktop, which every screenshot shows.
+Before 30 Sep 2026 each run left two file-manager windows (five Finder windows
+onto `$TMPDIR` had piled up on the Mac, six `explorer.exe` processes on the VM),
+a "Location is not available" box, and a file dialog that went only because
+the process exited under it.
+
+**Programs close what they open.** `glaze-all -probe` closes each window
+`openurl.Open` and `Reveal` opened and checks it is gone, found by difference
+against the file manager's windows before the call and filtered to the
+directory it passed, so a window the owner had open is never touched; Finder
+through `osascript`, Explorer through `user32`. It removes the temp directory
+only after that. It cancels its file dialog (`abortModal` on the Mac,
+`WM_CLOSE` on Windows) and requires `OpenFile` to return. A window left behind
+is a FAILED row, and a FAILED row exits 1. That last part was not true before:
+the exit code raced `main` returning, and a FAILED run exited 0. The code is in
+`examples/glaze-all/cleanup*.go`.
+
+**The VM's desktop is reset around every Windows check.** `utmvm.DesktopReset`
+runs `internal/utmvm/assets/desktop-reset.ps1` in dev's session, through the
+same `/it` scheduled task as `app-create -gui`. SYSTEM is in session 0 and
+cannot see dev's windows. It closes Explorer windows and Explorer's error
+boxes, stops Windows Update's restart prompt and its requester, closes an open
+Start or Search pane, then checks again and exits 1 if any is still there or if
+the taskbar is gone. It never kills `explorer.exe`: when that was tried, the
+taskbar went with it and Windows did not restart the shell. There is no
+command of its own. `glaze-check -windows` runs it before the first program and
+after the last, printing what it closed, so a program that left something open
+is named in the log. `vm-repair` runs it at the end unless it reboots.
+`docs/screens/vm/desktop-before-reset.png` is the VM's desktop before any of
+this, with two Explorer windows and the restart prompt;
+`docs/screens/vm/desktop-after-glaze-check.png` is the same desktop straight
+after a full `glaze-check -windows`, with nothing on it.
+
+**At the source**, the answer file and `vm-repair` turn off Windows Update
+notifications, restart warnings included (`SetUpdateNotificationLevel` 1 with
+`UpdateNotificationLevel` 2, and `SetAutoRestartNotificationDisable`), and
+remap both Windows keys to nothing (`Scancode Map`). UTM forwards the Mac's
+Command key as the Windows key, so every Cmd-Tab on the Mac opened Start in the
+guest. The remap is read at boot. `vm-repair` says whether it is in effect,
+needs a reboot, or cannot tell (set by the answer file with no record of when).
+UTM's only related settings are app-wide, not per VM: `IsCtrlCmdSwapped`
+(Settings, Input: swap Control and Command) and the input-capture options
+(`WindowFocusAutoCapture`, `FullScreenAutoCapture`). None of them simply stops
+forwarding Command, and this tool does not change UTM's preferences.
+
+**What a `vm-screen` shows is current.** It captures UTM's window, and the
+taskbar clock in each capture advanced minute by minute. A capture taken inside
+the guest (`CopyFromScreen` in dev's session) matched it pixel for pixel,
+update prompt included. When a window seems to survive being killed, the
+process that owns it is not the one that was killed. See the traps below.
+
 ## Known traps
 
 Each of these fails silently or misleadingly. UTM rejects a bad config with one
@@ -569,4 +623,11 @@ detail there and only the reminder here.
 | `menu.Set` with `Options.Dispatch` set **before** `Run` | `Set` blocks until its UI work has run, and nothing drains the queue until the run loop starts | call it after `Run` starts |
 | `file://` URL built by concatenation | Windows paths are `C:\dir`; the URL needs `file:///C:/dir`. Without the leading slash `net/url` writes `file:C:/dir` and ShellExecuteW rejects it | build it with `net/url` and a leading slash |
 | `openurl.Open != nil` as a capability check | a function value is never nil, so it checks nothing; `go vet` says so | call it and check the error |
+| Windows Update's restart prompt, "We've got an update for you" | killing `MoNotificationUx.exe` leaves it on screen: that process only requests it. The window is a `Shell_SystemDialogProxy` owned by `PickerHost.exe`, and `WM_CLOSE` to the proxy removes the window but leaves its picture | stop `PickerHost.exe`, then the requester, as `desktop-reset.ps1` does |
+| `EnumWindows` or UI Automation to find what is on the Windows screen | both list only the desktop's own z-order band. The taskbar, Start, Search and the update prompt live in others, so all of them were missing while on screen | walk top-level windows with `FindWindowEx(NULL, prev, NULL, NULL)`, and treat a cloaked window as hidden |
+| checking the foreground window for an open Start menu | the check runs in a console of its own, which has the foreground, while Start stays open behind it | look for an uncloaked `CoreWindow` of `StartMenuExperienceHost` or `SearchHost` |
+| the Mac's Command key | UTM forwards it as the Windows key, so Cmd-Tab on the Mac opens Start in the guest, over screenshots and `-gui` windows | `Scancode Map` remaps both Windows keys (answer file, `vm-repair`); a reboot applies it |
+| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §4](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` first |
+| an exit code set by `os.Exit` in a goroutine after `Terminate` | `Run` returns, `main` returns, and the process exits 0 first, so a FAILED report exited 0 | take the code on the main goroutine after `Run` returns |
+| deleting a directory just handed to `openurl` | Explorer is still navigating to it and shows "Location is not available" | close the window first, then delete |
 | an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([UPSTREAM.md §1b](UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |

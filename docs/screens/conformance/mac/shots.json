@@ -1,0 +1,46 @@
+{
+  "Target": "mac",
+  "When": "2026-09-30T15:33:49.1455+07:00",
+  "Platform": "darwin/arm64 (this machine, natively)",
+  "Commit": "22166ad28ddd6e17676efd93eb0e0d77e5a27013",
+  "Verdict": "YES: 28 passed, 1 skipped",
+  "Tests": [
+    {
+      "Test": "TestEvents",
+      "Result": "PASS",
+      "Picture": "TestEvents.png"
+    },
+    {
+      "Test": "TestAppScheme",
+      "Result": "PASS",
+      "Picture": "TestAppScheme.png"
+    },
+    {
+      "Test": "TestTray/running",
+      "Result": "PASS",
+      "Picture": "TestTray_running.png",
+      "Note": "the window the tray was started beside; the status item is drawn outside this process and its window could not be captured: screencapture -o -l 4294967296: exit status 1: could not create image from window"
+    },
+    {
+      "Test": "TestMenu",
+      "Result": "PASS",
+      "Picture": "TestMenu.png",
+      "Note": "the window the menu was installed for; macOS draws the menu bar outside this process, and a capture of that part of the screen shows the desktop behind it, not the menus"
+    },
+    {
+      "Test": "TestNoCapture",
+      "Result": "skip",
+      "Picture": "TestNoCapture.png"
+    },
+    {
+      "Test": "TestAppIcon",
+      "Result": "PASS",
+      "Picture": "TestAppIcon.png"
+    },
+    {
+      "Test": "TestFileDialog",
+      "Result": "PASS",
+      "Picture": "TestFileDialog.png"
+    }
+  ]
+}

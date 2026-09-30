@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/glazecheck"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
@@ -26,6 +27,7 @@ func glazeCheckFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("glaze-check", flag.ContinueOnError)
 	fs.Bool("windows", false, "run the suite on the VM, through app-create, instead of natively on this machine")
 	fs.String("vm", utmvm.DefaultVMName, "VM name, with -windows")
+	fs.String("import", "", "record runs made elsewhere instead of running the suite: a directory holding the conformance CI job's downloaded artifacts, whose sections and screenshots replace this checkout's")
 	return fs
 }
 
@@ -35,7 +37,8 @@ func glazeCheckFlags() *flag.FlagSet {
 // app-create's own library call.
 //
 // Natively it runs on macOS, and on Windows too: that is how the CI job on
-// GitHub's windows-11-arm runner gets the same record the VM run does.
+// GitHub's windows-11-arm runner gets the same record the VM run does. With
+// -import it runs nothing, and records CI's artifacts instead.
 func runGlazeCheck(v values, _ []string) error {
 	windows, name := v.Bool("windows"), v.String("vm")
 	say := utmvm.Printer("glaze-check")
@@ -43,6 +46,11 @@ func runGlazeCheck(v values, _ []string) error {
 	root, err := repo()
 	if err != nil {
 		return err
+	}
+	if dir := v.String("import"); dir != "" {
+		// Nothing is built or run, so neither Go nor a desktop is needed:
+		// this is how the pages workflow, on Linux, publishes CI's record.
+		return glazecheck.Import(root, dir, say)
 	}
 	if err := glazecheck.NeedGo(); err != nil {
 		return err
@@ -110,6 +118,14 @@ func runGlazeCheck(v values, _ []string) error {
 		}
 		// The same account the suite runs as.
 		o.ResetDesktop = func() error { return utmvm.DesktopReset(e.UUID, user, say) }
+		// The screenshots are written in the guest, where the interactive
+		// session can write, and pulled back one by one by the names the
+		// tests logged. Overwritten by the next run, not swept by app-delete.
+		guestShots := utmvm.GuestPublicPath("irgo-conformance-shots")
+		o.ShotsDir = guestShots
+		o.Fetch = func(rel string) ([]byte, error) {
+			return utmvm.Pull(e.UUID, guestShots+`\`+strings.ReplaceAll(rel, "/", `\`))
+		}
 		// These mean the suite never ran. Anything else, including its own
 		// non-zero exit, is a result, read from what it printed.
 		o.NotRun = func(err error) bool {

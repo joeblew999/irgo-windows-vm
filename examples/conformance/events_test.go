@@ -4,6 +4,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"image"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestEvents(t *testing.T) {
 	dones := make(chan done, 1)
 
 	var ev *glaze.Events
-	openWindow(t, glaze.Options{
+	w := openWindow(t, glaze.Options{
 		SchemeHandlers: map[string]glaze.SchemeHandler{
 			"app": func(req *glaze.SchemeRequest) *glaze.SchemeResponse {
 				if strings.HasSuffix(req.URL, "/events.js") {
@@ -120,4 +121,7 @@ func TestEvents(t *testing.T) {
 			t.Fatal("three pushes emitted and the page never confirmed them")
 		}
 	})
+
+	// The page with the three pushes in its DOM.
+	shoot(t, func() (image.Image, error) { return grabWindow(w) })
 }

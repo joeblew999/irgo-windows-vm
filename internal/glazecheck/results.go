@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -130,6 +131,11 @@ func parseEvents(target string, stream []byte) ([]Result, error) {
 		case "skip":
 			r.Outcome = Skip
 		case "output":
+			// A screenshot line is about the test, not from it: recorded, and
+			// never taken for its first message.
+			if shotLine(r, e.Output) {
+				continue
+			}
 			// The first line the test itself wrote: its t.Error, t.Fatal or
 			// t.Skip message. The runner's own === and --- lines are not it.
 			if l := strings.TrimSpace(e.Output); r.Detail == "" && l != "" && !isFrame(l) {
@@ -210,4 +216,26 @@ func rawTail(raw []byte, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, " / ")
+}
+
+// The lines examples/conformance logs about its screenshots (shots_test.go:
+// shotOK and shotNone), after the file:line prefix t.Logf adds. A picture's
+// line may end in a parenthesised note about it.
+var (
+	shotTaken  = regexp.MustCompile(`(?:^|: )screenshot: (\S+\.png)(?: \((.*)\))?$`)
+	shotMissed = regexp.MustCompile(`(?:^|: )screenshot not captured: (.+)$`)
+)
+
+// shotLine records a screenshot line on r and reports whether l was one.
+func shotLine(r *Result, l string) bool {
+	l = strings.TrimSpace(l)
+	if m := shotTaken.FindStringSubmatch(l); m != nil {
+		r.Shot, r.ShotNote, r.NoShot = m[1], m[2], ""
+		return true
+	}
+	if m := shotMissed.FindStringSubmatch(l); m != nil {
+		r.Shot, r.ShotNote, r.NoShot = "", "", m[1]
+		return true
+	}
+	return false
 }

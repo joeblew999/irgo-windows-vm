@@ -4,6 +4,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"image"
 	"net/url"
 	"slices"
 	"sync"
@@ -63,6 +64,14 @@ window.addEventListener('load', async () => {
       absScript: !!window.__abs, relScript: !!window.__rel,
       absCSS: s.paddingLeft, relCSS: s.marginLeft,
     });
+    // What the page found, on the page, for its screenshot: on Windows the
+    // absolute half reads missing, which is §1b in one picture.
+    const yes = (b) => b ? "loaded" : "MISSING";
+    document.getElementById("h").textContent = "app:// page on " + r.origin;
+    document.body.insertAdjacentHTML("beforeend", "<ul>" +
+      "<li>relative script: " + yes(r.relScript) + ", stylesheet: " + yes(r.relCSS === "13px") + "</li>" +
+      "<li>absolute app:// script: " + yes(r.absScript) + ", stylesheet: " + yes(r.absCSS === "11px") + "</li>" +
+      "<li>secure context: " + r.secureContext + ", localStorage: " + r.localStorage + "</li></ul>");
     const token = await report(JSON.stringify(r));
     await handBack(token);
   } catch (e) {
@@ -107,7 +116,7 @@ func TestAppScheme(t *testing.T) {
 	reports := make(chan pageReport, 1)
 	confirms := make(chan string, 1)
 
-	openWindow(t, glaze.Options{
+	w := openWindow(t, glaze.Options{
 		SchemeHandlers: map[string]glaze.SchemeHandler{
 			"app": func(req *glaze.SchemeRequest) *glaze.SchemeResponse {
 				u, err := url.Parse(req.URL)
@@ -202,6 +211,9 @@ func TestAppScheme(t *testing.T) {
 			t.Errorf("app://home/abs.css not applied: body padding-left is %q, want 11px (the handler was asked for it: %t)", r.AbsCSS, wasServed("/abs.css"))
 		}
 	})
+
+	// The page as it stands once it has reported: what loaded and what did not.
+	shoot(t, func() (image.Image, error) { return grabWindow(w) })
 
 	// What decides whether a client-side-routed single-page app works on this
 	// origin at all. verify printed these and asserted none of them.

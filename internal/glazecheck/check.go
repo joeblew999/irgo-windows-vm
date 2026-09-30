@@ -48,6 +48,14 @@ type Options struct {
 	// open and the owner's desktop is not this tool's to tidy.
 	ResetDesktop func() error
 
+	// ShotsDir is the directory the binary writes its screenshots into, as
+	// the machine it runs on names it, and Fetch reads one back by the name a
+	// test logged (<target>/<Test>.png). For the VM run they are a guest path
+	// and utmvm.Pull. Both empty means a temporary directory here, read with
+	// os.ReadFile.
+	ShotsDir string
+	Fetch    func(rel string) ([]byte, error)
+
 	Say func(string, ...any)
 }
 
@@ -78,7 +86,17 @@ var TestArgs = []string{"-test.v=test2json", "-test.timeout=" + SuiteTimeout.Str
 func Check(o Options) (Section, error) {
 	start := time.Now()
 	say := o.Say
-	sec := Section{Target: o.Target, When: start, Platform: o.Platform}
+	sec := Section{Target: o.Target, When: start, Platform: o.Platform, RunURL: runURL()}
+
+	if o.ShotsDir == "" {
+		dir, err := os.MkdirTemp("", "glaze-shots-")
+		if err != nil {
+			return sec, err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		o.ShotsDir = dir
+		o.Fetch = func(rel string) ([]byte, error) { return os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel))) }
+	}
 
 	logPath, logFile, err := openLog(o.Target, start)
 	if err != nil {
@@ -118,10 +136,11 @@ func Check(o Options) (Section, error) {
 			// straight after linking a clone mid-edit.
 			sec.BuildError = bErr.Error()
 		} else {
-			say("running: %s %s", exe, strings.Join(TestArgs, " "))
+			args := append(append([]string{}, TestArgs...), ShotsFlag+o.ShotsDir)
+			say("running: %s %s", exe, strings.Join(args, " "))
 			var raw []byte
 			var runErr error
-			resetErr = resetAround(o.ResetDesktop, say, func() { raw, runErr = runSuite(o, exe) })
+			resetErr = resetAround(o.ResetDesktop, say, func() { raw, runErr = runSuite(o, exe, args) })
 			switch {
 			case runErr != nil && o.NotRun != nil && o.NotRun(runErr):
 				sec.NotRun, notRun = runErr.Error(), runErr
@@ -132,6 +151,11 @@ func Check(o Options) (Section, error) {
 			}
 		}
 		sec.Elapsed = time.Since(start)
+		// Whatever the outcome, so a run that did not build or did not run
+		// leaves no earlier run's pictures beside its verdict.
+		if err := collectShots(o.Root, &sec, o.Fetch, say); err != nil {
+			return fmt.Errorf("recording the screenshots: %w", err)
+		}
 
 		say("%s on %s", sec.Verdict(), o.Platform)
 		path, rErr := Record(o.Root, sec)
@@ -302,16 +326,16 @@ func envPrefix(env []string) string {
 
 // runSuite runs the binary through o.Run, or natively, and copies what it printed
 // to the log.
-func runSuite(o Options, exe string) ([]byte, error) {
+func runSuite(o Options, exe string, args []string) ([]byte, error) {
 	if o.Run != nil {
-		out, err := o.Run(exe, TestArgs)
+		out, err := o.Run(exe, args)
 		_, _ = io.WriteString(unframed{utmvm.Out}, out)
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			_, _ = io.WriteString(utmvm.Out, "\n")
 		}
 		return []byte(out), err
 	}
-	return runHere(exe)
+	return runHere(exe, args)
 }
 
 // unframed copies test output to a person with the ^V (0x16) bytes
@@ -332,7 +356,7 @@ var hostOS = map[string]bool{"darwin": true, "windows": true}
 
 // runHere runs the binary on this machine, output to the log as it comes and
 // into the returned buffer.
-func runHere(exe string) ([]byte, error) {
+func runHere(exe string, args []string) ([]byte, error) {
 	if !hostOS[runtime.GOOS] {
 		return nil, fmt.Errorf("the suite is built for darwin and windows, and this is %s", runtime.GOOS)
 	}
@@ -341,7 +365,7 @@ func runHere(exe string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), SuiteTimeout+time.Minute)
 	defer cancel()
 	var buf bytes.Buffer
-	c := exec.CommandContext(ctx, exe, TestArgs...)
+	c := exec.CommandContext(ctx, exe, args...)
 	c.Stdout = io.MultiWriter(&buf, unframed{utmvm.Out})
 	c.Stderr = c.Stdout
 	err := c.Run()
@@ -349,6 +373,15 @@ func runHere(exe string) ([]byte, error) {
 		return buf.Bytes(), fmt.Errorf("%s hung past its own -test.timeout: killed after %s", filepath.Base(exe), SuiteTimeout+time.Minute)
 	}
 	return buf.Bytes(), err
+}
+
+// runURL is the GitHub Actions run this is part of, or "" outside one: the
+// record says where a CI verdict and its pictures came from.
+func runURL() string {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("GITHUB_RUN_ID") == "" {
+		return ""
+	}
+	return os.Getenv("GITHUB_SERVER_URL") + "/" + os.Getenv("GITHUB_REPOSITORY") + "/actions/runs/" + os.Getenv("GITHUB_RUN_ID")
 }
 
 // summarise appends the section to the GitHub Actions job summary when there

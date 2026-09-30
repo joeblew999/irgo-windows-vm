@@ -28,6 +28,10 @@ const guestTemp = `C:\Windows\Temp`
 // did not.
 const guestPublic = `C:\Users\Public`
 
+// GuestPublicPath is name inside guestPublic: where a program run with -gui
+// can leave files for the host to Pull.
+func GuestPublicPath(name string) string { return guestPublic + `\` + name }
+
 // Two prefixes for the files this package leaves in the guest, and they must
 // never overlap.
 //

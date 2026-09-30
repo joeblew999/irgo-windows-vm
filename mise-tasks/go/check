@@ -17,10 +17,15 @@ run go test ./...
 # -o a directory because they are all main packages: a bare `go build` drops
 # binaries in the source tree, and in examples/ it fails outright because
 # `glaze-all` is already a directory there.
+#
+# examples is tested with -short: the conformance suite opens windows, trays
+# and file dialogs, which is not something a check run on every edit should do
+# to the desktop it runs on. -short is the headless half; the whole suite is
+# `mise run glaze:mac`.
 for m in examples site; do
   run go -C "$m" build -o "$MISE_PROJECT_ROOT/.bin/host/" ./...
   run go -C "$m" vet ./...
-  run go -C "$m" test ./...
+  run go -C "$m" test -short ./...
 done
 
 # The CLI must compile for every host a developer might be on: `targets`
@@ -31,7 +36,10 @@ for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64; 
   run env GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -o /dev/null ./...
 done
 
-# And the probes must cross-compile with no C toolchain. If that ever needs
-# one, something has taken a cgo dependency and this project's central claim
-# has quietly stopped being true.
+# And the examples and the conformance suite must cross-compile with no C
+# toolchain. If that ever needs one, something has taken a cgo dependency and
+# this project's central claim has quietly stopped being true. The suite is
+# compiled as the test binary glaze:windows puts on the VM, since a test file
+# that only builds on darwin would otherwise pass every check run on a Mac.
 run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./...
+run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples test -c -o /dev/null ./conformance

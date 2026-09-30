@@ -376,7 +376,43 @@ func firstLine(s string) string {
 // Necessary because UTM enumerates its bundle directory only at launch: a VM
 // written to disk while UTM is running simply does not exist as far as utmctl
 // or the UI are concerned, with no error to suggest why.
-func RestartUTM() error {
+//
+// Quitting UTM stops every VM it is running, so this refuses when any VM
+// other than except is started or paused, and when UTM cannot be asked —
+// "cannot tell" is not "safe". It had no guard at all: only the vm:test task
+// checked, in shell, and that check could not fire (it grepped doctor, which
+// never prints a VM's status). With several agents each on its own VM, an
+// unguarded restart is one agent's vm-create stopping everybody else's.
+// Cloning from the golden image needs no restart, which is the way round it.
+func RestartUTM(except string) error {
+	if err := canRestartUTM(except); err != nil {
+		return err
+	}
+	return restartUTM()
+}
+
+// canRestartUTM is RestartUTM's guard alone, for a caller that must know
+// before it writes anything — vm-create asks before it makes a bundle it
+// could not then register.
+func canRestartUTM(except string) error {
+	list, err := List()
+	if err != nil {
+		return fmt.Errorf("restarting UTM stops every VM it runs, and UTM could not be asked which are running (%w); refusing", err)
+	}
+	for _, e := range list {
+		if strings.EqualFold(e.Name, except) || strings.EqualFold(e.UUID, except) {
+			continue
+		}
+		if st := strings.TrimSpace(e.Status); strings.EqualFold(st, statusStarted) || strings.EqualFold(st, "paused") {
+			return fmt.Errorf("this needs UTM restarted, which would stop %s (%s); refusing.\n"+
+				"  Stop it first, or make VMs by cloning a golden image (vm-golden-create), which needs no restart", e.Name, st)
+		}
+	}
+	return nil
+}
+
+// restartUTM is the restart itself, unguarded. Only RestartUTM calls it.
+func restartUTM() error {
 	_ = exec.Command("osascript", "-e", `tell application "UTM" to quit`).Run()
 	for i := 0; i < 15; i++ {
 		if err := exec.Command("pgrep", "-f", filepath.Join(AppPath, utmBinDir, "UTM")).Run(); err != nil {
@@ -470,6 +506,26 @@ func CheckAutomation() error {
 		"  Privacy & Security -> Automation, then run this again.\n"+
 		"  Without it the boot cannot be driven and an install stops at a UEFI prompt",
 		strings.TrimSpace(string(out)))
+}
+
+// utmScript runs an AppleScript that talks to UTM and returns what it printed.
+//
+// The route for everything that changes a bundle: UTM can read and write its
+// own container and this process cannot (macOS App Data protection, see
+// vm_golden.go). Bounded, because an AppleScript waiting on a UTM that is
+// showing a dialog waits forever.
+func utmScript(script string, limit time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if ctx.Err() != nil {
+		return text, fmt.Errorf("UTM did not answer within %s", limit)
+	}
+	if err != nil {
+		return text, fmt.Errorf("%w: %s", err, text)
+	}
+	return text, nil
 }
 
 // isoSearchDirs are the two places an ISO's other names can be: the one

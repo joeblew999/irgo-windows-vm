@@ -182,6 +182,12 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	if findErr == nil {
 		_ = stage("VM bundle", true, opts.VMName+" ("+existing.Status+")", nil)
 	} else {
+		// Asked before the bundle is written: a bundle UTM cannot be made to
+		// see is one this process then cannot remove either (it has no access
+		// to UTM's container), so refusing afterwards would leave it behind.
+		if gErr := canRestartUTM(opts.VMName); gErr != nil {
+			return res, stage("VM bundle", false, "", gErr)
+		}
 		if _, cErr := Create(Options{
 			Name:       opts.VMName,
 			InstallISO: iso,
@@ -194,7 +200,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 		// while it is running does not exist as far as utmctl is concerned —
 		// with no error saying so. This is the step nobody discovers alone.
 		say("… restarting UTM so it sees the new VM")
-		if rErr := RestartUTM(); rErr != nil {
+		if rErr := RestartUTM(opts.VMName); rErr != nil {
 			return res, stage("restart UTM", false, "", rErr)
 		}
 		_ = stage("restart UTM", false, "rescanned", nil)
@@ -943,8 +949,16 @@ func RunInstall(opts InstallOptions) error {
 						logf("Windows is on the disk — removing the install medium so the firmware boots it")
 						_ = vm.Stop()
 						time.Sleep(5 * time.Second)
-						if rErr := RestartUTM(); rErr == nil {
-							_ = Named(opts.VMRef).StartWithDisplay()
+						// Not ignored any more. A refused or failed restart left the
+						// VM stopped, and this loop went on typing boot paths at a
+						// machine that was off until the timeout.
+						if rErr := RestartUTM(opts.VMRef); rErr != nil {
+							return fmt.Errorf("Windows is on the disk and the install medium is out of the config, "+ //nolint:staticcheck // ST1005: names what to run next
+								"but UTM must be restarted to read that: %w\n"+
+								"  Re-run vm-create -install once it can be; it boots the Windows already on the disk", rErr)
+						}
+						if sErr := Named(opts.VMRef).StartWithDisplay(); sErr != nil {
+							return sErr
 						}
 						stalls = 0
 						continue

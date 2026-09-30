@@ -36,6 +36,25 @@ Set-ItemProperty -Path $wu -Name UpdateNotificationLevel -Value 2 -Type DWord
 Set-ItemProperty -Path $wu -Name SetAutoRestartNotificationDisable -Value 1 -Type DWord
 'windows update notifications: ok (off, restart warnings included)'
 
+# 6. OneDrive put "Turn On Windows Backup" on the desktop a minute after the
+#    reboot that installed an update. Off by policy: it no longer starts.
+$od = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive'
+New-Item -Path $od -Force | Out-Null
+Set-ItemProperty -Path $od -Name DisableFileSyncNGSC -Value 1 -Type DWord
+'onedrive: ok (off by policy)'
+
+# 7. Toasts, which is how OneDrive's prompt actually arrived: a per-user policy,
+#    so it goes into dev's hive, which is loaded while dev is logged on.
+$sid = (New-Object System.Security.Principal.NTAccount($User)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+if (Test-Path "Registry::HKEY_USERS\$sid") {
+  $pn = "Registry::HKEY_USERS\$sid\Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications"
+  New-Item -Path $pn -Force | Out-Null
+  Set-ItemProperty -Path $pn -Name NoToastApplicationNotification -Value 1 -Type DWord
+  "notifications: ok (toasts off for $User)"
+} else {
+  "notifications: NOT SET, $User is not logged on (run vm-repair again once AutoLogon has run)"
+}
+
 # 5. UTM forwards the Mac's Command key as the Windows key, so each Cmd-Tab on
 #    the Mac opened Start in the guest, over screenshots and -gui windows.
 #    Scancode Map maps left and right Windows (E0 5B, E0 5C) to nothing. It is

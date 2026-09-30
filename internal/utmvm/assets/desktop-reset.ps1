@@ -14,6 +14,11 @@
 #    NOT by MoNotificationUx.exe, which only asks for it (/NotificationType
 #    Reboot_Engaged). That is why killing MoNotificationUx left it on screen:
 #    the pixels were not stale, the window belonged to another process.
+#  - Notification toasts, such as OneDrive's "Turn On Windows Backup", which
+#    appeared a minute after the reboot that installed the pending update. A
+#    toast is an uncloaked CoreWindow of ShellExperienceHost ("New
+#    notification"); that host is stopped, and Windows starts it again. vm-repair
+#    and the answer file turn toasts and OneDrive off so they do not come back.
 #  - The Start menu, found open after that prompt was gone and again after a
 #    glaze-check run.
 #
@@ -38,7 +43,10 @@ public static class IrgoDesk {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindow(string c, string t);
+  // In C#, not PowerShell: PowerShell passes $null to a string parameter as
+  // "", so FindWindow('Shell_TrayWnd', $null) asks for an empty title.
+  public static bool TrayExists() { return FindWindow("Shell_TrayWnd", null) != IntPtr.Zero; }
   public class Win { public IntPtr Hwnd; public uint Pid; public string Class; public string Title; }
   static Win Describe(IntPtr h) {
     var c = new StringBuilder(256); GetClassName(h, c, 256);
@@ -78,7 +86,7 @@ $startHosts = 'StartMenuExperienceHost', 'SearchHost'
 # The shell's always-present immersive windows, left out of "other windows".
 # Explorer is among them: whatever of its windows is not an Explorer window or
 # error box (both handled above) is the shell itself.
-$immersive = 'explorer', 'ShellExperienceHost', 'ShellHost', 'TextInputHost'
+$immersive = 'explorer', 'ShellHost', 'TextInputHost'
 
 function ProcName([uint32]$id) {
   $p = Get-Process -Id $id -ErrorAction SilentlyContinue
@@ -94,6 +102,7 @@ function Junk {
     elseif ($w.Class -eq '#32770' -and $name -eq 'explorer') { $kind = 'explorer error box' }
     elseif ($w.Class -eq 'Shell_SystemDialogProxy') { $kind = 'windows update prompt' }
     elseif ($updateUx -contains $name) { $kind = 'windows update prompt' }
+
     if ($kind) {
       [pscustomobject]@{ Kind = $kind; Hwnd = $w.Hwnd; Pid = $w.Pid; Proc = $name; Title = $w.Title }
     }
@@ -107,6 +116,12 @@ function Junk {
 function StartPanes {
   [IrgoDesk]::Shown() | Where-Object {
     $_.Class -eq 'Windows.UI.Core.CoreWindow' -and $startHosts -contains (ProcName $_.Pid)
+  }
+}
+
+function Toasts {
+  [IrgoDesk]::Shown() | Where-Object {
+    $_.Class -eq 'Windows.UI.Core.CoreWindow' -and (ProcName $_.Pid) -eq 'ShellExperienceHost'
   }
 }
 
@@ -147,6 +162,24 @@ $uxStopped | Stop-Process -Force
 # a keystroke that misses lands in whatever does. StartMenuExperienceHost and
 # SearchHost are started again on demand, the next time Start is opened;
 # explorer.exe is not among them.
+# Toasts. Stopping ShellExperienceHost alone did not do it: Windows restarted
+# it and the toast came straight back (measured 30 Sep 2026). What cleared
+# OneDrive's was stopping OneDrive and clearing its notification history; the
+# host is stopped too for a toast from anything else.
+$toasts = @(Toasts)
+if ($toasts) {
+  Get-Process -Name OneDrive -ErrorAction SilentlyContinue | Where-Object SessionId -eq (Get-Process -Id $PID).SessionId | Stop-Process -Force
+  $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+  foreach ($app in 'Microsoft.SkyDrive.Desktop', 'Microsoft.OneDrive') {
+    [Windows.UI.Notifications.ToastNotificationManager]::History.Clear($app)
+  }
+  Start-Sleep -Seconds 1
+  if (Toasts) {
+    foreach ($id in ($toasts | Select-Object -ExpandProperty Pid -Unique)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1
+  }
+}
+
 $startPanes = @(StartPanes)
 $startNames = ($startPanes | ForEach-Object { ProcName $_.Pid } | Select-Object -Unique) -join ', '
 foreach ($id in ($startPanes | Select-Object -ExpandProperty Pid -Unique)) { Stop-Process -Id $id -Force }
@@ -155,6 +188,7 @@ if ($startPanes) { Start-Sleep -Seconds 1 }
 Say 'explorer windows' ($found | Where-Object Kind -eq 'explorer window')
 Say 'explorer error boxes' ($found | Where-Object Kind -eq 'explorer error box')
 Say 'windows update prompts' ($found | Where-Object Kind -eq 'windows update prompt')
+if ($toasts) { "notifications: closed $($toasts.Count) - $(($toasts | ForEach-Object { "'$($_.Title)'" }) -join ', ')" } else { 'notifications: none' }
 if ($uxStopped) { "windows update notifier: stopped $(($uxStopped | ForEach-Object Name) -join ', ')" }
 else { 'windows update notifier: not running' }
 if ($startPanes) { "start menu: closed ($startNames)" } else { 'start menu: not open' }
@@ -164,13 +198,17 @@ foreach ($j in @(Junk)) {
   $bad = $true
   "STILL OPEN: $($j.Kind) '$($j.Title)' ($($j.Proc) pid $($j.Pid))"
 }
+if (Toasts) {
+  $bad = $true
+  'STILL OPEN: a notification'
+}
 if (StartPanes) {
   $bad = $true
   'STILL OPEN: the Start menu'
 }
 # FindWindow, not the visible list: while the update prompt was up the taskbar
 # was drawn on the screen and reported not visible.
-if ([IrgoDesk]::FindWindow('Shell_TrayWnd', $null) -eq [IntPtr]::Zero) {
+if (-not [IrgoDesk]::TrayExists()) {
   $bad = $true
   'TASKBAR MISSING: no Shell_TrayWnd on this desktop (explorer.exe is not running as the shell)'
 }

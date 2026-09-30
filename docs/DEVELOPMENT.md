@@ -541,8 +541,8 @@ the exit code raced `main` returning, and a FAILED run exited 0. The code is in
 runs `internal/utmvm/assets/desktop-reset.ps1` in dev's session, through the
 same `/it` scheduled task as `app-create -gui`. SYSTEM is in session 0 and
 cannot see dev's windows. It closes Explorer windows and Explorer's error
-boxes, stops Windows Update's restart prompt and its requester, closes an open
-Start or Search pane, then checks again and exits 1 if any is still there or if
+boxes, stops Windows Update's restart prompt and its requester, dismisses
+notification toasts, closes an open Start or Search pane, then checks again and exits 1 if any is still there or if
 the taskbar is gone. It never kills `explorer.exe`: when that was tried, the
 taskbar went with it and Windows did not restart the shell. There is no
 command of its own. `glaze-check -windows` runs it before the first program and
@@ -555,8 +555,12 @@ after a full `glaze-check -windows`, with nothing on it.
 
 **At the source**, the answer file and `vm-repair` turn off Windows Update
 notifications, restart warnings included (`SetUpdateNotificationLevel` 1 with
-`UpdateNotificationLevel` 2, and `SetAutoRestartNotificationDisable`), and
-remap both Windows keys to nothing (`Scancode Map`). UTM forwards the Mac's
+`UpdateNotificationLevel` 2, and `SetAutoRestartNotificationDisable`), turn
+off OneDrive (`DisableFileSyncNGSC`) and notification toasts
+(`NoToastApplicationNotification`, a per-user policy written into dev's hive),
+and remap both Windows keys to nothing (`Scancode Map`). OneDrive's "Turn On
+Windows Backup" toast arrived a minute after the reboot that installed the
+pending update. UTM forwards the Mac's
 Command key as the Windows key, so every Cmd-Tab on the Mac opened Start in the
 guest. The remap is read at boot. `vm-repair` says whether it is in effect,
 needs a reboot, or cannot tell (set by the answer file with no record of when).
@@ -626,6 +630,8 @@ detail there and only the reminder here.
 | Windows Update's restart prompt, "We've got an update for you" | killing `MoNotificationUx.exe` leaves it on screen: that process only requests it. The window is a `Shell_SystemDialogProxy` owned by `PickerHost.exe`, and `WM_CLOSE` to the proxy removes the window but leaves its picture | stop `PickerHost.exe`, then the requester, as `desktop-reset.ps1` does |
 | `EnumWindows` or UI Automation to find what is on the Windows screen | both list only the desktop's own z-order band. The taskbar, Start, Search and the update prompt live in others, so all of them were missing while on screen | walk top-level windows with `FindWindowEx(NULL, prev, NULL, NULL)`, and treat a cloaked window as hidden |
 | checking the foreground window for an open Start menu | the check runs in a console of its own, which has the foreground, while Start stays open behind it | look for an uncloaked `CoreWindow` of `StartMenuExperienceHost` or `SearchHost` |
+| a notification toast (OneDrive's "Turn On Windows Backup") | an uncloaked `CoreWindow` of `ShellExperienceHost` titled "New notification". Stopping that host brings it straight back | stop the sending app and clear its notification history (`ToastNotificationManager.History.Clear`) |
+| `$null` passed to a `string` parameter of a .NET method from PowerShell | PowerShell passes `""`, so `FindWindow('Shell_TrayWnd', $null)` asks for an empty title and `FindWindowEx(0, h, $null, $null)` finds nothing | call from C# (`Add-Type`) or pass `[NullString]::Value` |
 | the Mac's Command key | UTM forwards it as the Windows key, so Cmd-Tab on the Mac opens Start in the guest, over screenshots and `-gui` windows | `Scancode Map` remaps both Windows keys (answer file, `vm-repair`); a reboot applies it |
 | `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §4](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` first |
 | an exit code set by `os.Exit` in a goroutine after `Terminate` | `Run` returns, `main` returns, and the process exits 0 first, so a FAILED report exited 0 | take the code on the main goroutine after `Run` returns |

@@ -7,7 +7,16 @@ VM=irgo-test-cycle
 # vm-create restarts UTM so it sees the new bundle, and quitting UTM takes any
 # running VM down with it. Refuse rather than cost somebody a 45-minute
 # install they had running.
-if irgo-winvm doctor 2>/dev/null | grep -q started; then
+#
+# This was `irgo-winvm doctor | grep -q started`, and doctor never prints a VM's
+# status -- its rows are files, tools and records -- so the guard could not
+# fire and this task would have stopped a running VM. Asked of utmctl instead,
+# and "cannot tell" refuses: a failed list is not an empty one.
+if ! list=$(utmctl list); then
+  echo "cannot ask UTM which VMs are running (utmctl list failed); refusing" >&2
+  exit 1
+fi
+if awk 'NR > 1 && $2 == "started" { found = 1 } END { exit !found }' <<<"$list"; then
   echo "a VM is running; vm-create restarts UTM and would stop it" >&2
   exit 1
 fi

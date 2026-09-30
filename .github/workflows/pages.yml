@@ -68,28 +68,9 @@ jobs:
       - name: build the site
         run: mise run site:build
 
-      # Fails the build rather than publishing a site whose pages 404 at each
-      # other. Every local href in the output must name a file that exists —
-      # the licence link was broken exactly this way and only turned up because
-      # it was checked by hand.
-      - name: check every local link resolves
-        working-directory: site/dist
-        run: |
-          broken=0
-          for f in $(grep -rho 'href="[^"#:]*"' ./*.html | sed 's/href="//;s/"//' | sort -u); do
-            [ -z "$f" ] && continue
-            if [ ! -e "$f" ]; then echo "broken link: $f"; broken=1; fi
-          done
-
-          # An absolute URL glued onto a repository path. The check above cannot
-          # see these — it only inspects local hrefs, and the result is a
-          # syntactically valid absolute URL — so every outbound link on the
-          # site was broken this way and the build stayed green.
-          if grep -rhoE 'href="[^"]*/blob/main/[a-zA-Z][a-zA-Z0-9+.-]*:' ./*.html; then
-            echo "above: an absolute URL was rewritten as a repository path"
-            broken=1
-          fi
-          exit $broken
+      # No link check here. TestEveryLocalLinkResolves and TestEveryAnchorResolves
+      # in site/ build the site and check every local href, src and #anchor; they
+      # run in check.yml via `mise run go:check`, on the same push.
 
       - uses: actions/upload-pages-artifact@v5.0.0
         with:

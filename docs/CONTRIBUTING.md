@@ -52,7 +52,7 @@ The modules are split so each binary carries only what it needs:
   names nineteen third-party modules, and neither is among them.
 - `site` needs a markdown parser the tool has no reason to ship.
 
-More on the layout is in [DEVELOPMENT.md](DEVELOPMENT.md), under "Where things go".
+More on the layout is in [DEVELOPMENT.md](DEVELOPMENT.md#repository-layout).
 
 ## Run the cycle tests
 

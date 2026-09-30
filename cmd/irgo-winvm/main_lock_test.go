@@ -7,17 +7,13 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// The mutation-lock wrapper tests run only on macOS, because the lock itself is
-// a flock and does not exist off macOS — there is nothing to serialise where
-// UTM cannot run.
+// macOS only: the mutation lock is a flock that exists only where UTM runs.
 
-// TestRunToolRefusesMutationWhileLockHeld is the wrapper the whole feature
-// hangs on: a mutating command is refused before its own work starts, and help
-// is not a mutation.
+// TestRunToolRefusesMutationWhileLockHeld: a mutating command is refused
+// before its own work starts, and help is not a mutation.
 func TestRunToolRefusesMutationWhileLockHeld(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	release, err := utmvm.Acquire(utmvm.VMLock(utmvm.DefaultVMName))
@@ -65,30 +61,40 @@ func TestRunToolLetsAnotherVMThrough(t *testing.T) {
 // TestLocksForReadsTheVMFlag: every spelling of -vm, and its default, lands on
 // one lock, and the declared scope decides which kinds are taken.
 func TestLocksForReadsTheVMFlag(t *testing.T) {
-	appCreate, _ := command.Find("app-create")
-	vmCreate, _ := command.Find("vm-create")
-	isoDelete, _ := command.Find("iso-delete")
-	appDelete, _ := command.Find("app-delete")
-
-	one := func(c command.Command, args ...string) utmvm.Lock {
+	locks := func(name string, args ...string) []utmvm.Lock {
 		t.Helper()
-		l := locksFor(c, args)
+		c, ok := find(name)
+		if !ok {
+			t.Fatalf("no command %s", name)
+		}
+		v, _, err := c.parse(args)
+		if err != nil {
+			t.Fatalf("parsing %s %v: %v", name, args, err)
+		}
+		return locksFor(c.Command, v)
+	}
+	one := func(name string, args ...string) utmvm.Lock {
+		t.Helper()
+		l := locks(name, args...)
 		if len(l) != 1 {
-			t.Fatalf("locksFor(%s %v) = %v, want one lock", c.Name, args, l)
+			t.Fatalf("locksFor(%s %v) = %v, want one lock", name, args, l)
 		}
 		return l[0]
 	}
-	if a, b := one(appCreate, "-vm", "a1", "x.exe"), one(vmCreate, "-vm=A1"); a != b {
+	if a, b := one("app-create", "-vm", "a1", "x.exe"), one("vm-create", "-vm=A1"); a != b {
 		t.Errorf("-vm a1 and -vm=A1 took %q and %q", a, b)
 	}
-	if got := one(vmCreate); got != utmvm.VMLock(utmvm.DefaultVMName) {
+	if got := one("vm-create"); got != utmvm.VMLock(utmvm.DefaultVMName) {
 		t.Errorf("no -vm took %q, want the default VM's lock", got)
 	}
-	if got := one(isoDelete, "-force"); got != utmvm.MachineLock {
+	if got := one("iso-delete", "-force"); got != utmvm.MachineLock {
 		t.Errorf("iso-delete took %q, want the machine lock", got)
 	}
-	if got := locksFor(appDelete, []string{"-vm", "a1"}); len(got) != 2 {
+	if got := locks("app-delete", "-vm", "a1"); len(got) != 2 {
 		t.Errorf("app-delete took %v; it clears the stage and cleans a VM, so both", got)
+	}
+	if got := locks("vm-golden-create", "-vm", "g1"); len(got) != 2 || got[1] != utmvm.VMLock("g1") {
+		t.Errorf("vm-golden-create took %v; want the machine lock and its source VM's", got)
 	}
 }
 

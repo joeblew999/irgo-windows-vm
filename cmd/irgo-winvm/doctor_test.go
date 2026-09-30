@@ -9,24 +9,19 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// TestDoctorJSON is the contract the iso:test cycle reads.
+// TestDoctorJSON is the contract the iso:test cycle reads: the row names it
+// asks for exist, each path is absolute (a script cannot stat "~/..."), and
+// present agrees with the filesystem.
 //
-// That cycle asks whether the ISO and the .esd are present by row name, and it
-// used to read the answer out of the table's fifth whitespace-separated column.
-// Now it reads `present` from this JSON, so what must hold is: the names it asks
-// for exist, each path is absolute (a script cannot stat "~/..."), and present
-// agrees with the filesystem.
+// HOME is empty so the media is absent: where everything is present, the
+// agreement check cannot tell `present` from `true`.
 //
-// HOME is an empty directory, so the media is absent whatever this machine
-// holds: an agreement check run only where everything is present cannot tell
-// `present` from `true`.
-//
-// Negative control, run by hand: renaming the .esd entry in utmvm.Externals
+// Negative control: renaming the .esd entry in utmvm.Externals
 // fails the name check; passing utmvm.Home(e.Path) into the row fails the
 // absolute-path check; hard-coding present to true fails the agreement check.
 func TestDoctorJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	out, err := utmvm.Capture(func() error { return runDoctor([]string{"-json"}) })
+	out, err := utmvm.Capture(func() error { return runTool("doctor", []string{"-json"}) })
 	if err != nil {
 		t.Fatalf("doctor -json: %v", err)
 	}

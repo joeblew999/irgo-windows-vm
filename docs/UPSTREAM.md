@@ -1,95 +1,97 @@
-# What this repo has found upstream
+# Upstream bugs
 
-Three projects, all open source, all fixed **there** rather than worked around
-here:
+Defects this project has found in the open-source projects it depends on:
 
 - **[crgimenes/glaze](https://github.com/crgimenes/glaze)** — the webview
 - **[crgimenes/native](https://github.com/crgimenes/native)** — the OS integration
-- **[utmapp/UTM](https://github.com/utmapp/UTM)** — the hypervisor this drives
+- **[utmapp/UTM](https://github.com/utmapp/UTM)** — the hypervisor this tool drives
 
-The README states the rule; this file is the ledger. It is published so a
-developer — or an agent — can see what is known without reading the code.
+Bugs in these projects are fixed **there**, not worked around here. This page
+is the ledger: what was found, how to reproduce it, and where the fix stands.
 
-Each entry answers one question before it is listed: *does a correct consumer,
-reading only the public documentation, hit this?* If the answer is no — we
-called the API wrongly — it is our bug and it is fixed in this repo. Those are
-at the bottom, so the distinction stays visible rather than being quietly
-rewritten later.
+An entry is listed only if a correct consumer, reading only the public
+documentation, would hit it. If we called an API wrongly, the bug is ours and is
+fixed in this repository; those are listed [separately](#ours-not-theirs--fixed-in-this-repo)
+so the distinction stays visible.
 
 ## Status
 
-| | finding | severity | status |
-|---|---|---|---|
-| **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) — while that loop is still running (tray callback) | high | `FIXED UPSTREAM` in **v0.0.48** (bd5d994), reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
-| **glaze** | [the same, after that loop has stopped](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) (tray ran and returned, then `New`) — still hangs in v0.0.61 | high | `PATCHED LOCALLY` — branch `fix/nsapp-first` (`8623e26`) in the glaze clone, on trunk, not pushed; not reported — text ready in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **glaze** | WebView2 "not found" when the registered runtime folder is stale (self-update left `EBWebView` pointing at a deleted version) — see `.plans/2026-09-30_1250_glaze-webview2-stale-registration.md` | high | `FILED` as [glaze#34](https://github.com/crgimenes/glaze/issues/34) on 30 Sep 2026, no reply yet; fix on branch `fix/webview2-stale-registration` (`ba8775b`), pushed to the fork, **no PR opened** |
-| **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `PATCHED LOCALLY` — committed on branch `fix/windows-custom-scheme` (`75f3ea1`) in the glaze clone, not pushed; **not verified on Windows**; not reported — see `.plans/2026-09-30_1745_glaze-1b-upstream.md` |
-| **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — branch `fix/errunsupported-wrap` in each clone, on trunk (glaze `50cc331`, native `854cdb9`), not pushed; not reported — text ready in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported; question drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [`utmctl` reports failure and exits 0](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [`utmctl exec` never returns the guest's output](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [`suspend --save-state` power-cuts the guest](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [`ip-address` hangs rather than failing](#utm) | medium | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [a rejected config names no field](#utm) | medium | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
-| **UTM** | [the guest agent stops answering](#the-guest-agent-stops-answering) | — | `OPEN` — cause not isolated |
+| finding | project | severity | status | link |
+|---|---|---|---|---|
+| [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) — while that loop is still running (tray callback) | glaze | high | `FIXED UPSTREAM` in **v0.0.48** (bd5d994) | [glaze#31](https://github.com/crgimenes/glaze/issues/31), reported by someone else |
+| [the same, after that loop has stopped](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) (tray ran and returned, then `New`) — still hangs in v0.0.61 | glaze | high | `PATCHED LOCALLY`, not reported | branch `fix/nsapp-first` (`8623e26`), not pushed |
+| [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | glaze | high | `PATCHED LOCALLY`, **not verified on Windows**, not reported | branch `fix/windows-custom-scheme` (`75f3ea1`), not pushed |
+| [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | glaze + native | medium | `PATCHED LOCALLY`, not reported | branch `fix/errunsupported-wrap` (glaze `50cc331`, native `854cdb9`), not pushed |
+| [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | native | low | `FOUND HERE` — a limitation, not reported | question drafted |
+| [WebView2 "not found" when its registration is stale](#4-glaze--webview2-not-found-when-its-registration-is-stale) | glaze | high | `FILED` 30 Sep 2026, no reply yet | [glaze#34](https://github.com/crgimenes/glaze/issues/34); branch `fix/webview2-stale-registration` (`ba8775b`) on the fork, **no PR** |
+| [`utmctl` reports failure and exits 0](#utmctl-reports-failure-and-exits-0) | UTM | high | `FOUND HERE`, not reported | drafted |
+| [`utmctl exec` never returns the guest's output](#utmctl-exec-never-returns-the-guests-output) | UTM | high | `FOUND HERE`, not reported | drafted |
+| [`suspend --save-state` power-cuts the guest](#utmctl-suspend---save-state-reports-success-and-power-cuts-the-guest) | UTM | high | `FOUND HERE`, not reported | drafted |
+| [`ip-address` hangs rather than failing](#utmctl-ip-address-hangs-rather-than-failing) | UTM | medium | `FOUND HERE`, not reported | drafted |
+| [a rejected config names no field](#a-rejected-config-names-no-field) | UTM | medium | `FOUND HERE`, not reported | drafted |
+| [the guest agent stops answering](#the-guest-agent-stops-answering) | UTM (unconfirmed) | — | `OPEN` — cause not isolated | — |
 
-What the words mean, and they are chosen so none of them can flatter:
+"Drafted" means the issue text (and PR text, where there is a patch) is written
+in `.plans/2026-09-30_1800_upstream-reports.md` and waits on the owner's
+go-ahead.
+
+### Status values
+
+Chosen so that none of them overstates progress:
 
 - `FOUND HERE` — diagnosed and written up. **Upstream does not know.**
-- `PATCHED LOCALLY` — a fix exists **only in a clone on one machine**, as
-  uncommitted edits or a local branch (the row says which). Not pushed, not
-  proposed.
+- `PATCHED LOCALLY` — a fix exists **only in a clone on one machine**, as a
+  local branch (the row says which). Not pushed, not proposed.
 - `FILED` — reported upstream, with the link.
 - `FIXED UPSTREAM` — landed in a release, with the version.
 - `OPEN` — observed, cause not established, not yet filable.
 
-**One thing in this file has been reported upstream by this project:**
-glaze#34, on 30 Sep 2026. Everything else is unreported, and every unreported
-finding has its issue (and, where there is a patch, PR) text drafted in
-`.plans/2026-09-30_1800_upstream-reports.md`, waiting for the owner's go-ahead.
-That is worth stating plainly: glaze#31 is the same defect as §1, filed on
-12 Aug 2026 by **@nako-ruru** — a stranger who hit it independently, twelve days
-after it was diagnosed here, and it was the maintainer's fix for *their* report
-that shipped. Finding bugs and not reporting them is how that happens.
+**One finding has been reported upstream by this project:** glaze#34, on
+30 Sep 2026. Every other finding is unreported. glaze#31 is the same defect as
+§1, filed on 12 Aug 2026 by **@nako-ruru**, who hit it independently twelve days
+after it was diagnosed here; the maintainer's fix for *that* report is what
+shipped. Unreported findings get fixed on someone else's schedule, or not at
+all.
 
-Patches live as **commits on local branches** in the clones at
+### Where the patches are
+
+Patches are **commits on local branches** in the clones at
 `$UPSTREAM_DIR` = `~/workspace/go/src/github.com/crgimenes/{glaze,native}`.
-None is pushed except `fix/webview2-stale-registration` (to the fork, for #34).
+None is pushed except `fix/webview2-stale-registration`, which is on the fork
+for #34.
 
-| clone | branch | commit | on | what |
+| clone | branch | commit | based on | what |
 |---|---|---|---|---|
 | glaze | `fix/nsapp-first` | `8623e26` | trunk `0dce849` (v0.0.61) | §1, the stopped-loop case, with a test |
 | glaze | `fix/errunsupported-wrap` | `50cc331` | trunk `0dce849` (v0.0.61) | §2, glaze half, a test per package |
-| glaze | `fix/windows-custom-scheme` | `75f3ea1` | — | §1b (see its plan) |
-| glaze | `fix/webview2-stale-registration` | `ba8775b` | trunk `0dce849` | glaze#34 |
+| glaze | `fix/windows-custom-scheme` | `75f3ea1` | `origin/trunk` (v0.0.61) | §1b |
+| glaze | `fix/webview2-stale-registration` | `ba8775b` | trunk `0dce849` | §4, glaze#34 |
 | native | `fix/errunsupported-wrap` | `854cdb9` | trunk `58f48b7` (v0.1.15) | §2, native half, all ten packages, a test each |
 
 Superseded, kept only until the PRs exist: `patch/nsapp-new-blocks` (`2b145f9`,
 glaze) and `patch/errunsupported-wraps-std` (glaze `a5fedb7`, native
-`66b4497`). These are the original working-tree edits, committed on 30 Sep —
-nothing was lost — but on the stale `master` branches (glaze v0.0.47, native
-v0.1.6), not on `trunk`, which is what upstream releases from. The `fix/*`
-branches are those patches carried onto trunk and extended to what trunk has
-added since.
+`66b4497`). These are the original working-tree edits, committed on 30 Sep so
+nothing was lost, but on the stale `master` branches (glaze v0.0.47, native
+v0.1.6) rather than `trunk`, which upstream releases from. The `fix/*` branches
+carry those patches onto trunk and extend them to what trunk has added since.
 
-A fix is not listed as verified until it has been *run*: their tests, our tests,
-and the probe binary built from the edit executing on Windows 11 ARM64 in the
-VM. `irgo-winvm app-create` does the last.
-
----
+A fix is not listed as verified until it has been *run*: upstream's tests, this
+repository's tests, and the probe binary built from the patched code executing
+on Windows 11 ARM64 in the VM. `irgo-winvm app-create` does the last.
 
 ## 1. glaze — `New` blocks forever if anything ran `NSApp` first
 
-**Severity: high.** Silent infinite hang, no window, no error, nothing logged.
+**Severity:** high. Silent infinite hang: no window, no error, nothing logged.
 
-`webview_darwin.go` / `windowInit` enters a temporary `[NSApp run]` and relies
-on `applicationDidFinishLaunching:` to stop it. AppKit sends that **once per
-process**. Any code that ran `NSApp` before the first `WebView` consumes it —
-`native/tray`, an Ebitengine window, any library that raises a Cocoa dialog —
-and the temporary loop then has nothing to stop it.
+**Summary.** `glaze.New` never returns if any code ran the Cocoa application
+loop before the first web view was created — `native/tray`, an Ebitengine
+window, or any library that raises a Cocoa dialog. Nothing in glaze's
+documentation says a window must be created first.
 
-Nothing in glaze's documentation says a window must be created first, and the
-failure names nothing:
+**Cause.** `webview_darwin.go` / `windowInit` enters a temporary `[NSApp run]`
+and relies on `applicationDidFinishLaunching:` to stop it. AppKit sends that
+**once per process**. Code that ran `NSApp` earlier consumes it, and the
+temporary loop has nothing to stop it:
 
 ```
 goroutine 1 [syscall, locked to thread]:          (glaze v0.0.47)
@@ -100,24 +102,23 @@ goroutine 1 [syscall, locked to thread]:          (glaze v0.0.47)
   main.main()
 ```
 
-There are two routes in, and upstream has fixed one of them.
+There are two routes in. Upstream has fixed the first.
 
-**Route 1 — `New` while someone else's loop is still running** (from a tray
-`OnClick`). Reported by somebody else as
-[glaze#31](https://github.com/crgimenes/glaze/issues/31), *"[macOS]
-glaze.New(true) blocks indefinitely when initialized inside tray OnClick
-callback"*, opened on 12 Aug 2026 by **@nako-ruru** — twelve days after this
-was diagnosed here, while the fix sat uncommitted in a local clone. The
-maintainer fixed it in bd5d994 (*"darwin: a webview born under someone else's
-run loop"*): when `[NSApp isRunning]`, glaze skips the bootstrap and marshals
-itself to the main thread. **`FIXED UPSTREAM` in v0.0.48**; this repo is on
-v0.0.61.
+**Route 1 — `New` while another loop is still running** (from a tray
+`OnClick`). Reported as [glaze#31](https://github.com/crgimenes/glaze/issues/31),
+*"[macOS] glaze.New(true) blocks indefinitely when initialized inside tray
+OnClick callback"*, opened on 12 Aug 2026 by @nako-ruru, twelve days after it
+was diagnosed here while the fix sat uncommitted in a local clone. Fixed in
+bd5d994 (*"darwin: a webview born under someone else's run loop"*): when
+`[NSApp isRunning]`, glaze skips the bootstrap and marshals itself to the main
+thread. **`FIXED UPSTREAM` in v0.0.48**; this repository is on v0.0.61.
 
 **Route 2 — `New` after that loop has stopped** (`tray.Run` returned after
 `tray.Stop`, a dialog closed, another toolkit's window gone). `isRunning` is
 false by then, so bd5d994's check does not fire, the bootstrap is taken, and it
-waits for a notification AppKit already sent. **Still hangs in v0.0.61**,
-measured on 30 Sep 2026 with the reproducer below (Mac, no VM):
+waits for a notification AppKit already sent. **Still hangs in v0.0.61.**
+
+**Reproduction** (route 2; Mac, no VM; measured 30 Sep 2026):
 
 ```
 tray.Run (stops itself after 1.5s), then glaze.New
@@ -126,9 +127,9 @@ tray.Run (stops itself after 1.5s), then glaze.New
   glaze fix/nsapp-first        step 1, 2, 3, 4, exit 0
 ```
 
-**Fix** (route 2, on trunk): also ask AppKit whether it has already launched,
-and if so take the path the delegate callback would have taken, minus the stop
-that has nothing to stop.
+**Fix** (route 2, on trunk). Also ask AppKit whether it has already finished
+launching, and if so take the path the delegate callback would have taken,
+minus the stop that has nothing to stop:
 
 ```go
 func appFinishedLaunching() bool {
@@ -141,37 +142,37 @@ func appFinishedLaunching() bool {
 ```
 
 The body shared with `onApplicationDidFinishLaunching` is split into
-`finishLaunching`, so the two paths cannot drift.
-
-**Status**: `PATCHED LOCALLY` — branch `fix/nsapp-first`, commit `8623e26`, on
-glaze trunk `0dce849` (v0.0.61), not pushed, **not reported**. It carries the
+`finishLaunching`, so the two paths cannot drift. The branch carries the
 original patch (`2b145f9`, made on v0.0.47) onto the code bd5d994 rewrote, plus
-`TestNewAfterAppFinishedLaunching`, which runs route 2 in a child process of
-the test binary: it hangs on trunk and passes with the fix (negative control
-run). glaze `go test ./...` and `-short` pass on macOS 27; `GOOS=windows` and
+`TestNewAfterAppFinishedLaunching`, which runs route 2 in a child process of the
+test binary: it hangs on trunk and passes with the fix (negative control run).
+glaze `go test ./...` and `-short` pass on macOS 27; `GOOS=windows` and
 `GOOS=linux` build and vet; `golangci-lint run` for darwin and windows reports 0
-issues. macOS-only code, so the Windows VM has nothing to say about it. Issue
-and PR text: `.plans/2026-09-30_1800_upstream-reports.md` §1.
+issues. The code is macOS-only, so the Windows VM has nothing to say about it.
 
-Nothing in this repo works around route 2 — no example creates a web view after
-a loop has stopped. The comment on `probeTray` in `examples/glaze-all` still
-describes route 1 as unfixed ("this order is what a released glaze still
-requires"); since v0.0.48 that is no longer true, and the window-first order is
-kept only because the tray is posted with `w.Dispatch`, which needs the window.
+**Status.** `PATCHED LOCALLY` — branch `fix/nsapp-first`, commit `8623e26`, on
+glaze trunk `0dce849` (v0.0.61). Not pushed, **not reported**. Issue and PR
+text: `.plans/2026-09-30_1800_upstream-reports.md` §1.
 
----
+**In this repository.** Nothing works around route 2; no example creates a web
+view after a loop has stopped. The comment on `probeTray` in
+`examples/glaze-all` still describes route 1 as unfixed ("this order is what a
+released glaze still requires"). Since v0.0.48 that is no longer true; the
+window-first order is kept only because the tray is posted with `w.Dispatch`,
+which needs the window.
 
 ## 1b. glaze — absolute `app://` URLs silently do not load on Windows
 
-**Severity: high.** A glaze app that works on macOS loses every stylesheet and
-script on Windows, with no error anywhere.
+**Severity:** high. A glaze app that works on macOS loses every stylesheet and
+script on Windows, with no error anywhere. This is the class of bug this project
+exists to find: it is invisible from a Mac.
 
-This is the bug this whole project exists to find, and it is invisible from a
-Mac.
+**Summary.** An absolute `app://home/app.js` reference inside a page loads on
+macOS and is never requested on Windows. No error, no console message — a page
+with no CSS and no JavaScript.
 
-**What happens.** On macOS, WKWebView registers `app` as a real scheme, so
-`app://home/app.js` loads. On Windows, `webview2_scheme_windows.go` emulates the
-scheme with a virtual host:
+**Cause.** On macOS, WKWebView registers `app` as a real scheme. On Windows,
+`webview2_scheme_windows.go` emulates the scheme with a virtual host:
 
 ```go
 func schemeVHost(scheme string) string { return "https://" + scheme + ".localhost" }
@@ -179,12 +180,10 @@ func schemeVHost(scheme string) string { return "https://" + scheme + ".localhos
 out := schemeVHost(u.Scheme) + u.Path     // app://home/index.html -> https://app.localhost/index.html
 ```
 
-So the document loads from `https://app.localhost/`, and an absolute
-`app://home/app.js` inside it names a scheme WebView2 has never heard of. The
-request is never made. No error, no console message — just a page with no CSS
-and no JavaScript.
+The document therefore loads from `https://app.localhost/`, and an absolute
+`app://home/app.js` inside it names a scheme WebView2 has never heard of.
 
-**Measured**, Windows 11 ARM64, by `examples/verify` loading the same asset
+**Reproduction.** Windows 11 ARM64, `examples/verify` loading the same asset
 twice, once absolutely and once relatively:
 
 ```
@@ -200,47 +199,48 @@ secureContext: true
 ```
 
 `favicon.ico` arriving is the tell: the browser resolves it against the
-document's real origin, so it matches the handler, while the absolute URLs
-written by the developer do not.
+document's real origin, so it reaches the handler, while the absolute URLs the
+developer wrote do not. The probe distinguishes the two cases, so this cannot
+silently regress into a bare "timed out".
 
-**Two further consequences of the same rewrite:**
+Two further consequences of the same rewrite:
 
 - **`location.origin` differs by platform** — `app://home` on macOS,
-  `https://app.localhost` on Windows. Any origin-dependent code diverges.
+  `https://app.localhost` on Windows. Origin-dependent code diverges.
 - **The URL's host is dropped.** `app://home/x` and `app://other/x` both become
   `https://app.localhost/x`, so two hosts collide silently.
 
-**The fix** is to stop emulating: WebView2 supports real custom schemes through
+**Fix.** Stop emulating. WebView2 supports real custom schemes through
 `ICoreWebView2EnvironmentOptions4::GetCustomSchemeRegistrations`, with
 `HasAuthorityComponent` for the host and `TreatAsSecure`. glaze passed `null`
-environment options; the fix passes a read-only options object it implements
-over Go vtables (cgo-free, as its completion handlers already are), filters
+environment options; the fix passes a read-only options object implemented over
+Go vtables (cgo-free, as glaze's completion handlers already are), filters
 `app:*`, and deletes the vhost rewrite. A window with schemes gets its own
 WebView2 user data folder, because WebView2 refuses different registrations on
 one browser process. Design, checks and the upstream text:
 `.plans/2026-09-30_1745_glaze-1b-upstream.md`.
 
-**Interim, for anyone using glaze today:** reference assets **relatively**.
-It works on both platforms. `examples/verify-events` was changed to do
-exactly that, and with it the Events bridge passes completely on Windows.
+**Workaround for glaze users today:** reference assets **relatively**. It works
+on both platforms. `examples/verify-events` does exactly that, and with it the
+Events bridge passes completely on Windows.
 
-**Status**: `PATCHED LOCALLY` — committed on branch `fix/windows-custom-scheme`
-(`75f3ea1`, on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed.
-Checked on the Mac only: builds for all six targets, `go vet` and
-`golangci-lint` clean for darwin/linux/windows, glaze's macOS tests pass.
-**Not run on Windows**, so not verified: that needs `mise run upstream:link &&
-mise run glaze:windows` with the branch checked out (verify must PASS) and
-`mise run upstream:test:windows`. **Not reported**: nobody upstream knows (no
-issue or PR as of 30 Sep 2026; released v0.0.61 still emulates). The issue text
-is written and waits on the owner's go-ahead. The probe distinguishes the two
-cases, so this cannot silently regress into a bare "timed out" again.
+**Status.** `PATCHED LOCALLY` — branch `fix/windows-custom-scheme` (`75f3ea1`,
+on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed. Checked on
+the Mac only: builds for all six targets, `go vet` and `golangci-lint` clean for
+darwin/linux/windows, glaze's macOS tests pass. **Not run on Windows, so not
+verified**; that needs `mise run upstream:link && mise run glaze:windows` with
+the branch checked out (verify must PASS) and `mise run upstream:test:windows`.
+**Not reported**: no issue or PR upstream as of 30 Sep 2026, and released
+v0.0.61 still emulates. The issue text is written and waits on the owner's
+go-ahead.
 
 ## 2. native + glaze — `ErrUnsupported` sentinels do not wrap `errors.ErrUnsupported`
 
-**Severity: medium.** Correct programs on correct platforms report failure.
+**Severity:** medium. Correct programs on correct platforms report failure.
 
-Twelve packages define their own sentinel with `errors.New`, so none of them
-matches the one check the standard library defines for exactly this purpose:
+**Summary.** Twelve packages define their own "unsupported" sentinel with
+`errors.New`, so none matches `errors.Is(err, errors.ErrUnsupported)`, the check
+the standard library defines for this purpose:
 
 | package | sentinel |
 |---|---|
@@ -248,40 +248,35 @@ matches the one check the standard library defines for exactly this purpose:
 | `glaze/menu` | `ErrUnsupported` |
 | `glaze` | `ErrIconUnsupported` |
 
-A caller handling several of them has to import every package purely to name
-its sentinel, and any package added later silently breaks that list again. The
-consequence is not cosmetic — it is measured, in this repo:
+A caller handling several must import every package just to name its sentinel,
+and any package added later silently breaks that list.
 
-- `glaze.SetAppIcon` is unsupported **on Windows**, by design. Windows is the
-  platform this project exists to test.
+**Reproduction.** Measured in this repository:
+
+- `glaze.SetAppIcon` is unsupported **on Windows**, by design — the platform
+  this project exists to test.
 - `nocapture.Protect` is unsupported **on macOS**, by design — Apple removed
   the API.
 
-So a run in which every capability behaves exactly as documented reported two
+A run in which every capability behaved exactly as documented reported two
 FAILURES and exited non-zero.
 
-**Fix**: wrap, which is source- and behaviour-compatible — `errors.Is` against
-the package sentinel still matches.
+**Fix.** Wrap the standard sentinel. This is source- and behaviour-compatible:
+`errors.Is` against the package sentinel still matches.
 
 ```go
 var ErrUnsupported = fmt.Errorf("clipboard: not supported on this platform: %w", errors.ErrUnsupported)
 ```
 
-**Status**: `PATCHED LOCALLY` — branch `fix/errunsupported-wrap` in each
-clone, on trunk: glaze `50cc331` (on `0dce849`, v0.0.61), native `854cdb9` (on
-`58f48b7`, v0.1.15). Not pushed, **not reported**; issue and PR text in
-`.plans/2026-09-30_1800_upstream-reports.md` §2 and §3. Checked upstream on
-30 Sep 2026: neither trunk wraps, and no issue or PR mentions it.
-
-Each package has a test asserting the wrapping (native: `unsupported_test.go`
+Each package gets a test asserting the wrapping (native: `unsupported_test.go`
 in all ten; glaze: `appicon_unsupported_test.go` for both sentinels and
 `menu/unsupported_test.go`), so a package added later cannot reintroduce it.
-native's README, which documented the old pattern as the house style, is
-updated. Both repos: `go test ./...` passes on macOS 27, `GOOS=windows` and
+native's README, which documented the old pattern as house style, is updated.
+Both repositories: `go test ./...` passes on macOS 27, `GOOS=windows` and
 `GOOS=linux` build, `golangci-lint run` for darwin and windows reports 0 issues.
 
-This repo against those branches (a `go.work` pointing at them, not
-committed), with the stand-in below **deleted** so `glaze-all` makes the one
+Verified against this repository with a `go.work` pointing at the branches (not
+committed) and the stand-in below **deleted**, so `glaze-all` makes the one
 standard check: `go -C examples build/vet/test ./...` pass, `GOOS=windows`
 builds, and `mise run glaze:mac` answers "YES: all four passed on
 darwin/arm64", with
@@ -290,91 +285,134 @@ darwin/arm64", with
 nocapture.Protect        UNSUPPORTED  nocapture: not supported on this platform: unsupported operation
 ```
 
-The same deletion against the released v0.0.61 / v0.1.15 reads
+The same deletion against released v0.0.61 / v0.1.15 reads
 `nocapture.Protect  FAILED` — the negative control.
 
-Windows: the original patch (the seven native packages of v0.1.6, glaze
-v0.0.47) was run in the VM, where `glaze.SetAppIcon` read `UNSUPPORTED ...:
+On Windows, the original patch (the seven native packages of v0.1.6, glaze
+v0.0.47) was run in the VM: `glaze.SetAppIcon` read `UNSUPPORTED ...:
 unsupported operation` and the run passed. The trunk branches have **not** been
 run on Windows yet.
 
-**Why `examples/glaze-all` still has a workaround.** `unsupportedErrs` and
-`isUnsupported` in `examples/glaze-all/main.go`, marked *STANDING IN FOR AN
-UPSTREAM FIX*, list each package's sentinel by name. That is the workaround the
-rule forbids, and it stays only because the fix is in no released glaze or
-native: deleting it today makes every macOS run fail on `nocapture`. **What
-removes it:** a glaze and a native release containing the wrapping; then bump
+**Status.** `PATCHED LOCALLY` — branch `fix/errunsupported-wrap` in each clone,
+on trunk: glaze `50cc331` (on `0dce849`, v0.0.61), native `854cdb9` (on
+`58f48b7`, v0.1.15). Not pushed, **not reported**; issue and PR text in
+`.plans/2026-09-30_1800_upstream-reports.md` §2 and §3. Checked upstream on
+30 Sep 2026: neither trunk wraps, and no issue or PR mentions it.
+
+**In this repository.** `unsupportedErrs` and `isUnsupported` in
+`examples/glaze-all/main.go`, marked *STANDING IN FOR AN UPSTREAM FIX*, list
+each package's sentinel by name. That is the kind of workaround the rule
+forbids; it stays only because no released glaze or native contains the fix,
+and deleting it today makes every macOS run fail on `nocapture`. **Removed
+when:** a glaze and a native release contain the wrapping. Then bump
 `examples/go.mod` to them and replace the list with one
 `errors.Is(err, errors.ErrUnsupported)`, exactly as verified above.
 
----
-
 ## 3. native/tray — no way to have a tray *and* a window
 
-**Severity: low.** A limitation rather than a defect — the documented behaviour
-of each package is correct on its own.
+**Severity:** low. A limitation rather than a defect; each package's documented
+behaviour is correct on its own.
 
-**Status**: `FOUND HERE` — not reported. Nothing upstream knows this has been
-hit, and the workaround below is undocumented, so it is luck rather than
-contract. A question (not a bug report) is drafted in
-`.plans/2026-09-30_1800_upstream-reports.md` §4.
+**Summary.** `tray.Run` blocks driving the OS event loop, and its documentation
+requires the main goroutine locked to the main OS thread. A `glaze.WebView`
+needs exactly the same. Both are documented; nothing says they are mutually
+exclusive, and a desktop app with a tray icon and a window is not unusual.
 
-`tray.Run` blocks driving the OS event loop and its doc requires the main
-goroutine locked to the main OS thread. A `glaze.WebView` wants exactly the
-same thing. Both are documented; nothing says they are mutually exclusive, and
-a desktop app that wants a tray icon and a window is not unusual.
+**Workaround.** What works today, and what `examples/glaze-all` does: post
+`tray.Run` onto the UI thread **after** the window exists and never wait on it,
+letting the nested loop run until `tray.Stop`. Verified on macOS 15 and
+Windows 11 ARM64. It is undocumented, so it works by luck rather than contract.
 
-What works today, and what `examples/glaze-all` does: post `tray.Run` onto the
-UI thread **after** the window exists and never wait on it, letting the nested
-loop run until `tray.Stop`. Verified on macOS 15 and Windows 11 ARM64. It is
-undocumented, so it is luck rather than contract.
+**Fix.** An API that attaches a tray to a run loop somebody else owns.
 
-An honest fix is an API that attaches a tray to a run loop somebody else owns.
+**Status.** `FOUND HERE` — not reported. A question (not a bug report) is
+drafted in `.plans/2026-09-30_1800_upstream-reports.md` §4.
 
----
+## 4. glaze — WebView2 "not found" when its registration is stale
+
+**Severity:** high. A glaze app refuses to start on a machine whose WebView2
+runtime is installed and working.
+
+**Summary.** On `irgo-win11` every glaze window failed with
+`webview2: Edge WebView2 Runtime not found (install it)` while a working runtime
+was installed. The Evergreen runtime had self-updated to `154.0.4258.37` and
+deleted the `151.0.4129.86` folder, but the registry still named the deleted
+folder. Same failure on glaze v0.0.47 and v0.0.61, so it is long-standing, not a
+regression. The likely trigger — inferred, not proven — is an update interrupted
+by a shutdown, which end users can hit after a power cut.
+
+**Reproduction** (in the VM, as SYSTEM): point the registration at a folder that
+does not exist, then run `examples/verify` against released glaze.
+
+```
+reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v EBWebView /t REG_SZ /d "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\1.0.0.0" /f
+```
+
+**Cause.** `findEmbeddedBrowserDLL` in `webview2_windows.go` (v0.0.61) reads
+`EBWebView` from the registry and treats it as the **only** source. If that
+folder is missing, it reports the runtime as not installed.
+
+**Fix.** When the registered folder is missing, scan the system and per-user
+install roots for the newest valid runtime beside it; the registry stays
+authoritative otherwise. On the VM, with the registration broken, released
+v0.0.61 `verify` FAILS and the patched glaze PASSES, finding `154.0.4258.37`.
+glaze's Windows test suite passes with the patch (`upstream:test:windows`), and
+lint is clean for darwin and windows (`upstream:lint`). Full diagnosis:
+`.plans/done/2026-09-30_1250_glaze-webview2-stale-registration.md`.
+
+**In this repository.** `irgo-winvm vm-repair -reboot` repairs the registration
+on an affected VM (see [DEVELOPMENT.md](DEVELOPMENT.md#when--gui-stops-working-on-an-old-vm)).
+
+**Status.** `FILED` as [glaze#34](https://github.com/crgimenes/glaze/issues/34)
+on 30 Sep 2026, no reply yet. The fix is on branch
+`fix/webview2-stale-registration` (`ba8775b`), pushed to the fork
+`joeblew999/glaze`; **no PR opened**, because the maintainer fixes his own bugs
+and a PR is sent only if asked.
 
 ## UTM
 
-[utmapp/UTM](https://github.com/utmapp/UTM), Apache-2.0. The version this repo
-verifies its config schema against is **4.7.5**, recorded as
-`utmvm.VerifiedVersion` — and 4.7.5 is the current release, so everything below
-is a live defect rather than an artefact of running something old.
+[utmapp/UTM](https://github.com/utmapp/UTM), Apache-2.0. This repository
+verifies its config schema against **4.7.5**, recorded as
+`utmvm.VerifiedVersion`. 4.7.5 is the current release, so everything below is a
+live defect, not an artefact of running something old.
 
-These have been treated as local traps to work around, which is the opposite of
-the rule applied to glaze and native. They are listed here so that stops being
-invisible. None has been reported; a search of utmapp/UTM issues on 30 Sep 2026
-found no existing report of any of them (related, not the same: UTM#3819,
-UTM#7669). Reports for all five are drafted in
-`.plans/2026-09-30_1800_upstream-reports.md` §5–§9. Reading `utmctl`'s source
-located the exit-status one: its event error handler prints and returns, and
-only `snapshot create` checks the failure it records.
+These were long treated as local traps to work around — the opposite of the rule
+applied to glaze and native. They are listed here so that is visible. None has
+been reported. A search of utmapp/UTM issues on 30 Sep 2026 found no existing
+report of any of them (related, not the same: UTM#3819, UTM#7669). Reports for
+all five are drafted in `.plans/2026-09-30_1800_upstream-reports.md` §5–§9.
 
 ### `utmctl` reports failure and exits 0
 
-**Severity: high.** The exit status cannot be used to tell whether a command
-worked, which makes every script built on `utmctl` unable to detect its own
-failures.
+**Severity:** high. The exit status cannot tell a script whether a command
+worked.
+
+**Reproduction.**
 
 - **`utmctl delete`** on a VM whose bundle is gone prints *"couldn't be
-  removed"* and exits **0**. This repo checks whether the bundle still exists
-  afterwards rather than trusting the status.
+  removed"* and exits **0**.
 - **`utmctl ip-address`** with no guest agent prints its complaint as ordinary
-  stdout and exits **0**. Every line has to be validated as an address, or a
-  human-readable error is mistaken for one — which made a status check
-  cheerfully report a working agent on a VM that had none.
+  stdout and exits **0**. Unless every line is validated as an address, the
+  error text is mistaken for one — which made a status check here report a
+  working agent on a VM that had none.
 
-It is also why this tool's own exit codes exist and are documented: it is the
-only honest signal a caller gets.
+**Cause.** In `utmctl`'s source, the event error handler prints and returns;
+only `snapshot create` checks the failure it records.
+
+**In this repository.** After `delete`, the tool checks whether the bundle still
+exists rather than trusting the status. This defect is also why this tool's own
+[exit codes](DEVELOPMENT.md#what-it-exits-with) exist and are documented: they
+are the only reliable signal a caller gets.
+
+**Status.** `FOUND HERE` — not reported; drafted.
 
 ### `utmctl exec` never returns the guest's output
 
-**Severity: high.** It does not stream the process's output back and exits 0
-whatever the guest command did, so a suite that ran nothing is indistinguishable
-from a suite that passed.
+**Severity:** high. A suite that ran nothing is indistinguishable from a suite
+that passed.
 
-Everything here that needs output writes a batch file which redirects to a file
-in the guest, runs that by path, and pulls the file back. That machinery exists
-solely because of this.
+**Summary.** `utmctl exec` does not stream the process's output back and exits
+0 whatever the guest command did.
 
 Two related quirks, same call:
 
@@ -383,57 +421,76 @@ Two related quirks, same call:
   already contains quotes, and the line silently does nothing.
 - A whole command line passed as **one argument** makes the agent look for a
   file by that entire name and answer *"No such file or directory"* — which is
-  indistinguishable from a dead agent, and cost a wrong diagnosis here.
+  indistinguishable from a dead agent, and caused a wrong diagnosis here.
+
+**In this repository.** Everything that needs output writes a batch file that
+redirects to a file in the guest, runs it by path, and pulls the file back.
+That machinery exists solely because of this.
+
+**Status.** `FOUND HERE` — not reported; drafted.
 
 ### `utmctl suspend --save-state` reports success and power-cuts the guest
 
-**Severity: high.** Exit 0, no state file written, VM left `stopped`, and the
+**Severity:** high. Exit 0, no state file written, VM left `stopped`, and the
 guest's next boot goes through *"Diagnosing your PC"* — the signature of an
 unclean shutdown.
 
-It either refuses (naming GPU acceleration, then NVMe) or does the above. Plain
-`suspend` works and is what this repo uses; `--save-state` must never be called.
+**Summary.** It either refuses (naming GPU acceleration, then NVMe) or does the
+above.
+
+**In this repository.** Plain `suspend` works and is what the tool uses;
+`--save-state` must never be called.
+
+**Status.** `FOUND HERE` — not reported; drafted.
 
 ### `utmctl ip-address` hangs rather than failing
 
-**Severity: medium.** Against a guest with no agent it does not fail — it waits,
-indefinitely. A VM with no Windows installed hung this CLI for ten minutes with
-no output, because everything that asks "is this VM usable" is built on it.
+**Severity:** medium. Against a guest with no agent it waits indefinitely
+instead of failing.
 
-Every `utmctl` call here is wrapped in a deadline for this reason.
+**Reproduction.** A VM with no Windows installed hung this CLI for ten minutes
+with no output, because everything that asks "is this VM usable" is built on
+`ip-address`.
+
+**In this repository.** Every `utmctl` call is wrapped in a deadline.
+
+**Status.** `FOUND HERE` — not reported; drafted.
 
 ### A rejected config names no field
 
-**Severity: medium.** UTM decodes `config.plist` with Swift `Codable` and
-non-optional fields, so any schema mismatch surfaces as a single generic
-*"cannot import this VM"* with no indication of which field is wrong. Six
-distinct config mistakes were found by bisection because of it, each costing an
-import cycle to identify.
+**Severity:** medium. Any schema mismatch surfaces as a single generic *"cannot
+import this VM"*, with no indication of which field is wrong.
+
+**Cause.** UTM decodes `config.plist` with Swift `Codable` and non-optional
+fields.
+
+**Reproduction.** Six distinct config mistakes were found by bisection because
+of it, each costing an import cycle to identify. They are listed in
+[DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
+
+**Status.** `FOUND HERE` — not reported; drafted.
 
 ### The guest agent stops answering
 
-**Status: `OPEN` — cause not isolated. Not filable as a UTM bug yet.**
+**Status:** `OPEN` — cause not isolated. Not filable as a UTM bug yet.
 
-**Observed.** `utmctl ip-address` answers one call and times out the next with
+**Summary.** `utmctl ip-address` answers one call and times out the next with
 `Error from event: The operation couldn't be completed. (OSStatus error -2700.)`
-/ `Timed out waiting for RPC`. The tool's own log records
+/ `Timed out waiting for RPC`. The tool's log recorded
 `VM not answering; recovering` seven times in one session. The guest's desktop
-was up and healthy throughout — confirmed by screenshot.
+was up and healthy throughout, confirmed by screenshot.
 
 **Not established.** Whether the guest agent service has actually stopped
-responding, or whether it is alive and the host cannot reach it. Those are two
-different bugs in two different projects, and this repo currently attributes the
-symptom to Windows Update keeping the agent busy — a guest-side explanation that
-has never been checked.
+responding, or is alive and unreachable from the host. Those are two different
+bugs in two different projects. This repository currently attributes the
+symptom to Windows Update keeping the agent busy — a guest-side explanation
+that has never been checked.
 
-**What would isolate it.** Query the `qemu-ga` service inside the guest, over
-RDP or the console rather than through `utmctl`, at the moment a host call is
-timing out. If the service is running and responsive while the host call fails,
-it belongs to UTM. If it is not, it belongs to the guest and this entry should
-be deleted.
-
-Until that is done, filing it would waste a maintainer's time on a report that
-cannot be acted on.
+**To isolate it.** Query the `qemu-ga` service inside the guest, over RDP or the
+console rather than through `utmctl`, while a host call is timing out. If the
+service is running and responsive while the host call fails, the bug is UTM's.
+If it is not, it belongs to the guest and this entry should be deleted. Until
+then, a report would cost a maintainer time without being actionable.
 
 ## Not bugs
 
@@ -444,7 +501,8 @@ cannot be acted on.
 
 ## Ours, not theirs — fixed in this repo
 
-Listed so they are never mistaken for upstream problems.
+Mistakes in how this repository called the libraries, listed so they are never
+mistaken for upstream problems.
 
 | what | whose | why |
 |---|---|---|

@@ -1,17 +1,17 @@
 # For agents
 
-Everything is in [docs/](docs/). This file only points there, so it cannot go
-stale.
+All documentation is in [docs/](docs/). This file only points there.
 
-**Before writing code, read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**: how
-the repo is laid out, the rules, and every trap that cost hours.
+**Before writing code, read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — the
+architecture, the conventions and the known traps — and check what already
+exists before adding anything.
 
 | file | what it holds |
 |---|---|
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | layout, rules, traps: how to change the code |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | architecture, conventions, contracts, known traps |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | setup, what to run, how to land a change |
-| [docs/UPSTREAM.md](docs/UPSTREAM.md) | glaze, native and UTM bugs found here, and their status |
+| [docs/UPSTREAM.md](docs/UPSTREAM.md) | bugs found in glaze, native and UTM, and their status |
 | [docs/RESULTS.md](docs/RESULTS.md) | what has been measured, dated |
-| [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | does glaze work on the Mac and on Windows: the last recorded run of each, generated |
+| [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | the last recorded glaze run on the Mac and on Windows (generated) |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | what is next |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | what the HTTP transport exposes |

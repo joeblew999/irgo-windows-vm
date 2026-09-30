@@ -1,171 +1,70 @@
-# Working on this repository
+# Development
 
-Read this before writing code, not after. It is the approach, not an index —
-any list of where things live goes stale the day someone moves them.
+How `irgo-winvm` is built: its structure, the conventions the code follows,
+the contracts it publishes, and the traps already found. Read it before
+changing code.
 
-## Three stages, isolated
+Setup, the commands to run and how to land a change are in
+[CONTRIBUTING.md](CONTRIBUTING.md). They are not repeated here.
 
-`iso-create` gets the Windows media. `vm-create` makes a VM from it.
-`app-create` puts a binary on that. Each has an undo, and each owns its own
-paths and constants in its own files:
+## Overview
 
-- **iso** knows nothing about UTM. It is a download from Microsoft and an ISO
-  built with `xorriso`, and it works on a machine that has never had a
+`irgo-winvm` is a command-line tool for macOS on Apple Silicon. It builds a
+Windows 11 ARM64 virtual machine in [UTM](https://mac.getutm.app), runs a Go
+`.exe` inside it, and returns the program's output and exit status. It also
+serves the same commands to agents over the Model Context Protocol.
+
+The work is split into three stages, run in order. Each is one command with a
+matching undo (see [The commands](#the-commands)):
+
+1. **iso** (`iso-create`) — Windows installation media, downloaded from
+   Microsoft and mastered with `xorriso`.
+2. **vm** (`vm-create`) — a UTM VM with Windows installed from that media.
+3. **app** (`app-create`) — your `.exe` running in the VM, with its output
+   copied back.
+
+Each stage owns its own paths and constants, in its own files:
+
+- **iso** knows nothing about UTM and works on a machine that has never had a
   hypervisor. It once called into UTM's bundle directory to decorate an error
-  message, which meant fetching media required UTM to be installed.
-- **vm** owns UTM entirely: finding it, installing it, `utmctl`, the bundle
-  layout, the guest tools.
-- **app** drives the guest through `vm`'s `utmctl`, and owns the guest-side
-  paths.
+  message, which made fetching media require UTM to be installed.
+- **vm** owns UTM entirely: finding and installing it, `utmctl`, the bundle
+  layout and the guest tools.
+- **app** drives the guest through the vm stage's `utmctl` wrapper and owns the
+  guest-side paths.
 
-Dependencies run one way: `vm` and `app` use the ISO API, nothing comes back.
-`doctor` reports on all three and calls into them rather than holding its own
-copy of where anything is.
+A change that makes one stage reach into another's paths is a design error.
 
-If you are about to make one stage reach into another's paths, stop.
+### Requirements
 
-## One way to do each thing
+- macOS on Apple Silicon.
+- UTM. `vm-create` installs it from its signed `.dmg` if it is missing.
+- `wimlib` and `xorriso`, only when building media from scratch. `iso-create`
+  installs them and `iso-delete` removes them.
+- macOS Automation permission to control UTM. This is granted once, in a system
+  dialog, and nothing can grant it for you. `vm-create` checks it before doing
+  anything expensive: without it a boot cannot be driven, and the failure would
+  otherwise arrive forty minutes into an install as a timeout that does not
+  mention permissions.
+- **Not** Full Disk Access, or access to other apps' data. The tool never reads
+  or writes UTM's container itself; it writes bundles under its own directory
+  and has UTM import, clone, reconfigure and delete them through AppleScript.
 
-There were four ways to run a binary in the guest, differing only in where it
-landed and which session ran it, and every caller had to pick. There were three
-answers to where media lives, all live at once. A second route is a second
-answer.
+### Scope: Windows only
 
-## Nothing returns success without checking it did the thing
+Windows is the platform whose behaviour cannot be checked by reading code on a
+Mac, and everything here — the answer file, ISO mastering, the guest agent, the
+session model — is Windows-specific. Linux guests would need their own image
+and path and are not built. The `linux` builds in CI exist only so the tool
+compiles for a developer on another OS.
 
-Nearly every bug here was this: a download renamed without verifying its length,
-`ExitCode: 0` when the output could not be fetched, `nil` after five failed
-boots, an error value that could never be non-nil, an ISO built and never
-checked.
+## Repository layout
 
-Closing a file you *wrote* can fail, and that is where a full disk shows up.
-Closing one you read cannot.
-
-An operation that cannot report failure also cannot be undone, because it does
-not know what it did.
-
-## Every action owes an undo
-
-The commands come in pairs. The undo is what lets a failed step be fixed and
-re-run, and it must work from any starting point — stopping early because half
-the work was already gone leaves the other half behind for good.
-
-Deleting nothing is success, not an error, or the undo cannot be run twice.
-
-## "Cannot tell" is not "safe"
-
-Guards are written `if ok && bad { refuse }`, so a question that cannot be
-answered does not refuse — it allows. Every guard here stands in front of
-something destructive, so that is backwards.
-
-Answer three ways: yes, no, and *could not determine*. The caller handles the
-third explicitly, refusing by default.
-
-## Check before you claim
-
-Everything below was asserted wrongly first, then measured:
-
-- `ln` to an immutable file is `EPERM`, so protecting the ISO silently turned a
-  hardlink into a 5 GB copy.
-- `rm` on a bundle holding that hardlink fails, so every VM built from a
-  protected ISO was undeletable.
-- `utmctl delete` prints its failure and **exits 0**.
-- `utmctl` will not drop a registry entry whose bundle is gone, so removing a
-  bundle behind its back makes a phantom it cannot then recover from.
-- `net/http` already rejects a short body, so a length check added to the
-  downloader was unreachable — proven by disabling it and watching the test
-  still pass.
-
-Grep counts comment mentions as call sites; it gave three wrong answers in one
-afternoon. **Use the compiler and the analysers**: delete the symbol, rebuild,
-run the tests, put it back if either fails. `mise run go:lint` finds what grep
-does not.
-
-And check on every platform. Deleting a function from `sysfile_other.go` passed
-every check that was running, because they were all darwin. `mise run go:check`
-cross-compiles.
-
-Waiting for CI is **`mise run ci:watch`** — never a hand-rolled `sleep` loop.
-There were five of those before the task existed and two were wrong, both in the
-same way, and both looked like patience rather than a bug. It watches every
-workflow the commit started, not just `check`, and exits non-zero if any failed.
-`SHA=<commit>` for one other than HEAD.
-
-## A test that cannot fail is not a test
-
-Every assertion needs a negative control: **break the thing, watch the test go
-red, put it back.** Ten seconds, by hand, when you write the test. There was a
-mise task automating this across eight mutations; it was fifty lines of shell
-matching exact source text, so it broke on the first rename and once left a
-mutated file in a commit. The habit catches what matters — a test born vacuous —
-and the machinery only caught tests weakened later, which did not happen.
-
-This is not theory. A test for the scan cache passed against a mutation that
-disabled the check it was testing, because the case it built also changed the
-other field. And a test for "the build records its verdict" is marked as not
-proving that, because deleting the build's call leaves it green.
-
-If a property can only be verified by measurement, record the measurement in
-`RESULTS.md` with a date rather than writing a test that looks like coverage.
-
-## Say what is happening, and where
-
-A command that prints nothing for fifty seconds is indistinguishable from one
-that has hung. Announce each step *before* doing it, name every path, and print
-elapsed time. "Not found" without a location cannot be checked.
-
-That is how the 77-second ARM64 scan was found: it was always there, and nothing
-said so.
-
-## The comments are findings
-
-Long comments record what cost hours and is not recoverable from the code: why
-the display is `virtio-ramfb-gl`, why ESD image 3 needs `--boot`, why
-`utmctl suspend --save-state` must never be called, why `%q` must not be
-re-escaped for AppleScript.
-
-Move them with their code. Do not compress or tidy them. If one is wrong, fix
-the fact — do not delete the explanation. When you correct a measurement, look
-for the other copy.
-
-## Verify against the VM
-
-Unit tests cover the ISO stage well, the VM and run stages only at the edges.
-Anything touching a real guest is proven by running it, and those paths fail
-silently.
-
-Use a disposable VM. Running a binary pushes it into the guest and executes it,
-which is a mutation; losing a 45-minute install to a test is not a trade worth
-making.
-
-## A glaze or native bug is fixed at crgimenes
-
-Non-negotiable, and the reason this project exists. A bug worked around in an
-example still ships to everyone using those libraries, and the workaround hides
-it. `UPSTREAM.md` is the ledger.
-
-## Where things go
-
-One place, fixed, nothing to configure:
-
-```
-~/Library/Application Support/irgo-winvm/
-  media/    the ISO, the .esd it was built from, and scratch
-  bin/      binaries staged into a VM
-  logs/     every command, appended across runs
-  shots/    a screenshot per stage of every run
-  jobs/     long-running work, so a 45-minute install survives a disconnect
-```
-
-VMs go where UTM keeps them, because UTM reads nowhere else. Committed
-screenshots — evidence chosen for documentation — are `docs/screens/`, kept
-apart from `shots/` so the record does not drown in the noise.
-
-In the tree, each top-level directory has one job:
+Each top-level directory has one job:
 
 ```
 cmd/irgo-winvm/   the CLI: flags, handlers, exit codes. The one thing users install
-internal/         the CLI's packages (below). internal/ so nothing outside can import them
+internal/         the CLI's packages (see Architecture). internal/ so nothing outside can import them
 examples/         the four programs run on Windows and the Mac: probe, verify,
                   verify-events, glaze-all. mise run glaze:mac / glaze:windows
 site/             renders docs/ into the website
@@ -175,45 +74,295 @@ mise.toml         tools, environment, one-line tasks. They run .bin/irgo-winvm, 
 mise-tasks/       every task longer than a line, one script each; the path is the name
 ```
 
-and one rule decides the packages:
+### Go modules
+
+There are three modules. The split controls what reaches the shipped binary.
+
+| module | why it is separate |
+|---|---|
+| root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
+| `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
+| `site` | needs a markdown parser the tool has no business carrying |
+
+Verify the split with `go list -deps`, not by reading imports. The site module
+requires goldmark, its extensions and the chroma highlighter, and nothing else.
+That is why the generated MCP page is captured from the binary rather than
+produced by importing the server: importing it would pull the protocol SDK's
+dependency graph into the documentation generator.
+
+### Runtime data
+
+Everything the tool writes goes in one fixed place, with nothing to configure:
+
+```
+~/Library/Application Support/irgo-winvm/
+  media/    the ISO, the .esd it was built from, and scratch
+  bin/      binaries staged into a VM
+  logs/     every command, appended across runs
+  shots/    a screenshot per stage of every run
+  jobs/     long-running work, so a 45-minute install survives a disconnect
+  vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
+  golden.json            what is known about the golden image
+  mutation*.lock         the mutation locks, one machine-wide, one per VM, one for bin/
+```
+
+VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
+chosen as documentation are committed under `docs/screens/`, separate from
+`shots/`, so the record is not buried in per-run noise.
+
+## Architecture
+
+### Packages
 
 | package | holds |
 |---|---|
-| `internal/utmvm` | all three stages and everything they touch. **Do not split it** — iso, vm and app are coupled, and separating them means one reaching into another's paths |
+| `internal/utmvm` | all three stages and everything they touch. **Do not split it**: iso, vm and app are coupled, and separating them means one reaching into another's paths |
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
-| `internal/mcpserver` | the MCP surface, and **no behaviour of its own** |
-| `internal/job` | work that outlives the caller that started it — a 45-minute install an MCP client cannot wait on. Not in `utmvm` because all three stages start such work, and whoever owns it must be able to report a **dead** process |
-| `internal/glazecheck` | does glaze work: build the four examples, run them here or through app-create, record the verdict. Needs a checkout, so it is not in `utmvm`, which must work on a machine that has never seen this repo |
-| `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
+| `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
+| `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
+| `internal/glazecheck` | whether glaze works: build the four examples, run them here or through `app-create`, record the verdict. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
-Three Go modules, and the split is load-bearing rather than organisational:
+### Dependency direction
 
-| module | why it is its own |
-|---|---|
-| root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
-| `examples` | they build against **glaze and native**, which are the things under test and must never reach the shipped binary |
-| `site` | needs a markdown parser the tool has no business carrying |
+Dependencies run one way:
 
-Check it with `go list -deps`, not by reading imports. The site module requires
-goldmark, its extensions and the chroma highlighter, and nothing else, which is
-why the generated MCP page is captured from
-the binary rather than produced by importing the server — importing it would
-drag the protocol SDK's dependency graph into the documentation generator.
+- `vm` and `app` use the ISO API; nothing calls back into them from `iso`.
+- `mcpserver` depends on `utmvm` and `command`; neither depends on it.
+- `doctor` reports on all three stages by calling into them, not by holding its
+  own copy of where anything is.
 
-`mcpserver` depends on `utmvm` and `command`; neither depends on it.
-Behaviour that exists only when driven over MCP is a second answer to a question
-already answered, and it is the one nobody tests — the cycle tests drive the
-CLI and so does a developer. If a tool needs logic, the logic goes in `utmvm`
-where both callers get it.
+### The MCP server
+
+`irgo-winvm mcp` serves the same commands over the Model Context Protocol, on
+stdin/stdout or over HTTP (`-http`, loopback by default). Its purpose: an agent
+writing a Go desktop app on a Mac cannot otherwise find out whether the app
+works on Windows. Through this server it can ask, get an answer from a real
+Windows guest, and see the screen when the answer is that the app hung.
+
+Adding a command is two edits: declare it in `command.All` (name, summary,
+undo, whether it mutates), and add a `<name>Flags` func and a `run<Name>` func
+in the matching file in `cmd/irgo-winvm`, joined by one row in the table in
+`main.go`. The binary panics at start if the two lists disagree, and the MCP
+tool, its schema, the usage text and the site's reference follow on their own.
 
 It needs macOS on Apple Silicon, and UTM, which `vm-create` installs from its
 signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `iso-create` and removed by `iso-delete`, only when building media from scratch.
 
-One thing nothing can install for you: macOS asks, once, in a dialog, whether
-this may control UTM. `vm-create` checks that before doing anything expensive,
-because without it a boot cannot be driven and the failure arrives forty minutes
-into an install as a timeout that mentions nothing about permissions.
+- **Tools are generated from the command list** in `internal/command`, so they
+  are the commands and nothing else.
+- **The server holds no logic.** Behaviour reachable only over MCP is a second
+  answer to a question already answered, and nobody tests it: the cycle tests
+  and developers both drive the CLI. If a tool needs logic, it goes in `utmvm`,
+  where both callers get it.
+- **Uploads.** Over HTTP, an agent with no shared filesystem can send a
+  cross-compiled `.exe` in chunks with `app-upload`. It is staged
+  content-addressed under `bin/`, verified by SHA-256 before it is committed,
+  and then passed to `app-create` by path.
+- **Remote access.** Binding wider than loopback requires `-allow-remote` and
+  `IRGO_WINVM_TOKEN`. Read the [threat model](THREAT-MODEL.md) first.
+- **In this repository**, `.mcp.json` registers `irgo-winvm mcp` for any agent
+  working here, rebuilding `.bin/irgo-winvm` first. mise's output goes to
+  `/dev/null`, because stdout is the JSON-RPC channel. Before 30 Sep 2026 there
+  was no `.mcp.json`, so no agent working here was connected to the server.
+
+### Jobs
+
+`vm-create -install` (about 45 minutes), `iso-create -fetch` and
+`vm-golden-create` (always) start the work and return a job id instead of
+blocking on a connection that would time out.
+Over MCP, `glaze-check -windows` is a job too. The work outlives the client that
+started it; `status` reports what is running, what finished and how long it
+took. Whether a job is alive is answered by asking the operating system, not by
+reading a file that says so. Job records live in `jobs/` under the runtime data
+directory.
+
+### The mutation locks
+
+Every command that changes state takes the locks it declares in
+`command.All` (`Locks`), from three kinds (`internal/utmvm/lock.go`):
+
+| lock | guards | taken by |
+|---|---|---|
+| machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
+| per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
+| stage (`mutation-stage.lock`) | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+
+So `app-create` on two VMs runs side by side, and a second mutation of the same
+VM is **refused, not queued**, with exit code 6 and a message naming the busy
+lock. The VM is read from the command's own `-vm` flag, its name case-folded
+and a UUID resolved to the name, so every spelling lands on one lock. A lock is
+released when its holder dies (flock on macOS; nothing to lock elsewhere, hence
+`lock_darwin.go` and `lock_other.go`), and its file is never deleted: unlinking
+a flock file someone holds lets a third process lock a new file of that name.
+
+## Building, testing and linting
+
+The commands are in [CONTRIBUTING.md](CONTRIBUTING.md#before-you-push):
+`mise run go:check` and `mise run go:lint` before pushing, `mise run ci:watch`
+after. The cycle tests that need UTM and real media are in
+[Run the cycle tests](CONTRIBUTING.md#run-the-cycle-tests), and the glaze gates
+in [Does glaze work?](CONTRIBUTING.md#does-glaze-work).
+
+What the checks cover, and what they do not:
+
+- **`go:check` cross-compiles** for Linux and Windows as well as macOS. Deleting
+  a function from `sysfile_other.go` once passed every check being run, because
+  they all ran on darwin.
+- **`go:lint` pins `GOOS=darwin`**, so a Mac and the Linux CI runner lint the
+  same code. On Linux `statfsAvailable` is a stub that always errors, and
+  staticcheck rightly reports `fErr == nil && free < n` in `iso_create.go` as
+  never true (SA4023). That failed CI on every push from e1a4243 to 79f8a55,
+  while the same command passed on the Mac that wrote it.
+- **Unit tests cover the iso stage well**, and the vm and app stages only at the
+  edges. Anything touching a real guest is proven by running it, because those
+  paths fail silently. Use a disposable VM: running a binary pushes it into the
+  guest and executes it, and a 45-minute install is not worth losing to a test.
+- **Wait for CI with `mise run ci:watch`**, never a hand-written `sleep` loop.
+  There were five such loops before the task existed; two were wrong in the same
+  way. It watches every workflow the commit started, not just `check`, exits
+  non-zero if any failed, and takes `SHA=<commit>` for a commit other than HEAD.
+
+### mise tasks
+
+`mise tasks` lists them. `mise.toml` holds the tools, the environment and the
+one-line tasks. Anything longer is an executable script in `mise-tasks/`, where
+the path is the name (`mise-tasks/go/check` is `go:check`), `#MISE` lines at the
+top declare its description and dependencies, and findings are comments beside
+the lines they explain. Until 30 Sep 2026 all of it was shell inside TOML
+strings: 516 lines that no editor, `bash -n` or shellcheck could see.
+
+A task exists only for what the binary cannot do on its own: checks, builds,
+the glaze gates, upstream work and the create-and-delete cycles. No task merely
+wraps a command; call the command.
+
+- **Tools are pinned in `mise.toml` and nowhere else**, so CI installs what a
+  maintainer has; `jdx/mise-action` reads it. Every `go.mod` says `go 1.27.1` to
+  match. mise's reading of the Go version from `go.mod` is deprecated (removed
+  in 2026.11.0), hence the pin.
+- **`go:tool` is the one build of the tool.** Every task runs `.bin/irgo-winvm`
+  rather than `go run ./cmd/irgo-winvm`, and `.bin` is on `PATH` in this
+  directory, so `irgo-winvm doctor` works by hand. `sources` and `outputs` let
+  mise skip the build when nothing under `cmd/` or `internal/` changed. From
+  977136e to 30 Sep 2026 the task built `./irgo-winvm` while `outputs` named
+  `.bin/irgo-winvm`, so every task and `.mcp.json` ran whatever stale binary
+  `.bin` held (in a fresh clone, none). mise warned on every run — `did not
+  generate expected output` — and nobody read it. After editing `cmd/` or
+  `internal/`, run any task or `mise run go:tool` before calling the binary by
+  hand.
+- **`site:build` renders the markdown and never hand-written pages**, so the
+  site cannot drift from the repository. **`site:serve` builds and serves in one
+  command** on purpose: a separate server can be pointed at a stale `dist`.
+- **`vm:shots` copies the newest screenshot of each stage** from `shots/` into
+  `docs/screens/vm` under its stage name. The originals carry timestamps, so no
+  document can point at them.
+- **`UPSTREAM_DIR`** is where the local glaze and native clones live, read by the
+  `upstream:*` tasks. It was restored from the `mise.toml` deleted in e533764.
+
+## Engineering conventions
+
+Each of these exists because its absence caused a real defect here.
+
+### One way to do each thing
+
+Every operation has exactly one implementation, and every question (where media
+lives, how a binary runs in the guest) has one answer. A second route is a
+second answer that drifts. Example: there were once four ways to run a binary in
+the guest, differing only in where it landed and which session ran it, and
+three answers to where media lives, all in use at once.
+
+### Nothing reports success it did not verify
+
+A function returns success only after checking that the effect happened. An
+operation that cannot report failure also cannot be undone, because it does not
+know what it did. Example: a download was renamed into place without checking
+its length. The same defect appeared as `ExitCode: 0` when the output could not
+be fetched, `nil` after five failed boots, an error value that could never be
+non-nil, and an ISO built and never checked. Closing a file you *wrote* can fail
+— that is where a full disk shows up — so that error is checked; closing a file
+you read cannot.
+
+### Commands come in do/undo pairs
+
+Every command that changes state has an undo, so a failed step can be cleaned up
+and re-run. The undo must work from any starting point, and deleting nothing is
+success, so it can run twice. Example: `cmd`'s `del` exits 1 on a glob that
+matches nothing, so an undo built on it succeeded while there was something to
+remove and failed as soon as there was not.
+
+### Guards answer yes, no, or cannot tell
+
+A guard written `if ok && bad { refuse }` allows the action when the question
+cannot be answered. Every guard here protects something destructive, so that is
+backwards. Guards return three answers — yes, no, *could not determine* — and
+the caller handles the third explicitly, refusing by default. Example:
+`glaze-status` reports each recorded verdict as current, stale or cannot tell,
+and `glaze-check` ends with `YES`, `NO` or `CANNOT TELL` when the guest agent
+went away.
+
+### Every check has a negative control
+
+A test that cannot fail is not a test. When writing one, break the code it
+covers, watch the test fail, and restore it; record the control in the test's
+comment. Example: a test for the scan cache passed against a mutation that
+disabled the check it covered, because its test case also changed the other
+field.
+
+If a property can only be verified by measurement, record the measurement with
+a date in [RESULTS.md](RESULTS.md) rather than writing a test that looks like
+coverage; a test for "the build records its verdict" is marked as not proving
+that, because deleting the build's call leaves it green. Controls are run by
+hand, not automated: a mise task that applied eight mutations matched exact
+source text, broke on the first rename, once left a mutated file in a commit,
+and was removed.
+
+### Measure, do not assert
+
+Behaviour of UTM, Windows and the filesystem is established by running it, not
+by reasoning. Example: a length check added to the downloader was unreachable,
+because `net/http` already rejects a short body — proven by disabling the check
+and watching the test still pass. The other measured surprises are in
+[Known traps](#known-traps). For code, use the compiler and analysers rather
+than grep, which counts comment mentions as call sites and gave three wrong
+answers in one afternoon: delete the symbol, rebuild, run the tests, and put it
+back if either fails. `mise run go:lint` finds what grep does not.
+
+### Say what is happening, and where
+
+A command that prints nothing for fifty seconds cannot be told apart from one
+that has hung. Announce each step before doing it, name every path, and print
+elapsed time; "not found" without a location cannot be checked. Example: the
+77-second ARM64 scan was always there and was found only once the tool said so.
+
+### Comments follow Go norms
+
+A doc comment says what the thing does and, in a sentence or two, the
+non-obvious why. A measured trap or a warning stays in the code, tightly worded:
+why the display is `virtio-ramfb-gl`, why ESD image 3 needs `--boot`, why
+`utmctl suspend --save-state` must never be called. The story of how it was
+found belongs in [RESULTS.md](RESULTS.md) or the traps table below, not in the
+code. If a comment is wrong, fix the fact, and look for any other copy of a
+measurement you correct.
+
+### Upstream bugs are fixed upstream
+
+A bug in glaze or native is fixed in [crgimenes](https://github.com/crgimenes),
+not worked around here. A workaround in an example still ships the bug to every
+user of those libraries and hides it. Example: `examples/glaze-all` carries one
+marked stand-in for the `ErrUnsupported` fix, to be deleted when a release
+contains it. [UPSTREAM.md](UPSTREAM.md) is the ledger.
+
+### Do not
+
+- Split `internal/utmvm`. Its parts are coupled.
+- Touch the assets, the answer file or the plist template without running a real
+  install. UTM rejects a bad config with one generic *"cannot import this VM"*
+  that names no field.
+- Export anything nothing uses.
+- Put logic in a task, whether in `mise.toml` or `mise-tasks/`. Tasks call the
+  binary; anything more belongs in the binary.
+- Land a refactor in one commit. One concern per commit, each verified.
 
 ## The commands
 
@@ -223,153 +372,124 @@ into an install as a timeout that mentions nothing about permissions.
 | **`vm-create`** | a VM with Windows on it, answering | `vm-delete` |
 | **`app-create`** | your `.exe` running in that VM, output back | `app-delete` |
 
-They run in that order, and each is cheap to repeat: if it is already done, it
-says so and stops. The undo is what lets a step that failed be cleaned and
-re-run, rather than leaving the machine somewhere between two states.
+They run in that order, and each is cheap to repeat: if the work is already
+done, it says so and stops.
 
-### A VM in minutes: the golden image
+Once one VM has been installed, **`vm-golden-create`** (undo
+**`vm-golden-delete`**) seals it into a [golden image](#the-golden-image), and
+`vm-create` then clones that instead of installing.
 
-| step | what it gets you | undo |
-|---|---|---|
-| **`vm-golden-create -vm <disposable>`** | that VM sealed into `irgo-golden`, which `vm-create` then clones | `vm-golden-delete` |
+Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
+reports what is installed and where, and **`status`** lists long-running
+[jobs](#jobs).
 
-Installing Windows is the 45 minutes, and nothing used to keep its result. So
-make one VM the slow way under a throwaway name (`vm-create -vm g1 -install
--golden=false`), seal it once, and from then on **`vm-create -vm <name>`
-clones the golden image and boots the clone** — no media, no install, and no
-UTM restart, so every other VM keeps running. Each developer or agent takes its
-own name and gets its own VM; `vm-delete` removes it. With no golden image,
-`vm-create` says it is falling back to a full install and does that;
-`-golden=false` installs even when there is one.
+Two work only **in a checkout of this repository**, because they build and read
+`examples/`:
 
-What sealing does, in the guest as SYSTEM (`assets/vm-golden-seal.ps1`, one
-step at a time, the disk's allocation printed after each): BitLocker off and
-`PreventDeviceEncryption` set, hibernation off, `DISM
-/StartComponentCleanup /ResetBase`, TRIM. Then Windows shuts itself down, UTM
-clones it as `irgo-golden` keeping only the NVMe system disk (the install,
-answer-file and guest-tools CDs are dropped), a throwaway clone of that is
-booted to prove it answers and deleted, and a manifest — Windows build,
-WebView2 version, sizes, seal and boot times — goes to `golden.json` under the
-application root. `doctor` reports both.
+- **`glaze-check`** builds the four [example programs](#the-example-programs)
+  and runs them, natively on this Mac or, with `-windows`, in the VM through
+  `app-create`. It records the verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md), a
+  generated file: when, which commit, which glaze and native were built against
+  (from `go list -m`, so a `go.work` pointing at local clones is named with the
+  clone's branch and commit), and each program's PASS or FAIL with the first
+  line that said FAIL. The Mac and Windows sections are separate, so one run
+  never erases the other. Each run keeps its full output as
+  `glaze-<target>-<stamp>.log` in the log directory `doctor` names, and prints
+  that path first and last.
+- **`glaze-status`** prints the recorded file and says, per section, whether it
+  still describes the tree: current, stale (and why), or cannot tell.
 
-Why it is built this way, each measured on 30 Sep 2026
-(`.plans/2026-09-30_1700_vm-golden-image.md`):
-
-- **Windows 11 24H2 encrypts the disk on its own**, and ciphertext does not
-  compress: every used block of `irgo-win11`'s disk was XTS-AES. The answer file
-  now sets `PreventDeviceEncryption` in specialize, and sealing decrypts VMs
-  made before that.
-- **This process cannot read or write UTM's container.** macOS App Data
-  protection refuses `ls`, `cat` and `touch` in
-  `~/Library/Containers/com.utmapp.UTM` even unsandboxed; `stat` on a known path
-  works. So every change to a bundle goes through UTM's AppleScript
-  (`assets/utm-clone.applescript`), which can, and needs no Full Disk Access.
-- **UTM's clone is `copyfile` with CLONE and DATA_SPARSE**: instant on APFS,
-  sparse, and costing nothing until the clone writes. It always gives a new
-  UUID, but keeps the MAC unless a global UTM setting that defaults to off says
-  otherwise — and two clones with one MAC fight over one DHCP lease. So every
-  clone gets `randomMAC()`, and the MAC UTM reports back is checked.
-- **The clone copies BSD flags**, so a bundle holding the immutable media's
-  inode would clone into one UTM cannot then tidy (`EPERM`). Sealing releases
-  that one known file for the clone and restores it.
-- **No sysprep.** It would re-run OOBE and risk the `dev` setup, for a machine
-  SID nothing standalone cares about. Every clone is `WIN11ARM` on the network.
-- **Only locally, only for yourself.** The Windows licence forbids passing the
-  image to anyone, and every running clone needs its own licence. There is no
-  public download of it and there will not be one.
-
-`vm-golden-create` refuses `irgo-win11` without `-force`, and refuses when it
-cannot find out which VM it was given. Over MCP it is always a job: sealing is
-many minutes even when there is nothing to decrypt.
-
-### Several VMs at once: the locks
-
-A mutation is refused, never queued, while another holds a lock it needs (exit
-6). There are three kinds (`internal/utmvm/lock.go`), and each command declares
-which it takes in `internal/command`:
-
-| lock | guards | taken by |
-|---|---|---|
-| machine | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` for the seconds its clone takes |
-| one per VM | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
-| stage | `bin/`, the staged binaries | `app-upload`, `app-delete` |
-
-So `app-create` on two VMs runs side by side, and the same VM twice is refused.
-They are `flock`s under the application root, released when the holder dies,
-and never deleted: unlinking a lock file someone holds lets a third process lock
-a new file of the same name.
-
-The one full-install step that still restarts UTM (to make it see a bundle
-written to its folder) refuses while any other VM is running or paused, and when
-`utmctl list` cannot answer. Quitting UTM stops every VM it runs; before
-30 Sep 2026 nothing in the binary checked.
-
-Three more change nothing: **`vm-screen`** photographs the VM, **`doctor`**
-reports what is here, and **`status`** lists long-running work — what is still
-going, what finished, and how long it has been. Whether a job is alive is
-answered by asking the operating system, not by reading a file that says so.
-
-Two more work only **in a checkout of this repository**, because they build
-and read `examples/`: **`glaze-check`** builds the four programs and runs them —
-natively on this Mac, or with `-windows` on the VM through `app-create` — and
-records the verdict in [GLAZE-STATUS.md](GLAZE-STATUS.md), a generated file:
-when, which commit, which glaze and native were actually built against (from
-`go list -m`, so a go.work pointing at local clones is named with the clone's
-branch and commit), and each program's PASS or FAIL with the first line that
-said FAIL. The Mac and Windows sections are separate, so one run never erases
-the other's answer. Every run also keeps its complete output as
-`glaze-<target>-<stamp>.log` in the log directory `doctor` names, and prints
-that path first and last. **`glaze-status`** prints the recorded file and says,
-for each section, whether it still describes the tree — current, stale (and
-why), or cannot tell. Outside a checkout both exit 2 and say where they looked.
-They are in the shipped binary anyway because an MCP tool can only be a command,
-and the agent most likely to ask "does glaze work on Windows?" is the one
-`.mcp.json` starts inside this repository; the reasoning is in
-`internal/glazecheck/doc.go`. glaze and native still never reach the binary:
-the examples are built by running `go`. Over MCP, `glaze-check -windows` is a
-job, like `vm-create -install`: call `status`, then `glaze-status`.
-
-The calls that take a long time — `vm-create -install`, `iso-create -fetch`
-and `vm-golden-create` — start the work and hand back a job id rather than
-blocking for 45 minutes on a connection that will time out. The work outlives the client that
-asked for it; `status` is how anyone finds out what happened.
+Outside a checkout both exit 2 and say where they looked. They ship in the
+binary anyway because an MCP tool can only be a command, and the agent most
+likely to ask "does glaze work on Windows?" is the one `.mcp.json` starts in
+this repository; the reasoning is in `internal/glazecheck/doc.go`. glaze and
+native still never reach the binary: the examples are built by running `go`.
+Over MCP, `glaze-check -windows` is a job: call `status`, then `glaze-status`.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
 
-Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
-explains the sequence. No document here lists flags, so none can go stale about
-them: the [command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)
+Every command that takes flags documents them with `-h`, and `irgo-winvm help`
+explains the sequence. No document lists flags, so none can go stale: the
+[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)
 is captured from the binary at build time.
 
-### For an agent: `mcp`
+## The golden image
 
-An agent working **in this repository** gets it automatically: `.mcp.json`
-registers `irgo-winvm mcp`, rebuilding `.bin/irgo-winvm` first (mise's output
-goes to /dev/null, since stdout is the JSON-RPC channel). Before 30 Sep 2026
-there was no `.mcp.json`, so the server existed and no agent here was connected
-to it.
+A golden image is an installed Windows, sealed once, that every new VM is
+cloned from instead of installed. It turns "a VM of my own" from about 45
+minutes into a clone and a boot, and it lets several developers or agents on
+one Mac each have a VM without stopping anybody else's.
 
-**`irgo-winvm mcp`** serves the same commands over the Model Context Protocol,
-on stdin and stdout or over HTTP (`-http`, loopback by default). It is the point
-of the repository pointed at its most likely user: an agent writing a Go desktop
-app on a Mac cannot find out whether it works on Windows, and this lets it ask,
-get a real answer from real Windows, and see the screen when the answer is that
-it hung. The tools are generated from the command list, so they are the commands
-and nothing else.
+| command | what it does | undo |
+|---|---|---|
+| **`vm-golden-create -vm <disposable>`** | seals that VM and registers the result as `irgo-golden` | `vm-golden-delete` |
+| **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
 
-Over HTTP, an agent that has just cross-compiled a `.exe` and has no shared
-filesystem with the Mac can send it in chunks with **`app-upload`** — staged
-content-addressed under `bin/`, verified by SHA-256 before it is committed —
-then hand the staged path to `app-create`. A wider bind than loopback needs
-`-allow-remote` and `IRGO_WINVM_TOKEN`; read [the threat model](THREAT-MODEL.md)
-before opening one.
+The first VM is still installed the slow way, under a throwaway name:
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`. With
+no golden image, `vm-create` says it is falling back to a full install and
+does that; `-golden=false` installs even when there is one.
+
+**Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
+the guest, as SYSTEM, one step at a time with the disk's allocation printed
+after each):
+
+1. boot the source VM and wait for its agent;
+2. BitLocker off (and `PreventDeviceEncryption` set), hibernation off,
+   `DISM /StartComponentCleanup /ResetBase`, TRIM;
+3. shut Windows down from inside and wait for UTM to report it stopped;
+4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
+   (the install, answer-file and guest-tools CDs are dropped);
+5. clone the golden image once more, boot that clone until its agent answers,
+   and delete it, so an image that does not boot is never reported made;
+6. write `golden.json`: source, Windows build, WebView2 version, allocated and
+   apparent size, seal and boot times, tool version. `doctor` reports it.
+
+It refuses `irgo-win11` without `-force`, and refuses when it cannot find out
+which VM it was given. The source is left sealed and stopped, an ordinary VM
+that `vm-delete` removes.
+
+**Cloning** (`CloneFromGolden`) takes the machine lock for the clone itself,
+seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new
+VM's lock only. It refuses when the golden image is running (it must stay
+stopped: UTM will not clone a running VM, and a golden image that has booted is
+no longer the one its manifest describes) and when free space is below 10 GiB,
+an estimate of how much a clone grows until it is measured.
+
+Why it is built this way:
+
+- **Everything goes through UTM.** macOS App Data protection refuses this
+  process `ls`, `cat` and `touch` in `~/Library/Containers/com.utmapp.UTM`, even
+  unsandboxed; `stat` on a known path works. UTM can do all of it to its own
+  folder, so clone, import, drive changes and delete are AppleScript
+  (`assets/utm-*.applescript`), and no Full Disk Access is needed.
+- **UTM's clone is `copyfile` with CLONE and DATA_SPARSE**: instant on APFS,
+  sparse, free until the clone writes. It always assigns a new UUID and renames
+  the bundle with the VM.
+- **It keeps the MAC** unless UTM's global `IsRegenerateMACOnClone` is on, which
+  defaults to off. Two clones with one MAC compete for one DHCP lease, so every
+  clone is given `randomMAC()`, and the MAC UTM reports back is checked.
+- **Nothing restarts UTM.** A new bundle is written to `vm/staging/` and UTM
+  imports it; the install medium is ejected with `update configuration` on the
+  stopped VM. Quitting UTM would stop every VM it runs.
+- **Decrypted, because ciphertext does not compress.** Windows 11 24H2 turned
+  Device Encryption on by itself; the answer file now prevents it at install,
+  and sealing decrypts VMs made before that. This also removes the risk of a
+  TPM protector locking a clone out.
+- **No sysprep.** It re-runs OOBE and risks the `dev` setup, for a machine SID
+  nothing standalone uses. Every clone is `WIN11ARM` on the network.
+- **Local only.** The Windows licence forbids passing the image to anyone else,
+  and every running clone needs its own licence. There is no public download.
+
+The research, and what is measured and what is not, is in
+`.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
 
 ## What it exits with
 
-`utmctl` exits 0 when it fails, which this repository has been bitten by more
-than once. So this tool is the only honest signal a caller gets, and it says
-something specific:
+`utmctl` exits 0 when it fails (see [UPSTREAM.md](UPSTREAM.md#utm)), so this
+tool's exit code is the only reliable signal a caller gets. Each code means one
+thing:
 
 | code | meaning |
 |---|---|
@@ -381,17 +501,16 @@ something specific:
 | **5** | refused — a destructive command without `-force` |
 | **6** | refused — another mutation is in progress |
 
-**1 is your program, not this tool.** The guest's own exit code is *not* passed
-through: a binary exiting 3 exits `app-create` **1**, and names its real code in
-the message. That is deliberate — a failing program and a missing VM must not
-look the same to a script.
+**1 is your program, not this tool.** The guest's exit code is *not* passed
+through: a binary exiting 3 makes `app-create` exit **1**, and the message names
+the real code. A failing program and a missing VM must not look the same to a
+script.
 
-**4 and 6 are the ones worth retrying.** Windows Update takes the agent away
-for minutes at a time; the VM is fine and will answer again. `app-create`
-already waits and tries to recover before giving up, which is why it can take
-several minutes to reach that code. 6 means another mutation holds a lock this
-one needs — the message names which, the VM or the machine — and the holder
-finishes on its own schedule, so waiting changes the answer.
+**4 and 6 are worth retrying.** Windows Update takes the guest agent away for
+minutes at a time while the VM is fine. `app-create` already waits and tries to
+recover before giving up, which is why it can take several minutes to return 4.
+6 means another mutation holds a [lock](#the-mutation-locks) this one needs,
+and the message names which; the holder finishes on its own schedule.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.
@@ -411,30 +530,19 @@ intends to close.
 |---|---|---|
 | the `.esd` from Microsoft | **4.2 GB** | downloaded once, from a source that rate-limits |
 | scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
-| the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
+| the built ISO | **~4.9 GB** | cloned into the VM (APFS), not copied |
 | the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
 
 About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
 `-all`, because rebuilding the ISO from it is local work, while losing it means
 downloading 4.2 GB again.
 
-## Linux is out of scope
+## The VM and the dev account
 
-This repository is the Windows VM system: Windows is the platform whose
-behaviour cannot be checked by reading the code from a Mac, and everything in it
-— the answer file, the ISO mastering, the guest agent, the session model — is
-Windows-specific. Linux would need its own guest image and its own path, and it
-is not built here. The `linux` builds in CI exist only so the tool compiles for
-a developer on another OS, not because it can drive a Linux guest.
-
-## What the VM is, and who you are inside it
-
-Fixed, and not settable by a flag. Changing one means editing `setDefaults` in
-`internal/utmvm/vm_create.go` — there is deliberately no way to ask for a different
-shape, because a VM that differs between two machines is a result that cannot
-be compared.
-Nothing in the tree records *why* these particular numbers, only that they are
-fixed.
+The VM's shape is fixed and not settable by a flag, because a VM that differs
+between two machines gives results that cannot be compared. Changing it means
+editing `setDefaults` in `internal/utmvm/vm_create.go`. Nothing in the tree
+records *why* these particular numbers were chosen, only that they are fixed.
 
 | | value | |
 |---|---|---|
@@ -444,48 +552,52 @@ fixed.
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 
 The guest logs itself in as **`dev`**, an administrator, with the password
-**`dev`** in plaintext in `internal/utmvm/assets/autounattend.xml`, auto-logon enabled
-for 999 logons, and RDP switched on.
+**`dev`** in plaintext in `internal/utmvm/assets/autounattend.xml`, auto-logon
+enabled for 999 logons, and RDP switched on. VMs created now have a `dev`
+password that never expires.
 
-That password is not a leaked credential and is not to be "fixed". Setup needs
-it in plaintext to create the account and log in with nobody typing, which is
-the entire point of an unattended install. It guards a throwaway VM with no
-inbound route from anywhere but this Mac, and it is deliberately obvious so
-nobody mistakes it for a secret that matters. **Do not copy that answer file to
-anything reachable from a network you do not control.**
+> [!WARNING]
+> The `dev` password is deliberate, not a leaked credential, and is not to be
+> "fixed". Setup needs it in plaintext to create the account and log in with
+> nobody typing, which is the point of an unattended install. It guards a
+> throwaway VM with no inbound route except from this Mac, and it is obvious so
+> nobody mistakes it for a secret. **Do not copy that answer file to anything
+> reachable from a network you do not control.**
 
 ### Why `-gui` exists
 
 The QEMU guest agent runs as `NT AUTHORITY\SYSTEM` in **session 0**, which has
-no window station. Anything that opens a window fails there — and fails
-confusingly: glaze reports it as `webview2: environment/controller creation
-failed`, which reads like a missing WebView2 runtime and is not. The runtime was
-present and healthy (151.0.4129.78) while that failure persisted.
+no window station. Anything that opens a window fails there, confusingly: glaze
+reports `webview2: environment/controller creation failed`, which reads like a
+missing WebView2 runtime. It is not — the runtime was present and healthy
+(151.0.4129.78) while that failure persisted.
 
-`-gui` routes through a scheduled task with `/it`, which runs as the logged-in
-user in their session, which has a desktop. The auto-logon above is what
-guarantees such a session exists. It also stages the binary in `C:\Users\Public`
-rather than `C:\Windows\Temp`, because the interactive user must be able to
-execute it.
+`-gui` runs the program through a scheduled task with `/it`, as the logged-in
+user in their session, which has a desktop. Auto-logon guarantees that session
+exists. It also stages the binary in `C:\Users\Public` rather than
+`C:\Windows\Temp`, because the interactive user must be able to execute it.
 
-So: headless work needs no flag, anything with a window needs `-gui`, and that
-split is enforced by the operating system rather than chosen here.
+Headless programs need no flag; anything with a window needs `-gui`. The
+operating system enforces that split.
 
 ### When `-gui` stops working on an old VM
 
-Windows expires local passwords after 42 days. AutoLogon then stops, so there
-is no desktop session and every `-gui` run has nowhere to go. An interrupted
-WebView2 update can also leave its registration naming a deleted folder, and
-glaze then reports WebView2 as missing (glaze#34). `irgo-winvm vm-repair -reboot`
-fixes both as SYSTEM, and `app-create -gui` refuses up front, naming the
-problem, when nobody is logged in, instead of waiting out its timeout. VMs made
-now have a `dev` password that never expires.
+- **Expired password.** Windows expires local passwords after 42 days. AutoLogon
+  then stops, there is no desktop session, and every `-gui` run has nowhere to
+  go. Affects VMs created before the never-expiring password.
+- **Stale WebView2 registration.** An interrupted WebView2 update can leave its
+  registration naming a deleted folder, and glaze then reports WebView2 as
+  missing ([glaze#34](https://github.com/crgimenes/glaze/issues/34)).
 
-## The four programs it runs
+`irgo-winvm vm-repair -reboot` fixes both, running as SYSTEM. `app-create -gui`
+refuses up front, naming the problem, when nobody is logged in, instead of
+waiting out its timeout.
 
-Split by what a capability *needs*, with exactly one owner each. A capability
-probed in two places is two things to fix when upstream changes and two reports
-to reconcile when they disagree.
+## The example programs
+
+Each capability is probed by exactly one program, split by what the capability
+needs. A capability probed in two places is two things to fix when upstream
+changes and two reports to reconcile when they disagree.
 
 | program | library | needs |
 |---|---|---|
@@ -495,115 +607,64 @@ to reconcile when they disagree.
 | `examples/verify-events` | glaze — the Events bridge | `-gui` |
 
 `glaze-all` opens its window and waits by default, because it is an example
-before it is a test. `-probe` is the unattended report, and `glaze-check`
+before it is a test. `-probe` gives the unattended report, and `glaze-check`
 passes it.
 
-## Things that cost hours
+## Known traps
 
-Each of these fails silently. UTM rejects a bad config with one generic *"cannot
-import this VM"* that names no field; a wrong boot command produces a prompt
-nobody sees; a truncated ISO produces a VM that will not boot.
+Each of these fails silently or misleadingly. UTM rejects a bad config with one
+generic *"cannot import this VM"* that names no field; a wrong boot command
+produces a prompt nobody sees; a truncated ISO produces a VM that will not boot.
 
-One line each, deliberately. The rows about `utmctl` are **defects in UTM**, not
-facts of life, and they are written up properly in
-[UPSTREAM.md](UPSTREAM.md#utm) — severity, reproduction and status. Keep the
-detail there and the reminder here; two full copies is the drift this file warns
-about three sections above.
+One line each. The `utmctl` rows are **defects in UTM**, written up with
+severity, reproduction and status in [UPSTREAM.md](UPSTREAM.md#utm); keep the
+detail there and only the reminder here.
 
-| trap | what happens |
-|---|---|
-| `virtio-gpu-pci` display | no framebuffer on aarch64, no legacy VGA — guest boots **invisibly** and looks hung |
-| VirtIO system disk | Windows ARM64 has no inbox driver; Setup reports no drive found. Use **NVMe** |
-| `virtio-net-pci` without guest tools | no inbox driver — **no network at all** in the guest |
-| missing `PS2Controller` | non-optional decode, no default; whole document rejected |
-| `UsbBusSupport: "USB3_0"` | the enum is `"2.0"` / `"3.0"` |
-| `CPUFlags` | the keys are `CPUFlagsAdd` and `CPUFlagsRemove` |
-| reading UTM's schema from `main` | `main` was v5.0.4 while the app was v4.7.5, and they disagree. Read the **tag** |
-| `gh run list --commit` with a short SHA | matches the **full 40 characters only**. An abbreviated one returns an empty list, not an error — indistinguishable from "not started yet". Use `mise run ci:watch` |
-| Windows ISOs are **UDF**, not ISO9660 | `install.wim` exceeds ISO9660's 4 GB limit, so ISO9660 readers fail on every path |
-| answer file on a FAT disk | Setup ignores it and runs interactive. Use an ISO9660 **CD** |
-| ISO padded past its declared volume size | mounts fine on macOS, ignored by Setup. Trim to the PVD size |
-| Joliet disabled | `autounattend.xml` becomes `AUTOUNAT.XML`, which Setup never looks for |
-| El Torito marked BIOS (`-b`) | correctly sized, correctly named, **does not boot**. UEFI needs `-e` |
-| `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs |
-| `utmctl start` then keystrokes | headless VM has no display, and UTM routes input through it — keystrokes vanish |
-| driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell. Keystrokes land in whatever has focus — see `docs/screens/vm/running-no-agent.png`, three Bing tabs searching for the EFI path |
-| `utmctl delete` | prints its failure and **exits 0** |
-| `utmctl exec` | never returns the guest's output and always exits 0. Everything that needs output goes through a batch file that captures it to a file the host then pulls |
-| `utmctl exec` with a whole command line as one string | the agent looks for a file by that entire name and answers "No such file or directory" — indistinguishable from a dead agent |
-| `cmd` `del` on a glob matching nothing | **exits 1**. So an undo succeeds while there is something to undo and fails the moment there is not |
-| `dir` and `del` disagree on the message | `dir` says "File Not Found", `del` says "Could Not Find". Handling one and not the other prints the other's error text as if it were a filename |
-| `utmctl suspend --save-state` | **reports success and power-cuts the guest.** No state file, VM left `stopped`, guest's next boot goes through "Diagnosing your PC". Use plain `suspend` |
-| `ln` to an immutable file | `EPERM` — so protecting the ISO silently turns a hardlink into a 5 GB copy |
-| `rm` on a bundle holding that hardlink | `EPERM`, directory left behind. Clear the flag first, restore it after |
+### Host, UTM and the ISO
+
+| trap | symptom | what to do |
+|---|---|---|
+| `virtio-gpu-pci` display | no framebuffer on aarch64 and no legacy VGA; the guest boots **invisibly** and looks hung | use `virtio-ramfb-gl` |
+| VirtIO system disk | Windows ARM64 has no inbox driver; Setup reports no drive found | use **NVMe** |
+| `virtio-net-pci` without guest tools | no inbox driver, **no network at all** in the guest | install the guest tools |
+| missing `PS2Controller` | non-optional decode with no default; the whole config is rejected | include it |
+| `UsbBusSupport: "USB3_0"` | config rejected | the enum is `"2.0"` / `"3.0"` |
+| `CPUFlags` | config rejected | the keys are `CPUFlagsAdd` and `CPUFlagsRemove` |
+| UTM's schema read from `main` | `main` was v5.0.4 while the app was v4.7.5, and they disagree | read the schema at the **tag** of the installed version |
+| `gh run list --commit` with a short SHA | an empty list, not an error — indistinguishable from "not started yet"; it matches the **full 40 characters only** | use `mise run ci:watch` |
+| reading a Windows ISO as ISO9660 | every path fails: the ISOs are **UDF**, because `install.wim` exceeds ISO9660's 4 GB limit | read it as UDF |
+| answer file on a FAT disk | Setup ignores it and runs interactively | put it on an ISO9660 **CD** |
+| ISO padded past its declared volume size | mounts on macOS, ignored by Setup | trim to the PVD size |
+| Joliet disabled | `autounattend.xml` becomes `AUTOUNAT.XML`, which Setup never looks for | keep Joliet on |
+| El Torito marked BIOS (`-b`) | correctly sized and named, **does not boot** | UEFI needs `-e` |
+| `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs | expand the name with `for` first, as `autounattend.xml` does |
+| `utmctl start`, then keystrokes | a headless VM has no display, UTM routes input through it, and the keystrokes vanish | start it through UTM itself so a display opens (`StartWithDisplay`) |
+| driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell; keystrokes land in whatever has focus (`docs/screens/vm/running-no-agent.png`: three Bing tabs searching for the EFI path) | never type at a VM this code did not just start; look at `vm-screen` |
+| `utmctl delete` | prints its failure and **exits 0** | check that the bundle is gone afterwards |
+| bundle removed behind UTM's back | `utmctl` will not drop a registry entry whose bundle is gone, leaving a phantom it cannot recover from | delete through `utmctl`. To recover a phantom, recreate an empty stub at the expected path so UTM has something to remove |
+| `utmctl exec` | never returns the guest's output and always exits 0 | run a batch file that captures output to a file, then pull the file |
+| `utmctl exec` with a whole command line as one string | the agent looks for a file by that entire name and answers "No such file or directory" — indistinguishable from a dead agent | pass arguments separately |
+| `utmctl suspend --save-state` | **reports success and power-cuts the guest**: no state file, VM left `stopped`, next boot goes through "Diagnosing your PC" | use plain `suspend` |
+| `cmd` `del` on a glob matching nothing | **exits 1**, so an undo fails as soon as there is nothing left to undo | treat "nothing matched" as success |
+| `dir` and `del` report a missing file differently | `dir` says "File Not Found", `del` says "Could Not Find"; handling only one prints the other's text as if it were a filename | handle both |
+| `ln` to an immutable file | `EPERM`, so protecting the ISO silently turned a hardlink into a 5 GB copy | clear the flag first, restore it after |
+| `rm` on a bundle holding that hardlink | `EPERM`, directory left behind, so every VM built from a protected ISO was undeletable | clear the flag first, restore it after |
+| a length check on a download | unreachable: `net/http` already rejects a short body | do not add one; it was proven dead by disabling it |
+| reading or writing UTM's container | `Operation not permitted` for `ls`, `cat`, `touch`, even unsandboxed (macOS App Data protection); `stat` on a known path works | have UTM do it through AppleScript |
+| a bundle written into UTM's folder | UTM only rescans at launch, and restarting it stops every running VM | write it elsewhere and `import` it |
+| `utmctl clone` / `duplicate` | keeps the source's MAC unless a global setting (default off) says otherwise; two clones fight over one DHCP lease | set the MAC in the same `duplicate ... with properties` |
+| an APFS clone of an immutable file | the clone is immutable too (`copyfile` copies BSD flags), so UTM cannot delete it later | clear the flag on the clone |
+| Windows 11 24H2 left alone | encrypts the disk on its own (Device Encryption), so a copy of it does not compress | `PreventDeviceEncryption` in specialize; decrypt before sealing |
 
 ### In the guest programs
 
-| trap | what happens |
-|---|---|
-| every package defines its **own** `ErrUnsupported` | none wrap `errors.ErrUnsupported`, so a check against that alone matches nothing and a platform behaving as documented reports **FAILED** with a non-zero exit. `glaze.SetAppIcon` is unsupported on Windows by design — the platform this exists to test |
-| `tray.Run` **blocks**, driving the event loop until `Stop` | waiting on it deadlocks. Post it and leave it; `Stop` is safe from any goroutine |
-| the tray started **before** the window | glaze's `New` runs a temporary `[NSApp run]` that ends only when `applicationDidFinishLaunching` fires — once per process. A tray started first consumes it and `glaze.New` blocks forever, with no window and nothing printed |
-| `menu.Set` with no `Options.Window` | required on Windows (the HWND); it returns an error naming it, on the one platform that matters here |
-| `menu.Set` with `Options.Dispatch` set **before** `Run` | Set blocks until its UI work has run, and nothing drains the queue until the run loop starts |
-| `file://` URL built by concatenation | Windows paths are `C:\dir`; the URL wants `file:///C:/dir`. Without the leading slash `net/url` writes `file:C:/dir` and ShellExecuteW rejects it |
-| `openurl.Open != nil` as a capability check | a function value is never nil. `go vet` says so outright — the check checked nothing |
-| an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` sub-resource names a scheme WebView2 has never heard of. Fails silently: no error, no console message, no stylesheet |
-
-## Tasks
-
-`mise tasks` lists them. `mise.toml` holds the tools, the environment and the
-one-line tasks; anything longer is an executable script in `mise-tasks/`, where
-the path is the name (`mise-tasks/go/check` is `go:check`), `#MISE` lines at the
-top declare its description and dependencies, and its findings are comments
-beside the lines they explain. Until 30 Sep 2026 all of it was shell inside TOML
-strings: 516 lines, where no editor, `bash -n` or shellcheck could see it.
-
-A task exists only for what the binary cannot do on its own: checks, builds,
-the glaze gates, upstream work, the create-and-delete cycles. No task just wraps
-a command — call the command.
-
-The reasons behind the one-liners, which have nowhere else to live:
-
-- **The tools are pinned in `mise.toml` and nowhere else**, so CI installs what a
-  maintainer has; `jdx/mise-action` reads it. Every `go.mod` says `go 1.27.1` to
-  match. Reading the Go version from `go.mod` is deprecated in mise (removed in
-  2026.11.0), hence the pin.
-- **`go:tool` is the one build of the tool.** Every task runs `.bin/irgo-winvm`
-  rather than `go run ./cmd/irgo-winvm`, and `.bin` is on `PATH` in this
-  directory, so `irgo-winvm doctor` works by hand. `sources` and `outputs` let
-  mise skip the build when nothing under `cmd/` or `internal/` changed — which
-  is also how it went wrong: from 977136e to 30 Sep 2026 the task built
-  `./irgo-winvm` while `outputs` named `.bin/irgo-winvm`, so every task and
-  `.mcp.json` ran whatever stale binary `.bin` happened to hold (in a fresh
-  clone, none). mise said so on every run — `did not generate expected output`
-  — and nobody read it. After editing `cmd/` or `internal/`, run any task or
-  `mise run go:tool` before calling the binary by hand.
-- **`go:lint` pins `GOOS=darwin`**, so a Mac and the Linux CI runner lint the same
-  code. The tool only runs on macOS; on Linux `statfsAvailable` is a stub that
-  always errors, and staticcheck rightly calls `fErr == nil && free < n` in
-  `iso_create.go` never true (SA4023). That failed CI on every push from e1a4243
-  to 79f8a55 while the same command passed on the Mac that wrote it.
-- **`site:build` renders the markdown, never hand-written pages**, so the site
-  cannot drift from the repository: if a page is wrong, the markdown is wrong.
-  **`site:serve` builds and serves in one command** on purpose — a separate
-  server can be pointed at a stale `dist` from an earlier run, and checking a
-  site that no longer matches the markdown is worse than not checking it.
-- **`vm:shots` copies, so nothing is copied by hand.** The tool photographs every
-  stage into `shots/` as it runs, but those names carry a timestamp, so no
-  document can point at one; this copies the newest of each stage into
-  `docs/screens/vm` under its stage name, which is what the docs reference.
-- **`UPSTREAM_DIR`** is where the local glaze and native clones live, read by the
-  `upstream:*` tasks. A bug in either is fixed there, not worked around here
-  (`UPSTREAM.md`). It was restored from the `mise.toml` deleted in e533764.
-
-## Do not
-
-- Split the package up. Its parts are coupled.
-- Touch the assets, the answer file or the plist template without running a real
-  install. UTM rejects a bad config with one generic *"cannot import this VM"*
-  that names no field.
-- Export anything nothing uses.
-- Put logic in a task, in `mise.toml` or `mise-tasks/` alike. Tasks call the
-  binary; if a task needs to do more than that, it belongs in the binary.
-- Land a refactor in one commit. One concern per commit, each verified.
+| trap | symptom | what to do |
+|---|---|---|
+| each package defines its **own** `ErrUnsupported` | none wrap `errors.ErrUnsupported`, so a check against that alone matches nothing, and a platform behaving as documented reports **FAILED** with a non-zero exit. `glaze.SetAppIcon` is unsupported on Windows by design | check each package's sentinel until the [upstream fix](UPSTREAM.md#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) is released |
+| `tray.Run` **blocks**, driving the event loop until `Stop` | waiting on it deadlocks | post it and leave it; `Stop` is safe from any goroutine |
+| the tray started **before** the window | glaze's `New` runs a temporary `[NSApp run]` that ends only when `applicationDidFinishLaunching` fires, once per process. A tray started first consumes it and `glaze.New` blocks forever, with no window and nothing printed | create the window first |
+| `menu.Set` with no `Options.Window` | returns an error naming it, on Windows, where the HWND is required | pass the window |
+| `menu.Set` with `Options.Dispatch` set **before** `Run` | `Set` blocks until its UI work has run, and nothing drains the queue until the run loop starts | call it after `Run` starts |
+| `file://` URL built by concatenation | Windows paths are `C:\dir`; the URL needs `file:///C:/dir`. Without the leading slash `net/url` writes `file:C:/dir` and ShellExecuteW rejects it | build it with `net/url` and a leading slash |
+| `openurl.Open != nil` as a capability check | a function value is never nil, so it checks nothing; `go vet` says so | call it and check the error |
+| an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([UPSTREAM.md §1b](UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |

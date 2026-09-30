@@ -150,7 +150,7 @@ presses reached Setup's UI. Media built with the no-prompt loader doesn't need
 it.
 
 The two failed attempts, and why they failed, are in the trap table in
-[DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
+[DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
 
 ## Suspend and resume — 400 ms, verified 12 Aug 2026
 
@@ -180,7 +180,7 @@ restarting.
 version isn't offered: `utmctl suspend --save-state` either refuses (naming GPU
 acceleration, then NVMe) or *reports success and power-cuts the guest*: exit 0,
 no state file, and the next boot goes through "Diagnosing your PC". See the trap
-table in [DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
+table in [DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
 
 ## glaze and native on Windows ARM64 — measured 12 Aug 2026
 

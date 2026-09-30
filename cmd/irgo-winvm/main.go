@@ -1,87 +1,23 @@
 // Command irgo-winvm brings up a Windows 11 ARM64 VM on Apple Silicon so an
 // irgo desktop build can be tested on the machine that produced it.
 //
-// It exists because the GUI path is a lot of clicking that cannot be scripted,
-// reviewed or run twice the same way. Everything here is plain Go: no hdiutil,
-// no plutil, no shell.
+// Everything is plain Go: no hdiutil, no plutil, no shell. Run it with no
+// arguments for the list of commands, or `irgo-winvm help` for the walkthrough.
 package main
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
-	"github.com/joeblew999/irgo-windows-vm/internal/job"
-	"github.com/joeblew999/irgo-windows-vm/internal/mcpserver"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// version is set at build time by .goreleaser.yaml (mise run go:build, and
-// release.yml): the tag for a release, `dev` for a snapshot or a plain go build.
+// version is set at build time by .goreleaser.yaml: the tag for a release,
+// "dev" otherwise.
 var version = "dev"
-
-// What this process exits with, and why each one is worth telling apart.
-//
-// The numbers and their meanings are declared in package command, because the
-// MCP server reports the same classification to an agent and the two must not
-// disagree about which one is worth retrying. What stays here is the mapping
-// from *this program's errors* to those codes, which is where the sentinels
-// live.
-//
-// Everything used to exit 1. So a script could not distinguish "the program I
-// asked you to run failed" from "that VM does not exist" from "the guest agent
-// is busy" — and the last of those is the one worth retrying, since Windows
-// Update takes the agent away for minutes at a time.
-//
-// It matters more here than in most tools because `utmctl` itself exits 0 on
-// failure, documented in docs/DEVELOPMENT.md. This CLI is the only honest signal a caller
-// gets, so it had better say something.
-
-// errRefused is a destructive command declining to act without -force.
-//
-// Not a failure of the machine — the tool did exactly what it should — but a
-// caller scripting a teardown needs to tell it from one, and both -force
-// refusals are raised here in the CLI rather than in utmvm.
-var errRefused = errors.New("refused without -force")
-
-// exitCode classifies an error for the shell.
-//
-// Sentinels, not string matching: these messages are written for people and get
-// reworded, and a classification that breaks silently when a sentence changes
-// is worse than none.
-func exitCode(err error) command.Code {
-	switch {
-	case err == nil:
-		return command.CodeOK
-	case errors.Is(err, flag.ErrHelp):
-		return command.CodeOK
-	case errors.Is(err, errRefused):
-		return command.CodeNeedForce
-	case errors.Is(err, utmvm.ErrNoVM):
-		return command.CodeNoVM
-	case errors.Is(err, utmvm.ErrNoAgent):
-		return command.CodeNoAgent
-	case errors.Is(err, utmvm.ErrMutationInProgress):
-		return command.CodeBusy
-	case errors.Is(err, errUsage):
-		return command.CodeUsage
-	default:
-		return command.CodeFailed
-	}
-}
-
-// errUsage is the command being called wrongly — a missing argument, rather
-// than a malformed flag, which the flag package catches itself.
-var errUsage = errors.New("usage")
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -90,69 +26,179 @@ func main() {
 	}
 }
 
-// cmd pairs a declared command with the function that performs it.
+// run is the command line: a bare invocation prints the usage on stdout and
+// succeeds, an unknown command prints it on stderr and fails, and -h is
+// answered without an error.
+func run(args []string) error {
+	if len(args) == 0 {
+		fmt.Print(command.UsageText())
+		return nil
+	}
+	if _, ok := find(args[0]); !ok {
+		fmt.Fprint(os.Stderr, command.UsageText())
+		return fmt.Errorf("unknown subcommand %q", args[0])
+	}
+	if err := runTool(args[0], args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return nil
+}
+
+// runTool is the one path every command takes: the CLI, an MCP tool call, and
+// the detached job child, which re-runs this binary. A command that changes
+// state on disk takes its mutation locks after its flags parse, so -h is
+// answered even while another mutation holds them; a second mutation is
+// refused, never queued.
+func runTool(name string, args []string) error {
+	c, ok := find(name)
+	if !ok {
+		return fmt.Errorf("%w: no such command %q", errUsage, name)
+	}
+	v, rest, err := c.parse(args)
+	if err != nil {
+		return err
+	}
+	if c.Mutates() {
+		release, err := utmvm.Acquire(locksFor(c.Command, v)...)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	return c.run(v, rest)
+}
+
+// locksFor is the locks c takes with these parsed flags: LockVM becomes the
+// lock of the VM its -vm flag names, or of the default VM when it has no -vm
+// or it is empty, so `-vm a1`, `-vm=A1` and a UUID all land on one lock.
+func locksFor(c command.Command, v values) []utmvm.Lock {
+	var locks []utmvm.Lock
+	if c.Locks&command.LockMachine != 0 {
+		locks = append(locks, utmvm.MachineLock)
+	}
+	if c.Locks&command.LockStage != 0 {
+		locks = append(locks, utmvm.StageLock)
+	}
+	if c.Locks&command.LockVM != 0 {
+		vm := utmvm.DefaultVMName
+		if v.fs != nil {
+			if f := v.fs.Lookup("vm"); f != nil && f.Value.String() != "" {
+				vm = f.Value.String()
+			}
+		}
+		locks = append(locks, utmvm.VMLockFor(vm))
+	}
+	return locks
+}
+
+// cmd is a declared command joined to what runs it.
 //
-// The declaration lives in package command, which the MCP server imports; the
-// handler lives here, because running a command is this program's job and
-// nothing else's. Nothing enumerates command names twice: `commands` below is
-// built by walking command.All, and `handlers` is keyed by the names that list
-// already declares.
+// What a command is (name, summary, whether it mutates) is declared in package
+// command, because the MCP server imports that list. How it runs is here.
 type cmd struct {
 	command.Command
-	Run func(args []string) error
+	impl
 }
 
-// Assigned in init, not at declaration: the table contains runCommands, which
-// reads the table, and Go rejects that as an initialization cycle.
+// impl is how a command runs.
+type impl struct {
+	// flags declares the command's flags. Nil means it takes none, and its
+	// arguments reach run unparsed: `version -h` prints the version.
+	flags func() *flag.FlagSet
+	// about, if set, replaces the "Usage of" preamble in -h output.
+	about string
+	// run performs the command, given its parsed flags and the remaining
+	// arguments.
+	run func(v values, args []string) error
+}
+
+// parse reads c's flags from args and returns them with what is left over.
+func (c cmd) parse(args []string) (values, []string, error) {
+	if c.flags == nil {
+		return values{}, args, nil
+	}
+	fs := c.flags()
+	if c.about != "" {
+		fs.Usage = func() {
+			_, _ = fmt.Fprintf(fs.Output(), "Usage of %s:\n%s", fs.Name(), c.about)
+			fs.PrintDefaults()
+		}
+	}
+	if err := fs.Parse(args); err != nil {
+		return values{}, nil, err
+	}
+	return values{fs}, fs.Args(), nil
+}
+
+// exec parses args and runs c without taking the mutation lock, for a caller
+// that already holds it.
+func (c cmd) exec(args []string) error {
+	v, rest, err := c.parse(args)
+	if err != nil {
+		return err
+	}
+	return c.run(v, rest)
+}
+
+// commands is command.All, in its order, each joined to its implementation.
+// Built in init because the table refers to runMCP, which reaches back here
+// through runTool, and Go rejects that as an initialization cycle.
 var commands []cmd
 
-// handlers is the wiring: one entry per declared command, keyed by its name.
-//
-// Package level rather than a local in init, so the test that checks it against
-// command.All can see it. There is no initialization cycle: it refers to
-// runCommands, which reads `commands`, and `commands` has no initializer — it
-// is filled in by init below.
-var handlers = map[string]func([]string) error{
-	"iso-create": runISOCreate,
-	"vm-create":  runVMCreate,
-	"app-create": runAppCreate,
-	"app-upload": runAppUpload,
-
-	"iso-delete": runISODelete,
-	"vm-delete":  runVMDelete,
-	"app-delete": runAppDelete,
-
-	"vm-golden-create": runVMGoldenCreate,
-	"vm-golden-delete": runVMGoldenDelete,
-
-	"vm-screen": runVMScreen,
-	"vm-repair": runVMRepair,
-	"doctor":    runDoctor,
-	"help":      runHelp,
-	"version":   runVersion,
-	"commands":  runCommands,
-	"status":    runStatus,
-	"mcp":       runMCP,
-
-	"glaze-check":  runGlazeCheck,
-	"glaze-status": runGlazeStatus,
-}
-
 func init() {
-	// Walked in the list's order, so the usage and `irgo-winvm commands` print
-	// what package command declares rather than what a map happened to iterate.
-	//
-	// Both directions are gated: a declared command with no handler leaves Run
-	// nil, which TestEveryCommandIsReachable fails on, and a handler naming nothing
-	// declared is caught by TestEveryHandlerIsADeclaredCommand. Half a check
-	// leaves half the drift invisible.
-	for _, c := range command.All {
-		commands = append(commands, cmd{Command: c, Run: handlers[c.Name]})
+	impls := map[string]impl{
+		"iso-create": {flags: isoCreateFlags, run: runISOCreate},
+		"vm-create":  {flags: vmCreateFlags, run: runVMCreate},
+		"app-create": {flags: appCreateFlags, run: runAppCreate},
+		"app-upload": {flags: appUploadFlags, run: runAppUpload},
+
+		"iso-delete": {flags: isoDeleteFlags, run: runISODelete},
+		"vm-delete":  {flags: vmDeleteFlags, run: runVMDelete},
+		"app-delete": {flags: appDeleteFlags, run: runAppDelete},
+
+		"vm-golden-create": {flags: vmGoldenCreateFlags, run: runVMGoldenCreate},
+		"vm-golden-delete": {flags: vmGoldenDeleteFlags, run: runVMGoldenDelete},
+
+		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
+		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},
+		"doctor":       {flags: doctorFlags, run: runDoctor},
+		"status":       {flags: statusFlags, about: statusAbout, run: runStatus},
+		"glaze-check":  {flags: glazeCheckFlags, run: runGlazeCheck},
+		"glaze-status": {run: runGlazeStatus},
+		"help":         {run: runHelp},
+		"version":      {run: runVersion},
+		"commands":     {run: runCommands},
+		"mcp":          {flags: mcpFlags, about: mcpAbout, run: runMCP},
+	}
+	var err error
+	if commands, err = join(command.All, impls); err != nil {
+		panic(err)
 	}
 }
 
-// find returns the command by name. Aliases for help are accepted here rather
-// than in the list, because they are spellings on a command line, not commands.
+// join pairs every declared command with its implementation, and fails if
+// either side names something the other does not.
+func join(all []command.Command, impls map[string]impl) ([]cmd, error) {
+	out := make([]cmd, 0, len(all))
+	declared := make(map[string]bool, len(all))
+	for _, c := range all {
+		im, ok := impls[c.Name]
+		if !ok || im.run == nil {
+			return nil, fmt.Errorf("command %q is declared but has no implementation", c.Name)
+		}
+		out = append(out, cmd{c, im})
+		declared[c.Name] = true
+	}
+	for name := range impls {
+		if !declared[name] {
+			return nil, fmt.Errorf("%q is implemented but not declared in package command", name)
+		}
+	}
+	return out, nil
+}
+
+// find returns the command by name. -h and --help are spellings of help on a
+// command line, so they are resolved here rather than declared.
 func find(name string) (cmd, bool) {
 	if name == "-h" || name == "--help" {
 		name = "help"
@@ -163,1137 +209,4 @@ func find(name string) (cmd, bool) {
 		}
 	}
 	return cmd{}, false
-}
-
-// usage goes to stderr, for the case where the user got it wrong. The same
-// text on stdout is what a bare `irgo-winvm` prints.
-func usage() { fmt.Fprint(os.Stderr, usageText()) }
-
-// usageText is generated from the list, so it cannot name a command that does
-// not exist or omit one that does.
-func usageText() string { return command.UsageText() }
-
-func runVersion([]string) error { fmt.Println(version); return nil }
-
-// screenshotForMCP runs vm-screen and hands back the PNG itself.
-//
-// It runs the same handler the CLI runs — same flags, same VM resolution, same
-// errors — rather than reimplementing it, which is the rule mcpserver is built
-// on. What it adds is knowing where the file went, because the CLI only says so
-// in prose and prose is not an interface.
-//
-// The file is read and removed. An agent cannot open a path, and over a remote
-// transport the path is on a machine it has no access to; the bytes are the
-// answer. A caller that passes its own -o keeps the file, because then it asked
-// for one on purpose.
-func screenshotForMCP(_ context.Context, args []string) ([]byte, string, error) {
-	// -promote publishes shots already taken and photographs nothing, so there
-	// is no image to return and pretending otherwise would be a lie.
-	for _, a := range args {
-		if a == "-promote" || strings.HasPrefix(a, "-promote=") {
-			out, err := utmvm.Capture(func() error { return runVMScreen(args) })
-			return nil, out, err
-		}
-	}
-
-	dst, keep := explicitOutput(args)
-	if dst == "" {
-		f, err := os.CreateTemp("", "irgo-mcp-shot-*.png")
-		if err != nil {
-			return nil, "", err
-		}
-		dst = f.Name()
-		_ = f.Close()
-		args = append(append([]string{}, args...), "-o", dst)
-	}
-	if !keep {
-		defer func() { _ = os.Remove(dst) }()
-	}
-
-	out, err := utmvm.Capture(func() error { return runVMScreen(args) })
-	if err != nil {
-		return nil, out, err
-	}
-	png, err := os.ReadFile(dst)
-	if err != nil {
-		// The command reported success and produced no file. Saying so is the
-		// whole point of this repository's rule about checking.
-		return nil, out, fmt.Errorf("vm-screen reported success but wrote no readable PNG at %s: %w", dst, err)
-	}
-	return png, out, nil
-}
-
-// explicitOutput reports the -o the caller passed, if any.
-func explicitOutput(args []string) (path string, given bool) {
-	for i, a := range args {
-		if v, ok := strings.CutPrefix(a, "-o="); ok {
-			return v, true
-		}
-		if a == "-o" && i+1 < len(args) {
-			return args[i+1], true
-		}
-	}
-	return "", false
-}
-
-// runStatus reports long-running work.
-//
-// For a person as much as for an agent: an agent can leave a 45-minute install
-// going and disconnect, and this is how anyone finds out whether it is still
-// alive. It reports liveness by asking the operating system, not by trusting a
-// file that says "running".
-func runStatus(args []string) error {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage of status:\n"+
-			"  status          every job, newest first\n"+
-			"  status <id>     one job\n\n"+
-			"  Jobs are long-running commands started detached — vm-create -install\n"+
-			"  and iso-create -fetch. Started over MCP they outlive the client that\n"+
-			"  asked for them, so this is how you find out what happened.\n")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	say := utmvm.Reporter("status")
-
-	if fs.NArg() == 1 {
-		s, err := job.Status(fs.Arg(0))
-		if err != nil {
-			return err
-		}
-		reportJob(say, s)
-		return nil
-	}
-
-	all, err := job.All()
-	if err != nil {
-		return err
-	}
-	if len(all) == 0 {
-		say("no jobs have been started")
-		say("jobs live in %s", utmvm.Home(job.Dir()))
-		return nil
-	}
-	for _, s := range all {
-		reportJob(say, s)
-	}
-	say("%d job(s), in %s", len(all), utmvm.Home(job.Dir()))
-	return nil
-}
-
-// reportJob prints one job. "running" and "finished" are what the operating
-// system says, not what the record claims.
-func reportJob(say func(string, ...any), s job.State) {
-	state := "finished"
-	if s.Alive {
-		state = "running"
-	}
-	say("%-28s %-9s %-8s %s %s", s.ID, state, s.Elapsed, s.Command, strings.Join(s.Args, " "))
-}
-
-// runMCP serves the commands to an agent.
-//
-// The handler each tool calls is the same function this program dispatches to,
-// through the same table — so a tool cannot do anything the CLI cannot, and
-// cannot do it differently. That is the rule mcpserver's doc comment states,
-// and this closure is where it is actually enforced.
-//
-// utmvm.Capture is not optional here. stdout is the JSON-RPC channel, and every
-// command announces its progress; without the capture the first vm-create would
-// write status lines into the middle of the protocol stream. The captured text
-// becomes the tool's result, which is where an agent needs it anyway.
-func runMCP(args []string) error {
-	fs := mcpFlags()
-	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage of mcp:\n"+
-			"  Serves the commands above to an agent over the Model Context Protocol.\n"+
-			"  With no flags it speaks JSON-RPC on stdin and stdout; -http serves the\n"+
-			"  same tools over HTTP. Read docs/THREAT-MODEL.md before -http.\n")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	list, addr := v.Bool("list"), v.String("http")
-	if list {
-		// What the documentation is generated from. Printed by the binary so no
-		// tool name, description or annotation is ever transcribed — the same
-		// rule that makes the command reference trustworthy.
-		tools, err := mcpserver.Describe(mcpDeps())
-		if err != nil {
-			return err
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(tools)
-	}
-	if addr != "" {
-		return mcpserver.ServeHTTP(context.Background(), mcpserver.ServeHTTPOptions{
-			Addr:        addr,
-			Secret:      os.Getenv("IRGO_WINVM_TOKEN"),
-			AllowRemote: v.Bool("allow-remote"),
-		}, mcpDeps())
-	}
-	return mcpserver.Serve(context.Background(), mcpDeps())
-}
-
-// mcpDeps is the wiring, in one place, so serving and describing cannot
-// disagree about what the server is.
-func mcpDeps() mcpserver.Deps {
-	return mcpserver.Deps{
-		Version:    version,
-		Classify:   exitCode,
-		Screenshot: screenshotForMCP,
-		// A fresh set each call: VisitAll reads defaults, and a set that had
-		// been parsed would report whatever the last call passed as the
-		// default for the next one.
-		Flags: func(name string) *flag.FlagSet {
-			if build, ok := flagSets[name]; ok {
-				return build()
-			}
-			return nil
-		},
-		Run: func(_ context.Context, name string, args []string) (string, error) {
-			return utmvm.Capture(func() error { return runTool(name, args) })
-		},
-		StartJob: func(name string, args []string) (string, error) {
-			// Refuse at call time, not forty minutes in. The job child takes
-			// the lock itself and is the source of truth, but asking first
-			// means a second mutation is told "busy" now rather than after it
-			// has forked. "Cannot tell" is refused too.
-			c, ok := command.Find(name)
-			if !ok {
-				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
-			}
-			// Taken and let go rather than asked about, so a refusal names
-			// which lock was busy — the VM, or the machine — instead of a
-			// bare "busy". The child takes them again for real.
-			release, err := utmvm.Acquire(locksFor(c, args)...)
-			if err != nil {
-				return "", err
-			}
-			release()
-			s, err := job.Start(name, args)
-			if err != nil {
-				return "", err
-			}
-			return s.ID, nil
-		},
-	}
-}
-
-// runCommands prints one name per line.
-//
-// This is the interface the site's flag reference and the CI documentation
-// check both read. They could have scraped the usage text instead, and that is
-// exactly the fragility worth avoiding: a layout change would silently drop a
-// command from the reference, which is the failure this whole exercise is
-// about.
-func runCommands([]string) error {
-	for _, c := range commands {
-		fmt.Println(c.Name)
-	}
-	return nil
-}
-
-// runHelp is the explanation. Separate from usage because a person who typed
-// the command wrong wants the list, and a person who typed `help` wants the
-// story — and putting the story in front of the first group buries the list
-// they were looking for.
-func runHelp([]string) error {
-	// The download size is asked for, not typed in. It is a constant in utmvm
-	// that iso-create's own -fetch usage already reports, and this text carried
-	// a second hand-written copy of it — the same number in two places, which is
-	// how one of them ends up stale.
-	fmt.Printf(`irgo-winvm — build a Go program on your Mac, run it on real Windows.
-
-Three steps, in this order. Each one is cheap to repeat: if it is already
-done, it says so and stops.
-
-  1  iso-create   get the Windows installer (%s from Microsoft, or
-                  built locally from an .esd you already have)
-  2  vm-create    make a VM and install Windows on it (about 45 minutes,
-                  unattended — you do not click anything)
-  3  app-create   push your .exe into that VM, run it, print what it said
-
-Undo, in the same shape:
-
-     iso-delete   remove the installer
-     vm-delete    remove the VM
-     app-delete   remove your .exe from the VM
-
-A VM in minutes, once one has been installed the slow way:
-
-     vm-golden-create  seal an installed, disposable VM into the golden
-                       image; from then on vm-create clones it and boots
-                       the clone instead of installing, and other VMs keep
-                       running. Each agent takes its own -vm name.
-     vm-golden-delete  remove the golden image
-
-When something is wrong:
-
-     vm-screen    save a PNG of the VM's screen — the only way to see a
-                  boot that is stuck, since it looks identical from here
-     vm-repair    fix what stops -gui runs on a VM that has lived a while:
-                  an expired password (no desktop session) and a stale
-                  WebView2 registration; -reboot restarts it afterwards
-     doctor       what is installed, what is missing, and where this run
-                  wrote its log and screenshots
-
-Your .exe is anything you built with GOOS=windows GOARCH=arm64. The programs
-in examples/ are examples of that, and what this repository
-uses to find out what breaks in glaze and native on Windows. In a checkout
-of this repository:
-
-     glaze-check  build the four and run them here (-windows: on the VM),
-                  and record the verdict in docs/GLAZE-STATUS.md
-     glaze-status print that record, and whether it still holds
-
-Every command takes -h for its flags.
-`, utmvm.ISODownloadSize())
-	return nil
-}
-
-func run(args []string) error {
-	// No arguments is somebody asking what this is, not an error. It prints the
-	// list on stdout and exits 0, so `irgo-winvm | head` works and a shell
-	// script does not see a failure for asking.
-	if len(args) == 0 {
-		fmt.Print(usageText())
-		return nil
-	}
-	if _, ok := find(args[0]); !ok {
-		usage()
-		return fmt.Errorf("unknown subcommand %q", args[0])
-	}
-
-	// -h is a request, not a failure.
-	//
-	// The flag package returns ErrHelp from Parse when it has already printed
-	// the usage, and every command here passed that straight out as an error.
-	// So asking for help printed the flags and then `error: flag: help
-	// requested`, and exited 1 — on vm-create, vm-delete, app-create and
-	// vm-screen, which used ContinueOnError, while the other three used
-	// ExitOnError and exited 0. Two error modes, no principle, and the same
-	// question answered two ways depending on which command you asked.
-	//
-	// One mode everywhere now, and ErrHelp stops here.
-	if err := runTool(args[0], args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
-		return err
-	}
-	return nil
-}
-
-// runTool is the one path every command takes — the CLI, an MCP tool call, and
-// the detached job child, which re-runs this binary. The mutation lock is
-// taken here, so a command that changes state on disk is refused while another
-// holds the lock: never queued, never interleaved.
-func runTool(name string, args []string) error {
-	c, ok := find(name)
-	if !ok || c.Run == nil {
-		return fmt.Errorf("%w: no such command %q", errUsage, name)
-	}
-	if c.Mutates() && !wantsHelp(args) {
-		release, err := utmvm.Acquire(locksFor(c.Command, args)...)
-		if err != nil {
-			return err
-		}
-		defer release()
-	}
-	return c.Run(args)
-}
-
-// locksFor turns what a command declares into the locks it takes for these
-// arguments: LockVM becomes the lock of the VM its -vm flag names.
-//
-// The -vm value is read with the command's own flag set, so the default
-// (irgo-win11) and every spelling the flag package accepts — `-vm a1`,
-// `-vm=a1`, `--vm a1` — resolve to one lock. Arguments that do not parse are
-// locked as the default VM: the handler is about to reject them anyway, and
-// taking a lock it did not need costs nothing, where taking none could let a
-// command run unguarded.
-func locksFor(c command.Command, args []string) []utmvm.Lock {
-	var locks []utmvm.Lock
-	if c.Locks&command.LockMachine != 0 {
-		locks = append(locks, utmvm.MachineLock)
-	}
-	if c.Locks&command.LockStage != 0 {
-		locks = append(locks, utmvm.StageLock)
-	}
-	if c.Locks&command.LockVM != 0 {
-		locks = append(locks, utmvm.VMLockFor(vmArg(c.Name, args)))
-	}
-	return locks
-}
-
-// vmArg is the VM a command's arguments name, or the default.
-func vmArg(name string, args []string) string {
-	build, ok := flagSets[name]
-	if !ok {
-		return utmvm.DefaultVMName
-	}
-	fs := build()
-	fs.SetOutput(io.Discard)
-	_ = fs.Parse(args) // a parse error leaves -vm at its default; see locksFor
-	if f := fs.Lookup("vm"); f != nil && f.Value.String() != "" {
-		return f.Value.String()
-	}
-	return utmvm.DefaultVMName
-}
-
-// wantsHelp reports whether the arguments ask for help. Help is answered before
-// the lock, or `irgo-winvm vm-create -h` would be refused as "busy" while
-// another mutation runs.
-func wantsHelp(args []string) bool {
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
-			return true
-		}
-	}
-	return false
-}
-
-// runVMCreate is the one command a new developer runs.
-//
-// Everything it does was already possible as eight separate calls in an order
-// you had to know, with a UTM restart in the middle that nobody discovers
-// alone. Every stage is idempotent, so running it twice is safe and the second
-// run takes seconds — which matters because the two expensive stages are a
-// 4.2 GB download and a 45-minute install.
-func runVMCreate(args []string) error {
-	fs := vmCreateFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name, install, timeout := v.String("vm"), v.Bool("install"), v.Duration("timeout")
-	say := utmvm.Printer("vm-create")
-
-	// Same shape as iso-create: name every location first, then narrate each
-	// step before doing it. This is the command that can take 45 minutes, so
-	// silence here is the difference between waiting and wondering.
-	b, _ := utmvm.BundlePath(name)
-	say("vm:     %s", name)
-	say("bundle: %s", utmvm.Home(b))
-	say("media:  %s", utmvm.Home(utmvm.ISODir()))
-
-	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
-		VMName:   name,
-		Install:  install,
-		Timeout:  timeout,
-		NoGolden: !v.Bool("golden"),
-	}, func(line string) { say("%s", line) })
-	if err != nil {
-		return err
-	}
-	if res.Ready {
-		say("%s is ready", res.VM)
-		return nil
-	}
-	say("%s is not ready yet — see the steps above for what remains", res.VM)
-	return nil
-}
-
-// doctorRow is one line of doctor's table, and one object of `doctor -json`.
-//
-// Path is absolute in the JSON and ~-abbreviated in the table. Present is its
-// own field so a script never has to know which STATE strings mean "absent":
-// the table says MISSING for a prerequisite and "not yet" for a record.
-type doctorRow struct {
-	What    string `json:"what"`
-	State   string `json:"state"`
-	Path    string `json:"path"`
-	Present bool   `json:"present"`
-}
-
-func runDoctor(args []string) error {
-	fs := doctorFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	rows := doctorRows()
-
-	// For scripts. iso:test parsed the table with `grep NAME | awk '{print $5}'`,
-	// which read the right column only because every name it asked about happened
-	// to be four words long, and would have read a size or a path the day one
-	// was renamed. Through utmvm.Out, not os.Stdout, so it is captured over MCP
-	// like every other command's output.
-	if (values{fs}).Bool("json") {
-		enc := json.NewEncoder(utmvm.Out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
-	}
-
-	out := utmvm.Reporter("doctor")
-	out("%-22s %-10s %s", "WHAT", "STATE", "WHERE")
-	var missing int
-	for _, r := range rows {
-		out("%-22s %-10s %s", r.What, r.State, utmvm.Home(r.Path))
-		if r.State == "MISSING" {
-			missing++
-		}
-	}
-	out("")
-	if missing == 0 {
-		out("nothing missing.")
-		return nil
-	}
-	// What to run, once, rather than a paragraph per missing thing.
-	out("%d missing. In order: irgo-winvm iso-create -fetch, then vm-create -install.", missing)
-	return nil
-}
-
-// doctorRows is everything doctor reports, measured now.
-func doctorRows() []doctorRow {
-	// One table. It was five formats -- prose, a table, another prose block, a
-	// "N missing" list repeating what the table already said, and a records
-	// section -- so the same fact appeared twice in different words and the
-	// thing you were looking for was never where you looked.
-	var rows []doctorRow
-	add := func(what, state, where string, present bool) {
-		rows = append(rows, doctorRow{what, state, where, present})
-	}
-
-	// The tool first, because it is the one thing in this table doctor cannot
-	// be wrong about and the first thing a bug report needs. It was the only
-	// thing missing from it: `version` printed the number and nothing else did,
-	// so doctor output pasted into an issue did not say what produced it —
-	// and "dev" versus a tag is the difference between a build somebody made
-	// and one that shipped.
-	//
-	// Built here rather than in utmvm, which cannot see main.version.
-	self, err := os.Executable()
-	if err != nil {
-		self = "(this binary)"
-	}
-	add("irgo-winvm", version, self, true)
-
-	// Externals has already stat'ed each entry; asking the filesystem again
-	// here was a second answer to the same question, taken a moment later.
-	for _, e := range utmvm.Externals() {
-		state := "MISSING"
-		if e.Present {
-			state = "ok"
-			if e.Bytes > 0 {
-				state = utmvm.HumanBytes(e.Bytes)
-			}
-		}
-		add(e.Name, state, e.Path, e.Present)
-	}
-
-	for _, t := range utmvm.ISOTools() {
-		state := "MISSING"
-		if t.Found() {
-			state = "ok"
-		}
-		add(t.Name, state, t.Where(), t.Found())
-	}
-
-	for _, r := range utmvm.Records() {
-		state := "not yet"
-		fi, sErr := os.Stat(r.Path)
-		if sErr == nil {
-			state = "written"
-			if !r.Dir {
-				state = utmvm.HumanBytes(fi.Size())
-			}
-		}
-		add(r.Name, state, r.Path, sErr == nil)
-	}
-
-	// Jobs are reported here rather than in utmvm.Records, because package job
-	// imports utmvm and the reverse would be a cycle. Reported at all because
-	// the directory grows on its own — one record and one log per detached run
-	// — and a directory that grows should be visible before it is a problem.
-	// The size is what is kept after pruning, not what was ever written.
-	jobState := "none yet"
-	all, err := job.All()
-	if err == nil && len(all) > 0 {
-		running := 0
-		for _, j := range all {
-			if j.Alive {
-				running++
-			}
-		}
-		jobState = utmvm.HumanBytes(job.Size())
-		if running > 0 {
-			jobState = fmt.Sprintf("%d running", running)
-		}
-	}
-	add("jobs", jobState, job.Dir(), err == nil && len(all) > 0)
-
-	// The golden image is optional, so its absence is "none", never MISSING:
-	// a machine without one is not broken, it installs instead of cloning.
-	g := utmvm.Golden()
-	goldenState := "none"
-	if g.Present {
-		goldenState = utmvm.HumanBytes(g.Allocated) + " of " + utmvm.HumanBytes(g.Apparent)
-	}
-	add("golden image", goldenState, g.Bundle, g.Present)
-	sealed := "none"
-	if m := g.Manifest; m != nil {
-		sealed = fmt.Sprintf("Windows %s, %s old", m.Windows, age(time.Since(m.Created)))
-		if !g.Present {
-			sealed += "; the image is gone (vm-golden-delete clears this)"
-		}
-	}
-	add("golden sealed", sealed, g.ManifestPath, g.Manifest != nil)
-	return rows
-}
-
-// age is a duration a person reads at a glance: days once it is a day.
-func age(d time.Duration) string {
-	if d >= 24*time.Hour {
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-	return d.Round(time.Minute).String()
-}
-
-// runVMGoldenCreate seals a disposable VM into the golden image.
-//
-// The guard is here, like every -force refusal: sealing turns BitLocker and
-// hibernation off and throws away the component store's backups, which is
-// fine for a disposable VM and not a decision to make for the shared one by
-// leaving a flag out. The VM is resolved first, so the guard answers yes, no
-// or could-not-tell — and could-not-tell refuses.
-func runVMGoldenCreate(args []string) error {
-	fs := vmGoldenCreateFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name, force := v.String("vm"), v.Bool("force")
-	if name == "" {
-		return fmt.Errorf("%w: irgo-winvm vm-golden-create -vm <installed disposable VM>\n"+
-			"  Make one with: irgo-winvm vm-create -vm <name> -install -golden=false", errUsage)
-	}
-	say := utmvm.Printer("vm-golden-create")
-
-	e, err := utmvm.Find(name)
-	if err != nil {
-		// ErrNoVM is exit 3. Anything else is UTM not answering, and then
-		// whether this is the shared VM cannot be told: refused, not guessed.
-		return err
-	}
-	switch {
-	case strings.EqualFold(e.Name, utmvm.GoldenVMName):
-		return fmt.Errorf("%w: %s is the golden image itself; seal the VM it should be made from", errUsage, e.Name)
-	case strings.EqualFold(e.Name, utmvm.DefaultVMName) && !force:
-		return fmt.Errorf("%s is the shared VM. Sealing it turns BitLocker and hibernation off\n"+
-			"  and removes the component store's backups, and it is stopped while that happens.\n"+
-			"  Seal a disposable VM instead, or pass -force (%w)", e.Name, errRefused)
-	}
-
-	b, _ := utmvm.BundlePath(e.Name)
-	g, _ := utmvm.BundlePath(utmvm.GoldenVMName)
-	say("from:     %s (%s)", e.Name, utmvm.Home(b))
-	say("golden:   %s (%s)", utmvm.GoldenVMName, utmvm.Home(g))
-	say("manifest: %s", utmvm.Home(utmvm.GoldenManifestPath()))
-	if _, err := utmvm.GoldenCreate(utmvm.GoldenCreateOptions{Source: e.Name, ToolVersion: version}, say); err != nil {
-		return err
-	}
-	say("vm-create -vm <name> now clones %s instead of installing", utmvm.GoldenVMName)
-	return nil
-}
-
-// runVMGoldenDelete removes the golden image: without -force it only lists.
-func runVMGoldenDelete(args []string) error {
-	fs := vmGoldenDeleteFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	force := values{fs}.Bool("force")
-	say := utmvm.Printer("vm-golden-delete")
-
-	g := utmvm.Golden()
-	say("golden:   %s", utmvm.Home(g.Bundle))
-	say("manifest: %s", utmvm.Home(g.ManifestPath))
-	if !g.Present && g.Manifest == nil {
-		// Asked of UTM as well as the disk: a registered golden image whose
-		// disk cannot be stat'ed is still something to delete.
-		if _, err := utmvm.Find(utmvm.GoldenVMName); err != nil {
-			say("no golden image; nothing to delete")
-			return nil
-		}
-	}
-	if !force {
-		return fmt.Errorf("the golden image, %s on disk. VMs already cloned from it are not affected,\n"+
-			"  but a new one takes a full install until vm-golden-create makes another. Pass -force to do it (%w)",
-			utmvm.HumanBytes(g.Allocated), errRefused)
-	}
-	return utmvm.GoldenDelete(func(f string, a ...any) { say("  "+f, a...) })
-}
-
-func runVMDelete(args []string) error {
-	fs := vmDeleteFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name, force := v.String("vm"), v.Bool("force")
-	say := utmvm.Printer("vm-delete")
-
-	b, _ := utmvm.BundlePath(name)
-	say("STEP 1/2  the VM")
-	say("          %s", utmvm.Home(b))
-
-	e, fErr := utmvm.Find(name)
-	if fErr != nil {
-		say("          UTM knows no VM %q; nothing to delete", name)
-		return nil
-	}
-	r, iErr := utmvm.InspectRemoval(name)
-	if iErr != nil {
-		return iErr
-	}
-	say("          %s, %s", e.Status, utmvm.HumanBytes(r.TotalBytes))
-
-	say("STEP 2/2  would delete:")
-	say("          %-9s %s", utmvm.HumanBytes(r.TotalBytes), utmvm.Home(r.Path))
-	if r.Running {
-		say("          it is running and will be stopped first")
-	}
-	if !force {
-		return fmt.Errorf("%s of VM, and the Windows on it.\n"+
-			"  Reinstalling takes about 45 minutes. Pass -force to do it (%w)",
-			utmvm.HumanBytes(r.TotalBytes), errRefused)
-	}
-
-	say("STEP 2/2  deleting")
-	out, err := utmvm.Delete(name, true, func(f string, a ...any) { say("          "+f, a...) })
-	if err != nil {
-		return err
-	}
-	say("removed %s — %s reclaimed", utmvm.Home(out.Path), utmvm.HumanBytes(out.TotalBytes))
-	return nil
-}
-
-// runAppCreate is the inner loop: build on the Mac, run on Windows, read output back.
-func runAppCreate(args []string) error {
-	say := utmvm.Printer("app-create")
-	fs := appCreateFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	timeout, name, gui := v.Duration("timeout"), v.String("vm"), v.Bool("gui")
-	user, detach := v.String("user"), v.Bool("detach")
-	if name == "" || fs.NArg() == 0 {
-		return fmt.Errorf("%w: irgo-winvm app-create -vm <name> <local.exe> [args...]", errUsage)
-	}
-	e, err := utmvm.Find(name)
-	if err != nil {
-		return err
-	}
-	vm := utmvm.Named(e.UUID)
-
-	// Recover the VM if it is not answering. A Windows guest reboots on its own
-	// — Windows Update does it — and lands back in the UEFI shell, so a run
-	// cannot assume the VM is still reachable just because it was earlier.
-	if !vm.AgentReady() {
-		say("VM not answering; recovering")
-		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute, say); err != nil {
-			return err
-		}
-	}
-
-	local := fs.Arg(0)
-	say("vm:     %s", e.Name)
-	say("binary: %s", local)
-	res, err := utmvm.AppCreate(e.UUID, local, utmvm.AppOptions{
-		Args:    fs.Args()[1:],
-		GUI:     gui,
-		User:    user,
-		Detach:  detach,
-		Timeout: timeout,
-		// The printer goes in, so the push, the launch and the wait are all
-		// visible and all logged. Without it the library half was silent and a
-		// run that hung recorded one line, "started", and nothing else.
-		Say: say,
-	})
-	if res.Stdout != "" {
-		// Through the printer: what the guest printed is the result of the
-		// whole three-stage chain, and a log that records every step except
-		// the answer is missing the part somebody comes back for.
-		for _, line := range strings.Split(strings.TrimRight(res.Stdout, "\n"), "\n") {
-			say("%s", line)
-		}
-	}
-	if err != nil {
-		return err
-	}
-	// Named here rather than in utmvm, which only ever sees the UUID: every
-	// command resolves the name to one before calling in, so a hint printed
-	// from in there tells you to run `-vm 38791348-ED91-...`.
-	if detach {
-		say("watch it with:    irgo-winvm vm-screen -vm %s", e.Name)
-		say("take it off with: irgo-winvm app-delete -vm %s %s", e.Name, filepath.Base(local))
-		return nil
-	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("%s exited %d in the guest", filepath.Base(local), res.ExitCode)
-	}
-	return nil
-}
-
-// bundleOf is the CLI's one route to a VM's bundle. The layout belongs to
-// utmvm; every command used to rebuild the path itself.
-func bundleOf(e utmvm.Entry) string {
-	p, err := utmvm.BundlePath(e.Name)
-	if err != nil {
-		return ""
-	}
-	return p
-}
-
-// runAppDelete removes what `app-create` put on the guest: the binaries it pushed and
-// any scratch files a run that did not finish left behind.
-func runAppDelete(args []string) error {
-	say := utmvm.Printer("app-delete")
-	fs := appDeleteFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name := v.String("vm")
-	// Only reachable via an explicit `-vm ""`, since the flag defaults now.
-	if name == "" {
-		return fmt.Errorf("app-delete: -vm was given an empty name")
-	}
-	// Staged uploads live on the host, not in the guest, so they are cleared
-	// regardless of whether the VM exists: app-upload's undo is app-delete.
-	if err := utmvm.ClearStage(); err != nil {
-		return err
-	}
-	say("stage:  %s", utmvm.Home(utmvm.VMStageDir()))
-	say("vm:     %s", name)
-	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
-	e, err := utmvm.Find(name)
-	if err != nil {
-		// No VM means nothing was ever put on it. An undo that fails when
-		// there is nothing to undo cannot be run twice.
-		say("UTM knows no VM %q; nothing to delete", name)
-		return nil
-	}
-	if err := utmvm.AppDelete(e.UUID, func(f string, a ...any) { say("  "+f, a...) }, fs.Args()...); err != nil {
-		return err
-	}
-	say("cleaned %s", e.Name)
-	return nil
-}
-
-// runAppUpload stages a binary for app-create, from bytes over MCP.
-//
-// A remote agent has a binary it just cross-compiled and no shared filesystem;
-// app-create wants a host path. This is the bridge: base64 chunks land in
-// bin/<sha256>.exe, and the committed path is what gets passed to app-create.
-func runAppUpload(args []string) error {
-	fs := appUploadFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	hash, total, offset := v.String("hash"), v.Int64("total"), v.Int64("offset")
-	data, err := base64.StdEncoding.DecodeString(v.String("data"))
-	if err != nil {
-		return fmt.Errorf("%w: -data is not base64: %v", errUsage, err)
-	}
-	say := utmvm.Printer("app-upload")
-
-	staged, n, err := utmvm.Upload(hash, total, offset, data)
-	if err != nil {
-		return err
-	}
-	if staged != "" {
-		say("staged %s (%s)", utmvm.Home(staged), utmvm.HumanBytes(n))
-		return nil
-	}
-	say("chunk accepted — %d of %d bytes staged", n, total)
-	return nil
-}
-
-// runISOCreate gets the Windows media, which is the slowest and most rate-limited
-// step in `vm`. Separate so it can be done once and kept.
-func runISOCreate(args []string) error {
-	fs := isoCreateFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	fetch := v.Bool("fetch")
-	// Elapsed time on every line. A multi-gigabyte download and an ISO build take
-	// minutes, and without this there is no way to tell a slow step from a
-	// stuck one — which is how a 77-second cached-media check went unnoticed.
-	say := utmvm.Printer("iso-create")
-	say("media:  %s", utmvm.Home(utmvm.ISODir()))
-
-	say("STEP 0/4  the two programs an ISO build needs")
-	// The two external programs building an ISO needs. Installed here, and
-	// removed by iso-delete — what `iso` puts on the machine, `iso-delete`
-	// takes off. Every path printed, because "installed" without a location
-	// cannot be checked and cannot be undone by hand.
-	for _, t := range utmvm.ISOTools() {
-		say("tool:   %-16s %s", t.Name, utmvm.Home(t.Where()))
-		if t.Found() {
-			continue
-		}
-		if err := t.Ensure(); err != nil {
-			return err
-		}
-		say("  ✓ %-16s installed at %s", t.Name, utmvm.Home(t.Path))
-	}
-
-	// No UTM, no guest tools, no VM. Getting Windows media is a download or an
-	// ESD expansion; a hypervisor is not involved, and this used to run the
-	// whole setup chain — so fetching an ISO required UTM to be installed first.
-	iso, detail, skipped, err := utmvm.ISOGet(utmvm.ISOGetOptions{Fetch: fetch}, say)
-	if err != nil {
-		return err
-	}
-	if skipped {
-		say("media: %s (already there — %s)", utmvm.Home(iso), detail)
-		return nil
-	}
-	say("media: %s (%s)", utmvm.Home(iso), detail)
-	return nil
-}
-
-// runISODelete removes the media, which is protected on purpose, so it says so
-// rather than failing with EPERM.
-func runISODelete(args []string) error {
-	fs := isoDeleteFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	force, all := v.Bool("force"), v.Bool("all")
-	say := utmvm.Printer("iso-delete")
-
-	// Everything that would go, listed as what it is — things about to be
-	// deleted, not an inventory. The earlier version printed the same lines
-	// under "media:" and "tool:" and then refused, which read as a status
-	// report followed by an unrelated complaint.
-	say("STEP 1/3  media in %s", utmvm.Home(utmvm.ISODir()))
-	var files []string
-	var bytes int64
-	wanted := utmvm.ISODerived()
-	if all {
-		wanted = utmvm.ISOFiles()
-	}
-	for _, f := range wanted {
-		fi, err := os.Stat(f)
-		if err != nil {
-			continue // absent files are not news; the directory is named above
-		}
-		files = append(files, f)
-		// Sidecars go with the file they describe rather than as entries of
-		// their own: 32 bytes of cached scan result each, and listing them
-		// separately made a two-file directory look like four.
-		if strings.HasSuffix(f, ".scan") {
-			continue
-		}
-		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), filepath.Base(f))
-		bytes += fi.Size()
-	}
-	if len(files) == 0 {
-		say("          none")
-	}
-	// The .esd is reported even when it is not being deleted: "what is on this
-	// machine" is the question, and a silent 4.2 GB is the answer nobody
-	// expects.
-	if !all {
-		if fi, err := os.Stat(utmvm.ISOSourcePath()); err == nil {
-			say("          %-9s %s  (kept — pass -all to delete it)",
-				utmvm.HumanBytes(fi.Size()), filepath.Base(utmvm.ISOSourcePath()))
-		}
-	}
-	say("STEP 2/3  looking for the tools iso installed")
-	tools := utmvm.ISOTools()
-	var installed []int
-	for i := range tools {
-		if tools[i].Found() {
-			say("          found %-16s %s", tools[i].Name, utmvm.Home(tools[i].Path))
-			installed = append(installed, i)
-			continue
-		}
-		say("          not installed: %s", tools[i].Name)
-	}
-
-	if len(files) == 0 && len(installed) == 0 {
-		say("nothing to delete")
-		say("  media would be at %s", utmvm.Home(utmvm.ISODir()))
-		for i := range tools {
-			say("  %s would be at %s", tools[i].Name, utmvm.Home(tools[i].Where()))
-		}
-		return nil
-	}
-
-	say("STEP 3/3  nothing deleted yet — this is what would go:")
-	for _, f := range files {
-		if strings.HasSuffix(f, ".scan") {
-			continue
-		}
-		fi, _ := os.Stat(f)
-		say("          %-9s %s", utmvm.HumanBytes(fi.Size()), filepath.Base(f))
-	}
-	for _, i := range installed {
-		say("          %-9s %s (uninstalls %s)", "tool", utmvm.Home(tools[i].Path), tools[i].Formula)
-	}
-
-	if !force {
-		var what []string
-		if len(files) > 0 {
-			// Sidecars are not counted: they are 32 bytes of cache and saying
-			// "2 files" for one ISO plus its scan result is just wrong.
-			n := 0
-			for _, f := range files {
-				if !strings.HasSuffix(f, ".scan") {
-					n++
-				}
-			}
-			what = append(what, fmt.Sprintf("%d file(s), %s", n, utmvm.HumanBytes(bytes)))
-		}
-		if len(installed) > 0 {
-			what = append(what, fmt.Sprintf("%d tool(s)", len(installed)))
-		}
-		msg := strings.Join(what, " and ")
-		if len(files) > 0 {
-			if all {
-				msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
-			} else {
-				// 40s, measured — see docs/RESULTS.md. It said "about three minutes"
-				// from before the figure was taken.
-				msg += "\n  The .esd is kept, so iso-create rebuilds this in about 40s with\n" +
-					"  no network. Add -all to delete that too."
-			}
-		}
-		return fmt.Errorf("%s\n  Pass -force to do it (%w)", msg, errRefused)
-	}
-
-	say("STEP 3/3  deleting")
-	for _, f := range files {
-		say("          clearing the immutable flag on %s", utmvm.Home(f))
-		// uchg blocks unlink. A failure to clear it is not fatal on its own —
-		// off macOS there is no flag and this always errors — but when the
-		// remove then fails with EPERM, it is the reason, and dropping it left
-		// "operation not permitted" with nothing saying the flag was why.
-		uErr := utmvm.ISOUnprotect(f)
-		if err := os.Remove(f); err != nil {
-			if uErr != nil {
-				return fmt.Errorf("%w (clearing its immutable flag failed first: %v)", err, uErr)
-			}
-			return err // a *PathError: it names the file already
-		}
-		say("  · deleted %s", utmvm.Home(f))
-	}
-	// The tools go whether or not the media was there: an undo has to run to
-	// completion from any starting point.
-	for i := range tools {
-		if tools[i].Found() {
-			say("          uninstalling %s (brew uninstall %s)", tools[i].Name, tools[i].Formula)
-		}
-		where, err := tools[i].Remove()
-		switch {
-		case err != nil:
-			say("          · %s left in place: %v", tools[i].Name, err)
-		case where != "":
-			say("          · uninstalled %s from %s", tools[i].Name, utmvm.Home(where))
-		}
-	}
-	return nil
-}
-
-// runVMRepair fixes an expired password and a stale WebView2 registration.
-//
-// Both leave the VM answering the agent while every -gui run fails, so it runs
-// through the agent as SYSTEM, which is exactly the access that still works.
-func runVMRepair(args []string) error {
-	fs := vmRepairFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name, user, reboot := v.String("vm"), v.String("user"), v.Bool("reboot")
-	say := utmvm.Printer("vm-repair")
-	e, err := utmvm.Find(name)
-	if err != nil {
-		return err
-	}
-	vm := utmvm.Named(e.UUID)
-	if !vm.AgentReady() {
-		say("VM not answering; recovering")
-		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute, say); err != nil {
-			return err
-		}
-	}
-	say("vm:     %s", e.Name)
-	return utmvm.VMRepair(e.UUID, user, reboot, say)
-}
-
-// runVMScreen photographs the guest's display.
-//
-// The only thing that answers "what is it actually doing" when a VM is stuck:
-// a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
-// exactly like a working one from the host.
-func runVMScreen(args []string) error {
-	fs := vmScreenFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
-	name, out, promote := v.String("vm"), v.String("o"), v.String("promote")
-	say := utmvm.Printer("vm-screen")
-
-	// Promoting takes no new picture. It publishes the ones the run already
-	// took, under stable names, because runtime shots are timestamped and
-	// nothing in a README can reference a filename that changes every boot.
-	if promote != "" {
-		stages, err := utmvm.Promote(promote)
-		if err != nil {
-			return err
-		}
-		say("from:   %s", utmvm.Home(utmvm.ShotDir()))
-		say("into:   %s", utmvm.Home(promote))
-		for _, s := range stages {
-			say("  · %s.png", s)
-		}
-		say("%d stage(s) published", len(stages))
-		return nil
-	}
-
-	// Resolved before photographing, only so a name that does not exist reports
-	// the same way here as everywhere else.
-	//
-	// Without it this named a VM that is absent and a VM that is running
-	// headless identically — "no UTM window titled ..." — and exited 1 where
-	// app-create exits 3 for the same typo. A contract that holds for some
-	// commands is not one.
-	if _, err := utmvm.Find(name); err != nil {
-		return err
-	}
-	say("vm:     %s", name)
-
-	// Into shots/, outside the repository, and timestamped.
-	//
-	// This wrote docs/screens/<vm>.png, which is a tracked file: every
-	// diagnostic screenshot overwrote committed evidence and left the working
-	// tree dirty, and taking two in a row silently destroyed the first. Those
-	// two directories are not the same thing — docs/screens is evidence chosen
-	// to be kept, shots/ is every look at a running VM.
-	if out == "" {
-		p, err := utmvm.Shot(name, "vm-screen")
-		if err != nil {
-			return err
-		}
-		say("shot:   %s", utmvm.Home(p))
-		say("written")
-		return nil
-	}
-	say("shot:   %s", utmvm.Home(out))
-	if err := utmvm.Screenshot(name, out); err != nil {
-		return err
-	}
-	say("written")
-	return nil
 }

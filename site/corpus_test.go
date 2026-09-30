@@ -511,3 +511,65 @@ func TestHeaderHasNoDuplicateLinks(t *testing.T) {
 	}
 	t.Logf("%d links across %d headers, none duplicated", linksChecked, pagesChecked)
 }
+
+// localRef captures every href and src on a page, local or not; the test
+// decides which are local.
+var localRef = regexp.MustCompile(`(?:href|src)="([^"]*)"`)
+
+// TestEveryLocalLinkResolves: every local href and src on every published page
+// names a file the build produced. It replaced the shell link checker that
+// used to run inline in pages.yml — the licence link was once broken exactly
+// this way and only turned up when somebody checked by hand. Anchors are
+// TestEveryAnchorResolves's job; this checks the file part.
+//
+// It also refuses an absolute URL glued onto a repository path
+// (".../blob/main/https://..."), which is a syntactically valid absolute link
+// and so invisible to a local-file check. Every outbound link on the site once
+// shipped that way. TestRewriteLinksNeverDoublesAScheme covers the function;
+// this covers the published output.
+//
+// A misspelt .md link in the markdown does not fail this: rewriteLinks points
+// any repository file that is not a page at GitHub, so it leaves the site. The
+// local links are the template's assets, generated page names and screenshots.
+//
+// Negative controls, run by hand: `href="syntx.css"` in page.tmpl fails this
+// on every page; making hasScheme return false fails it nine times on the
+// doubled-URL check.
+func TestEveryLocalLinkResolves(t *testing.T) {
+	out := buildToTemp(t)
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		body := read(t, filepath.Join(out, e.Name()))
+		for _, m := range localRef.FindAllStringSubmatch(body, -1) {
+			ref := m[1]
+			if strings.Contains(ref, "/blob/main/") && schemeRE.MatchString(ref[strings.Index(ref, "/blob/main/")+len("/blob/main/"):]) {
+				t.Errorf("%s links to %s: an absolute URL was rewritten as a repository path", e.Name(), ref)
+				continue
+			}
+			if ref == "" || schemeRE.MatchString(ref) || strings.HasPrefix(ref, "//") {
+				continue // external, or data:/mailto: — not a file this build owes
+			}
+			ref, _, _ = strings.Cut(ref, "#")
+			ref, _, _ = strings.Cut(ref, "?")
+			if ref == "" {
+				continue // a bare #fragment is this page
+			}
+			checked++
+			if _, sErr := os.Stat(filepath.Join(out, filepath.FromSlash(ref))); sErr != nil {
+				t.Errorf("%s links to %s and the build published no such file", e.Name(), ref)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no local links were found on any page; this test would pass vacuously")
+	}
+	t.Logf("%d local links checked", checked)
+}

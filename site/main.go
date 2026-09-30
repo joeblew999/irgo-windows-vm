@@ -68,9 +68,9 @@ var pages = []struct {
 }{
 	{"README.md", "index.html", "irgo-windows-vm", "", "What it does, and how to get started"},
 	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, and when"},
-	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Glaze status", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
+	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Status", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
 	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "Bugs found in glaze, native and UTM, and their status"},
-	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code works, and the traps that cost hours"},
+	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code works, its conventions, and the known traps"},
 	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Set up, run the checks, land a change"},
 
 	// The only page that states intent rather than fact, and it says so in its

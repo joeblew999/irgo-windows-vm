@@ -98,6 +98,7 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
+  net/      the guest address the last SMB push reached, one file per VM
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -474,6 +475,59 @@ password that never expires.
 > nobody mistakes it for a secret. **Do not copy that answer file to anything
 > reachable from a network you do not control.**
 
+### How a binary gets into the guest
+
+`utmctl file push` moves about **0.4 MB/s** (6.9 MB in 17.8 s), so the bytes,
+not the calls, were what made a Windows run slow. The guest's own network is
+about 250 times faster, but the Mac cannot be the server: its firewall is in
+stealth mode and drops connections *to* it, so a guest `curl` to a host HTTP
+server hangs. The owner is not asked to change that. So the connection goes the
+other way. **The guest serves an SMB share and the Mac connects out to it.**
+Nothing on the Mac changes, and nothing is mounted: the client is pure Go
+([cloudsoda/go-smb2](https://github.com/cloudsoda/go-smb2), the maintained fork
+of hirochachacha/go-smb2, about 0.5 MB of the binary), so no volume appears in
+Finder.
+
+`Push` (`internal/utmvm/app.go`, `app_share.go`), for anything of 256 KiB or more:
+
+1. **Find the guest.** First the address cached in `net/`, then
+   `utmctl ip-address` with a 3 s deadline (it sometimes hangs), then `ipconfig`
+   run through the agent, only if utmctl gave no answer.
+2. **Log in** as `dev`/`dev` over NTLMv2, with signing required. Windows 11 24H2
+   requires signing by default anyway (`RequireSecuritySignature: True` on
+   build 26100), and requiring it on our side refuses a guest-access fallback.
+3. **Write** the file into `\\<guest>\irgo-drop` as `irgo-<name>.part`, hashing
+   it as it goes.
+4. **Move and hash in the guest**, one batch as SYSTEM: `move /y` to the real
+   destination (a rename, on the same volume) and `certutil -hashfile … SHA256`.
+   Success means the guest's hash equals the local one.
+5. **Otherwise fall back** to the zipped `utmctl` push, and say why in one line:
+   `pushing 8 MB compressed through utmctl, because the SMB share did not work
+   (…)`. The fast path prints `pushed 8 MB over SMB to 192.168.64.40 in 1.05s`.
+
+Measured 30 Sep 2026: 8 MB in 1.1 s instead of 12–14 s, and 49 MB in 1.6 s
+instead of 1 min 17 s, most of the second being the guest round trip for the
+move and hash ([RESULTS](RESULTS.md#pushes-go-over-smb--measured-30-sep-2026)).
+
+**The share** is opened by `internal/utmvm/assets/file-share.ps1`, run as SYSTEM.
+`vm-repair` runs it on an existing VM, and `-share=false` removes it again. New
+VMs run it at first logon from the unattend CD. Running it again changes
+nothing. It creates:
+
+- `C:\irgo-drop`, with Modify granted to `dev`. The grant is explicit because a
+  network logon is not `INTERACTIVE`.
+- the share `irgo-drop` on that folder, Full access for `dev` only.
+- the firewall rule `irgo-winvm: SMB from the host`: TCP 445, remote address
+  `LocalSubnet` (the UTM shared network, where the Mac is `192.168.64.1`), any
+  profile, because Windows files that network as Public.
+
+It also turns **off** the `File and Printer Sharing (Restrictive)` rules. Windows
+11 24H2 enables them itself when a share is created, open to any address, and
+leaves them on after the share is removed (see the traps).
+`LocalAccountTokenFilterPolicy` is not set, because it only matters for admin
+shares (`C$`). `dev` reaches `irgo-drop` with its filtered network token,
+through the grants above.
+
 ### Why `-gui` exists
 
 The QEMU guest agent runs as `NT AUTHORITY\SYSTEM` in **session 0**, which has
@@ -642,6 +696,9 @@ detail there and only the reminder here.
 | `ln` to an immutable file | `EPERM`, so protecting the ISO silently turned a hardlink into a 5 GB copy | clear the flag first, restore it after |
 | `rm` on a bundle holding that hardlink | `EPERM`, directory left behind, so every VM built from a protected ISO was undeletable | clear the flag first, restore it after |
 | a length check on a download | unreachable: `net/http` already rejects a short body | do not add one; it was proven dead by disabling it |
+| `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
+| the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
+| creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |
 
 ### In the guest programs
 

@@ -38,7 +38,10 @@ A change that makes one stage reach into another's paths is a design error.
 ### Requirements
 
 - macOS on Apple Silicon.
-- UTM. `vm-create` installs it from its signed `.dmg` if it is missing.
+- UTM. `vm-create` installs it from its signed `.dmg` if it is missing: the
+  newest release GitHub does not mark as a pre-release, never a beta
+  (`latestStableUTMDMG`). UTM 5.0.x are betas; see
+  `.plans/2026-09-30_2000_utm-5.md`.
 - `wimlib` and `xorriso`, only when building media from scratch. `iso-create`
   installs them and `iso-delete` removes them.
 - macOS Automation permission to control UTM. This is granted once, in a system
@@ -98,6 +101,7 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
+  utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -361,7 +365,10 @@ done, it says so and stops.
 
 Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
 reports what is installed and where, and **`status`** lists long-running
-[jobs](#jobs).
+[jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
+pre-release on GitHub, and whether an update is available. It answers from a
+12-hour cache, else GitHub within 3 seconds, else an older cache marked as
+such, and offline it says "cannot tell" rather than failing.
 
 Two work only **in a checkout of this repository**, because they build and read
 `examples/`:

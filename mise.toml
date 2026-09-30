@@ -11,140 +11,59 @@ golangci-lint = "2.14.0"
 # read it; restored from the mise.toml deleted in e533764.
 UPSTREAM_DIR = "{{env.HOME}}/workspace/go/src/github.com/crgimenes"
 
-# Maintainer tasks. A user of the binary never needs this file.
-#
-# Namespaced by what they drive, and alphabetical:
-#
-#   iso:*   the Windows media
-#   vm:*    the VM
-#   app:*   your binary on that VM
-#   glaze:* does glaze work? the four examples, on this Mac or on the VM
-#   go:*    the Go toolchain, the analysers, and go:tool (the binary tasks run)
-#   upstream:*  local glaze/native clones: clone, link, verify, unlink
-#   doctor  what is here; belongs to no stage because it reports on all of them
-#
-# The command tasks are the commands and nothing else. If a task here does more
-# than call the binary, that logic belongs in the binary — which is why iso:test,
-# vm:test and app:test are the only ones with a script: they are checks, not
-# capabilities a user needs.
+# The tool itself is on PATH in this directory: `irgo-winvm doctor`,
+# `irgo-winvm vm-create`, and so on. It is .bin/irgo-winvm, built by go:tool,
+# which every task here depends on. After editing cmd/ or internal/, run any
+# task or `mise run go:tool` before calling it by hand.
+_.path = ["{{config_root}}/.bin"]
 
-[tasks."app:create"]
-description = "irgo-winvm app-create — your own .exe"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-create"
+# Only what the binary cannot do on its own: checks, builds, the glaze gates,
+# upstream work. No task just wraps a command — call the command.
+#
+#   glaze:*     does glaze work? the four examples, on this Mac or on the VM
+#   go:*        build, test, lint, cross-compile; go:tool builds the binary
+#   upstream:*  local glaze/native clones: clone, link, verify, lint, unlink
+#   iso:test, vm:test, app:test   create-and-delete cycles for each stage
+#   vm:shots    publish the newest screenshot of each stage into docs/
+#   site:*      the docs website
+#   ci:watch    wait for GitHub Actions
 
-# One pair per program this repository can put on a VM.
-#
-# Four, all in examples/: probe, verify, verify-events, glaze-all. Each exits
-# non-zero when anything it checks failed, so a task here passing means the
-# thing worked. To run all four with one verdict, use glaze:mac or glaze:windows.
-#
-# They are ordinary uses of app:create above and get no special treatment in the
-# tool: a probe is a Windows binary, and app-create runs any Windows binary.
-# What differs between them is only where the source is and whether it needs a
-# desktop, so that is all these tasks say.
-#
-# -gui or not is the split enforced in the code: without it the guest agent runs
-# the binary as SYSTEM in session 0, where there is no window station and every
-# windowed call fails.
-#
-# Output goes to .bin/win/, which is gitignored, and the delete half names the
-# same path without rebuilding — app-delete only needs to know what to remove.
-
-[tasks."app:create:glaze-all"]
-description = "examples/glaze-all — the windowed capability report, on the VM"
-depends = ["go:tool"]
-# -probe because glaze-all opens its window and waits when run with no flags:
-# it is an example first, and its default is the hands-on mode. An unattended
-# caller wants an exit code and nothing left open, so it says so.
-run = [
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
-  ".bin/irgo-winvm app-create -gui {{config_root}}/.bin/win/glaze-all.exe -probe",
-]
-
-[tasks."app:create:glaze-all:hands"]
-description = "examples/glaze-all — the window, left up on the VM to drive by hand"
+[tasks."glaze:hands"]
+description = "glaze-all on the VM with its window left up, to drive by hand"
 depends = ["go:tool"]
 # No -probe, so it opens the window and waits for a person. -detach because of
 # that: a window nobody closes never exits, so waiting for it can only end in
 # the timeout. Without it this sat silent for ten minutes and read as a hang.
 run = [
   "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
-  ".bin/irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
+  "irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
 ]
-
-[tasks."app:create:probe"]
-description = "examples/probe — the headless native capabilities, on the VM"
-depends = ["go:tool"]
-run = [
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/probe.exe ./probe",
-  ".bin/irgo-winvm app-create {{config_root}}/.bin/win/probe.exe",
-]
-
-[tasks."app:create:verify"]
-description = "examples/verify — the portless app:// path, on the VM"
-depends = ["go:tool"]
-run = [
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/verify.exe ./verify",
-  ".bin/irgo-winvm app-create -gui {{config_root}}/.bin/win/verify.exe",
-]
-
-[tasks."app:create:verify-events"]
-description = "examples/verify-events — the Events bridge, on the VM"
-depends = ["go:tool"]
-run = [
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/verify-events.exe ./verify-events",
-  ".bin/irgo-winvm app-create -gui {{config_root}}/.bin/win/verify-events.exe",
-]
-
-[tasks."app:delete"]
-description = "irgo-winvm app-delete — your own .exe"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-delete"
-
-[tasks."app:delete:glaze-all"]
-description = "Take glaze-all off the VM"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-delete {{config_root}}/.bin/win/glaze-all.exe"
-
-[tasks."app:delete:probe"]
-description = "Take probe off the VM"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-delete {{config_root}}/.bin/win/probe.exe"
-
-[tasks."app:delete:verify"]
-description = "Take verify off the VM"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-delete {{config_root}}/.bin/win/verify.exe"
-
-[tasks."app:delete:verify-events"]
-description = "Take verify-events off the VM"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm app-delete {{config_root}}/.bin/win/verify-events.exe"
 
 [tasks."app:test"]
 description = "Put a binary on a VM, run it, and remove it"
+depends = ["go:tool"]
 run = '''
 set -e
+exe="{{config_root}}/.bin/win/probe.exe"
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o "$exe" ./probe
 # No precondition check here any more. It shelled out to `utmctl ip-address` to
 # decide whether the guest agent was up, which meant this file held both the
 # VM's name and a second opinion about what "ready" means -- and app-create
 # already answers that, recovers a VM that has rebooted, and says what to run
 # if Windows is not installed yet.
 #
-# Through the named tasks, not a hand-rolled build of the same thing. This ran
-# `go build` into a mktemp hello.exe, which tested a path no user takes and
-# would have kept passing after app:create:probe broke.
+# examples/probe, not a throwaway: this once ran `go build` into a mktemp
+# hello.exe, which tested a path no user takes.
 echo "=== create: push it and run it ==="
-mise run app:create:probe
+irgo-winvm app-create "$exe"
 
 echo
 echo "=== delete: take it off again ==="
-mise run app:delete:probe
+irgo-winvm app-delete "$exe"
 
 echo
 echo "=== deleting again is success, not an error ==="
-mise run app:delete:probe
+irgo-winvm app-delete "$exe"
 
 echo
 echo "app create and delete cycle complete"
@@ -203,11 +122,6 @@ gh run list --commit "$SHA" --json workflowName,conclusion,url \
 exit $failed
 '''
 
-[tasks."doctor"]
-description = "irgo-winvm doctor"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm doctor"
-
 [tasks."glaze:mac"]
 # The inner loop. glaze and native run natively on macOS, cgo-free, so the same
 # four programs glaze:windows puts on the VM run here in seconds, no VM.
@@ -242,7 +156,7 @@ out="{{config_root}}/.bin/win"; mkdir -p "$out"
 [ -f "{{config_root}}/go.work" ] && echo "LINKED: building against $UPSTREAM_DIR" || echo "released glaze/native (the go.mod versions)"
 GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C "{{config_root}}/examples" build -o "$out/" ./...
 fail=""
-run() { name=$1; shift; echo; echo "=== $name"; .bin/irgo-winvm app-create "$@" || fail="$fail $name"; }
+run() { name=$1; shift; echo; echo "=== $name"; irgo-winvm app-create "$@" || fail="$fail $name"; }
 run probe                "$out/probe.exe"
 run verify        -gui   "$out/verify.exe"
 run verify-events -gui   "$out/verify-events.exe"
@@ -357,22 +271,7 @@ run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticche
 description = "Build irgo-winvm into .bin/ — the binary every task here runs"
 sources = ["go.mod", "go.sum", "cmd/**/*", "internal/**/*"]
 outputs = [".bin/irgo-winvm"]
-run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
-
-[tasks."help"]
-description = "irgo-winvm help"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm help"
-
-[tasks."iso:create"]
-description = "irgo-winvm iso-create"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm iso-create"
-
-[tasks."iso:delete"]
-description = "irgo-winvm iso-delete"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm iso-delete"
+run = "go build -o irgo-winvm ./cmd/irgo-winvm"
 
 [tasks."iso:test"]
 description = "Delete the ISO and rebuild it, keeping the .esd"
@@ -398,7 +297,7 @@ depends = ["go:tool"]
 # installed long ago and the ISO it holds is already spent.
 run = '''
 set -e
-state() { .bin/irgo-winvm doctor | grep "$1" | awk '{print $5}'; }
+state() { irgo-winvm doctor | grep "$1" | awk '{print $5}'; }
 
 if [ "$(state 'ARM64 .esd')" = "MISSING" ]; then
   echo "no .esd, so a rebuild would mean downloading 4.2 GB again." >&2
@@ -407,14 +306,14 @@ if [ "$(state 'ARM64 .esd')" = "MISSING" ]; then
 fi
 
 echo "=== create: idempotent, so this starts from a known-good ISO ==="
-.bin/irgo-winvm iso-create
+irgo-winvm iso-create
 
 echo
 echo "=== delete without -force lists, changes nothing, and does NOT report success ==="
 # Non-zero on purpose, and asserted rather than tolerated: a dry run that exited
 # 0 would be indistinguishable from a delete that had happened, and every
 # `set -e` script treating it as one. vm-delete does the same.
-if .bin/irgo-winvm iso-delete; then
+if irgo-winvm iso-delete; then
   echo "a dry run exited 0; a script cannot tell that from a real delete" >&2
   exit 1
 fi
@@ -422,17 +321,17 @@ fi
 
 echo
 echo "=== delete: the ISO goes, the .esd stays ==="
-.bin/irgo-winvm iso-delete -force
+irgo-winvm iso-delete -force
 [ "$(state 'ARM64 ISO')" = "MISSING" ] || { echo "ISO survived the delete" >&2; exit 1; }
 [ "$(state 'ARM64 .esd')" != "MISSING" ] || { echo "the .esd was deleted; only -all may do that" >&2; exit 1; }
 
 echo
 echo "=== deleting again is success, not an error ==="
-.bin/irgo-winvm iso-delete -force
+irgo-winvm iso-delete -force
 
 echo
 echo "=== create: rebuilt from the .esd, no download ==="
-.bin/irgo-winvm iso-create
+irgo-winvm iso-create
 [ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "the ISO was not rebuilt" >&2; exit 1; }
 
 echo
@@ -542,7 +441,7 @@ fail=0
 for exe in "$out"/*.test.exe; do
   [ -e "$exe" ] || continue   # packages without tests produce no binary
   echo "=== $(basename "$exe")"
-  if ! "$MISE_PROJECT_ROOT/.bin/irgo-winvm" app-create -gui "$exe" -- -test.v -test.timeout 300s; then
+  if ! irgo-winvm app-create -gui "$exe" -- -test.v -test.timeout 300s; then
     echo "FAILED: $(basename "$exe")"; fail=1
   fi
 done
@@ -576,16 +475,6 @@ echo "  mise run glaze:mac && mise run glaze:windows   # the four examples, agai
 echo "then: mise run upstream:unlink"
 '''
 
-[tasks."vm:create"]
-description = "irgo-winvm vm-create"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm vm-create"
-
-[tasks."vm:delete"]
-description = "irgo-winvm vm-delete"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm vm-delete"
-
 [tasks."vm:shots"]
 description = "Publish the newest shot of each stage into docs/screens/vm"
 depends = ["go:tool"]
@@ -593,12 +482,7 @@ depends = ["go:tool"]
 # those names carry a timestamp, so nothing in a README can point at one. This
 # copies the newest of each stage in under its stage name, which is what the
 # docs reference. No file is ever copied by hand.
-run = ".bin/irgo-winvm vm-screen -promote {{config_root}}/docs/screens/vm"
-
-[tasks."vm:screen"]
-description = "irgo-winvm vm-screen"
-depends = ["go:tool"]
-run = ".bin/irgo-winvm vm-screen"
+run = "irgo-winvm vm-screen -promote {{config_root}}/docs/screens/vm"
 
 [tasks."vm:test"]
 description = "Create a VM and delete it, against a disposable name"
@@ -610,13 +494,13 @@ VM=irgo-test-cycle
 # vm-create restarts UTM so it sees the new bundle, and quitting UTM takes any
 # running VM down with it. Refuse rather than cost somebody a 45-minute
 # install they had running.
-if .bin/irgo-winvm doctor 2>/dev/null | grep -q started; then
+if irgo-winvm doctor 2>/dev/null | grep -q started; then
   echo "a VM is running; vm-create restarts UTM and would stop it" >&2
   exit 1
 fi
 
 echo "=== create ==="
-.bin/irgo-winvm vm-create -vm "$VM"
+irgo-winvm vm-create -vm "$VM"
 
 echo
 echo "=== it exists ==="
@@ -624,13 +508,13 @@ utmctl status "$VM" || { echo "UTM does not know $VM" >&2; exit 1; }
 
 echo
 echo "=== delete refuses without -force ==="
-if .bin/irgo-winvm vm-delete -vm "$VM"; then
+if irgo-winvm vm-delete -vm "$VM"; then
   echo "vm-delete deleted without -force" >&2; exit 1
 fi
 
 echo
 echo "=== delete ==="
-.bin/irgo-winvm vm-delete -vm "$VM" -force
+irgo-winvm vm-delete -vm "$VM" -force
 
 echo
 echo "=== it is gone, and no phantom entry is left ==="
@@ -640,7 +524,7 @@ fi
 
 echo
 echo "=== deleting again is success, not an error ==="
-.bin/irgo-winvm vm-delete -vm "$VM"
+irgo-winvm vm-delete -vm "$VM"
 
 echo
 echo "create and delete cycle complete"

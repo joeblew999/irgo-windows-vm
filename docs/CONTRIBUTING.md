@@ -89,12 +89,13 @@ mise run upstream:lint && mise run upstream:test:windows
 mise run upstream:unlink         # back to the released versions
 ```
 
-One at a time: `mise run app:create:<name>` / `app:delete:<name>`.
-`app:create:glaze-all:hands` leaves the window up on the guest's desktop to
-drive by hand. If a `-gui` run fails with no desktop session, run
-`irgo-winvm vm-repair -reboot`.
+One at a time: build it, then `irgo-winvm app-create [-gui] <exe>` —
+`irgo-winvm` is on PATH inside the repo (mise puts `.bin/` there; any task, or
+`mise run go:tool`, rebuilds it). `mise run glaze:hands` leaves glaze-all's
+window up on the guest's desktop to drive by hand. If a `-gui` run fails with no
+desktop session, run `irgo-winvm vm-repair -reboot`.
 
-When something is stuck, `mise run vm:screen` photographs the guest — from the
+When something is stuck, `irgo-winvm vm-screen` photographs the guest — from the
 host a stuck boot and a working one look identical.
 
 ## The docs site

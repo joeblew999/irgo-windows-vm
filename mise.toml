@@ -1,6 +1,9 @@
+[settings]
+# go.mod/go.work `toolchain` is the Go pin; this makes `mise install` honour it.
+idiomatic_version_file_enable_tools = ["go"]
+
 [tools]
 # Pinned so CI installs what a maintainer has. mise-action reads this.
-go = "1.26.5"
 golangci-lint = "2.11.2"
 
 # Maintainer tasks. A user of the binary never needs this file.

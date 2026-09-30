@@ -7,7 +7,7 @@ A plan must stand on its own: symptom, evidence, cause, the exact change, and ho
 
 | # | Plan | Why this order | State |
 |---|---|---|---|
-| 1 | [`2026-09-30_1320_restore-upstream-link-verify.md`](2026-09-30_1320_restore-upstream-link-verify.md) | Restores `upstream:clone/link/verify/unlink`. Every upstream fix below is tested through it. Small: `mise.toml` only. | next |
+| 1 | [`done/2026-09-30_1320_restore-upstream-link-verify.md`](done/2026-09-30_1320_restore-upstream-link-verify.md) | Restores `upstream:clone/link/verify/unlink`. Every upstream fix below is tested through it. Small: `mise.toml` only. | **done** |
 | 2 | [`2026-09-30_1250_glaze-webview2-stale-registration.md`](2026-09-30_1250_glaze-webview2-stale-registration.md) | The glaze fix (fallback when the WebView2 registration is stale) → issue + PR to crgimenes/glaze. Needs 1. | planned |
 | 3 | [`2026-09-30_1215_gui-probes-blocked-by-password-expiry.md`](2026-09-30_1215_gui-probes-blocked-by-password-expiry.md) | Harden the VM itself: password never expires in `autounattend.xml`, `vm-repair`, fail-fast "ready" + `-gui`, `doctor` rows. Independent of 1–2. | partly done — `irgo-win11` repaired by hand 2026-09-30; code changes open |
 

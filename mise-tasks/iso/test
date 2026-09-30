@@ -22,9 +22,20 @@ set -euo pipefail
 # when that VM is deleted. Nothing is broken by it: the VM boots from a disk it
 # installed long ago and the ISO it holds is already spent.
 
-state() { irgo-winvm doctor | grep "$1" | awk '{print $5}'; }
+# present NAME prints true or false for doctor's row of that name, and FAILS if
+# there is no such row. It read the table with `grep NAME | awk '{print $5}'`,
+# which found the state column only because both names asked about are four
+# words long. A renamed row now stops the cycle instead of reading as absent,
+# which would have made "the ISO is gone" pass vacuously.
+# (jq ships with macOS since 15; this cycle only runs on a Mac.)
+present() {
+  irgo-winvm doctor -json | jq -er --arg w "$1" \
+    '[.[] | select(.what == $w)] | if length == 1 then .[0].present else error("doctor has no row \($w)") end'
+}
+ISO='Windows 11 ARM64 ISO'
+ESD='Windows 11 ARM64 .esd'
 
-if [ "$(state 'ARM64 .esd')" = "MISSING" ]; then
+if [ "$(present "$ESD")" != true ]; then
   echo "no .esd, so a rebuild would mean downloading 4.2 GB again." >&2
   echo "run: irgo-winvm iso-create -fetch" >&2
   exit 1
@@ -42,13 +53,13 @@ if irgo-winvm iso-delete; then
   echo "a dry run exited 0; a script cannot tell that from a real delete" >&2
   exit 1
 fi
-[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "a dry run deleted the ISO" >&2; exit 1; }
+[ "$(present "$ISO")" = true ] || { echo "a dry run deleted the ISO" >&2; exit 1; }
 
 echo
 echo "=== delete: the ISO goes, the .esd stays ==="
 irgo-winvm iso-delete -force
-[ "$(state 'ARM64 ISO')" = "MISSING" ] || { echo "ISO survived the delete" >&2; exit 1; }
-[ "$(state 'ARM64 .esd')" != "MISSING" ] || { echo "the .esd was deleted; only -all may do that" >&2; exit 1; }
+[ "$(present "$ISO")" = false ] || { echo "ISO survived the delete" >&2; exit 1; }
+[ "$(present "$ESD")" = true ] || { echo "the .esd was deleted; only -all may do that" >&2; exit 1; }
 
 echo
 echo "=== deleting again is success, not an error ==="
@@ -57,7 +68,7 @@ irgo-winvm iso-delete -force
 echo
 echo "=== create: rebuilt from the .esd, no download ==="
 irgo-winvm iso-create
-[ "$(state 'ARM64 ISO')" != "MISSING" ] || { echo "the ISO was not rebuilt" >&2; exit 1; }
+[ "$(present "$ISO")" = true ] || { echo "the ISO was not rebuilt" >&2; exit 1; }
 
 echo
 echo "iso create and delete cycle complete"

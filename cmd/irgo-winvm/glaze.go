@@ -37,7 +37,8 @@ func glazeCheckFlags() *flag.FlagSet {
 // app-create's own library call.
 //
 // Natively it runs on macOS, and on Windows too: that is how the CI job on
-// GitHub's windows-11-arm runner gets the same record the VM run does.
+// GitHub's windows-11-arm runner gets the same record the VM run does. With
+// -import it runs nothing, and records CI's artifacts instead.
 func runGlazeCheck(v values, _ []string) error {
 	windows, name := v.Bool("windows"), v.String("vm")
 	say := utmvm.Printer("glaze-check")

@@ -377,6 +377,8 @@ Two work only **in a checkout of this repository**, because they build and read
   run never erases the other. Each run keeps its full output as
   `glaze-<target>-<stamp>.log`, and the test2json events as `.json` beside it,
   in the log directory `doctor` names, and prints both paths first and last.
+  With `-import <dir>` it runs nothing and records downloaded CI artifacts
+  instead — what `pages.yml` does, on Linux, before building the site.
 - **`glaze-status`** prints the recorded file and says, per section, whether it
   still describes the tree: current, stale (and why), or cannot tell.
 
@@ -544,6 +546,29 @@ How it is built, and why:
   and exits 0 — the VM gate and the CI job stay green for changes that broke
   nothing — and a known failure that starts passing answers `UNEXPECTED PASS`
   and exits non-zero, because the list is then out of date.
+- **Every windowed test photographs its window**, when the binary is given
+  `-conformance.shots=<dir>` (or `$CONFORMANCE_SHOTS`), at the moment that
+  shows what it checked: the page loaded, the tray up, the menu installed, the
+  dialog open. Windows uses `PrintWindow` with `PW_RENDERFULLCONTENT` (WebView2
+  is composited by DWM, and a plain `WM_PRINT` or `BitBlt` gets black); macOS
+  uses `screencapture -l` with the `NSWindow`'s `windowNumber`, after
+  `CGPreflightScreenCaptureAccess` says the process may capture — without
+  Screen Recording permission `screencapture` returns the wallpaper where the
+  window should be. A black or one-colour frame is a failed capture and is not
+  written. A capture never fails a test: it logs `screenshot: <os>/<Test>.png`
+  or `screenshot not captured: <why>`, and `glaze-check` reads those lines.
+  On macOS the tray item and the menu bar are drawn outside the process and a
+  capture of them shows the desktop behind (measured on macOS 27), so those two
+  tests photograph their window instead and say why beside the picture.
+- **The pictures go where the verdict goes.** `glaze-check` copies them into
+  `docs/screens/conformance/<target>/` with a `shots.json` manifest (pulled
+  from `C:\Users\Public\irgo-conformance-shots` with `utmvm.Pull` for the VM
+  run), emptying the directory first, and `GLAZE-STATUS.md` ends in a
+  Screenshots table — each windowed test, the Mac and Windows side by side,
+  each with its result. The CI job uploads each runner's pictures with its
+  record; `pages.yml` downloads the latest completed conformance run on main
+  and runs `glaze-check -import` on it before building the site, so the Glaze
+  status page shows CI's pictures, and what is committed when CI has none.
 
 `examples/glaze-all` is the demo: every capability is a button, and
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is

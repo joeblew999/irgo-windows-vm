@@ -21,8 +21,6 @@ import (
 )
 
 //
-//go:embed assets/windowid.swift
-var windowIDSwift string
 
 // Screenshot captures a VM's display window to a PNG.
 //
@@ -60,46 +58,19 @@ func Screenshot(vmName, outPath string) error {
 
 // windowID finds the CoreGraphics window ID for a VM's display window.
 //
-// Shells out to `swift`, which ships with the Xcode command line tools. Reading
-// CGWindowList from Go directly would mean cgo, and this project is deliberately
-// cgo-free — a scripting dependency that is already on any Mac able to build for
-// Apple platforms is the cheaper trade.
+// The list comes from utmWindows (CGWindowList through purego). It used to
+// compile a Swift helper on every call, which needed the Xcode command line
+// tools; a Mac without them could not take a screenshot.
 func windowID(vmName string) (int, error) {
-	f, err := os.CreateTemp("", "utmvm-windowid-*.swift")
+	wins, err := utmWindows()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("listing UTM windows: %w", err)
 	}
-	defer func() { _ = os.Remove(f.Name()) }() // scratch
-
-	// Close is checked, and it has to be: an unflushed write leaves a truncated
-	// Swift file, and swift then fails with a parse error that reads like the
-	// Xcode tools are missing.
-	if _, wErr := f.WriteString(windowIDSwift); wErr != nil {
-		_ = f.Close()
-		return 0, wErr
-	}
-	if cErr := f.Close(); cErr != nil {
-		return 0, cErr
-	}
-
-	out, err := exec.Command("swift", f.Name()).Output()
-	if err != nil {
-		return 0, fmt.Errorf("listing UTM windows (needs Xcode command line tools): %w", err)
-	}
-
 	var titles []string
-	for _, line := range strings.Split(string(out), "\n") {
-		id, title, ok := strings.Cut(strings.TrimSpace(line), "\t")
-		if !ok {
-			continue
-		}
-		titles = append(titles, title)
-		if strings.EqualFold(title, vmName) {
-			n, convErr := strconv.Atoi(id)
-			if convErr != nil {
-				return 0, fmt.Errorf("bad window id %q: %w", id, convErr)
-			}
-			return n, nil
+	for _, w := range wins {
+		titles = append(titles, w.title)
+		if strings.EqualFold(w.title, vmName) {
+			return w.id, nil
 		}
 	}
 	// UTM's main window is always present; a missing VM window means the display

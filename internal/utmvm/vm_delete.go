@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -127,6 +128,14 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// this project's own ISO lives in the media directory, and a survivor
 	// that is not found is a survivor that is not re-protected.
 	_, immutable := walkBundle(r.Path)
+	// The walk finds nothing inside UTM's container when App Data protection
+	// refuses this process a listing, so the one file that can carry the flag
+	// is also asked for by its known path, which stat still answers.
+	if iso := filepath.Join(r.Path, bundleData, installISO); !slices.Contains(immutable, iso) {
+		if flags, ok := fileFlags(iso); ok && flags&uchgFlag != 0 {
+			immutable = append(immutable, iso)
+		}
+	}
 	if len(immutable) > 0 {
 		step("… releasing %d protected file(s) so the bundle can be removed", len(immutable))
 	}

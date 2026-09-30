@@ -302,6 +302,13 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	say("          %s: %s allocated of %s", Home(g.Bundle), HumanBytes(g.Allocated), HumanBytes(g.Apparent))
 
 	say("STEP 5/6  proving it boots: a clone of it, %s, until its agent answers", goldenVerifyName)
+	// A verification clone left by an earlier run that failed here is ours
+	// and would make the clone refuse its name.
+	if _, fErr := Find(goldenVerifyName); fErr == nil {
+		if _, dErr := Delete(goldenVerifyName, true, func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
+			return m, fmt.Errorf("removing the %s an earlier run left: %w", goldenVerifyName, dErr)
+		}
+	}
 	boot, err := cloneAndBoot(goldenVerifyName, say)
 	if err != nil {
 		return m, fmt.Errorf("the golden image did not boot a clone: %w\n"+

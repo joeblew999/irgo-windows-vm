@@ -33,3 +33,19 @@ func TestRepairScriptIsEmbedded(t *testing.T) {
 		}
 	}
 }
+
+// The same for the policies added on 30 Sep 2026, and for the desktop reset:
+// each is embedded, and a build that lost one would push an empty file and
+// report a clean desktop.
+func TestDesktopScriptsAreEmbedded(t *testing.T) {
+	for _, want := range []string{"UpdateNotificationLevel", "SetAutoRestartNotificationDisable", "Scancode Map", "NEEDS A REBOOT"} {
+		if !strings.Contains(vmRepairScript, want) {
+			t.Errorf("vm-repair.ps1 does not contain %q", want)
+		}
+	}
+	for _, want := range []string{"FindWindowEx", "CabinetWClass", "Shell_SystemDialogProxy", "Shell_TrayWnd", "exit 1"} {
+		if !strings.Contains(desktopResetScript, want) {
+			t.Errorf("desktop-reset.ps1 does not contain %q", want)
+		}
+	}
+}

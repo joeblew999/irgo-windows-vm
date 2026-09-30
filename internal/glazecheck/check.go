@@ -40,6 +40,14 @@ type Options struct {
 	// Such a run is recorded as CANNOT TELL, never as a failure.
 	NotRun func(error) bool
 
+	// ResetDesktop, when set, is run before the suite and after it, so the
+	// suite starts on a clean desktop and the run leaves one. What it closed
+	// afterwards is printed, so a test that left something open is named in
+	// the log rather than silently tidied away. For Windows it is
+	// utmvm.DesktopReset; the Mac has none, because the tests close what they
+	// open and the owner's desktop is not this tool's to tidy.
+	ResetDesktop func() error
+
 	Say func(string, ...any)
 }
 
@@ -80,7 +88,7 @@ func Check(o Options) (Section, error) {
 	sec.Log, sec.JSON = utmvm.Home(logPath), utmvm.Home(jsonPath)
 	say("full log: %s", sec.Log)
 
-	var notRun error
+	var notRun, resetErr error
 	teeErr := utmvm.Tee(logFile, func() error {
 		say("checkout: %s", o.Root)
 		say("target:   %s", o.Platform)
@@ -111,7 +119,9 @@ func Check(o Options) (Section, error) {
 			sec.BuildError = bErr.Error()
 		} else {
 			say("running: %s %s", exe, strings.Join(TestArgs, " "))
-			raw, runErr := runSuite(o, exe)
+			var raw []byte
+			var runErr error
+			resetErr = resetAround(o.ResetDesktop, say, func() { raw, runErr = runSuite(o, exe) })
 			switch {
 			case runErr != nil && o.NotRun != nil && o.NotRun(runErr):
 				sec.NotRun, notRun = runErr.Error(), runErr
@@ -151,8 +161,36 @@ func Check(o Options) (Section, error) {
 	case !sec.Passed():
 		return sec, fmt.Errorf("%w: %s — each test's first message is in %s, everything in %s",
 			ErrFailed, sec.Verdict(), StatusFile, sec.Log)
+	case resetErr != nil:
+		// The verdict stands and is recorded; the desktop is a separate
+		// failure, returned so the run does not exit 0 over a mess.
+		return sec, fmt.Errorf("%s, but %w", sec.Verdict(), resetErr)
 	}
 	return sec, nil
+}
+
+// resetAround runs run between two desktop resets, when there is a reset.
+// Both always run, whatever the first returned: the one after is the one that
+// names what a test left open. Its error is returned in preference to the one
+// before, for the same reason.
+func resetAround(reset func() error, say func(string, ...any), run func()) error {
+	if reset == nil {
+		run()
+		return nil
+	}
+	say("clearing the desktop before the run")
+	before := reset()
+	if before != nil {
+		say("desktop reset before the run: %v", before)
+	}
+	run()
+	say("clearing the desktop after the run (anything closed here was left open by the run)")
+	after := reset()
+	if after != nil {
+		say("desktop reset after the run: %v", after)
+		return after
+	}
+	return before
 }
 
 // convert turns the raw output into test2json events, keeps them beside the

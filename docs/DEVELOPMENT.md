@@ -549,6 +549,59 @@ How it is built, and why:
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
 not a test and nothing reads its output.
 
+## Desktop hygiene
+
+A check leaves nothing on a screen: not on the owner's Mac, where `glaze:mac`
+runs natively, and not on the VM's desktop, which every screenshot shows.
+Before 30 Sep 2026 each run left two file-manager windows (five Finder windows
+onto `$TMPDIR` had piled up on the Mac, six `explorer.exe` processes on the VM),
+a "Location is not available" box, and a file dialog that went only because
+the process exited under it.
+
+**Tests do not open what they cannot close.** The conformance suite checks
+openurl's refusals only, which ask the OS for nothing; `Open` and `Reveal` on a
+real target hand it to Finder or Explorer, whose window the test does not own
+(`TestOpenURL` says why). `TestFileDialog` cancels its dialog and requires
+`OpenFile` to return. Opening a real folder is for `glaze-all`, by hand.
+
+**The VM's desktop is reset around every Windows check.** `utmvm.DesktopReset`
+runs `internal/utmvm/assets/desktop-reset.ps1` in dev's session, through the
+same `/it` scheduled task as `app-create -gui`. SYSTEM is in session 0 and
+cannot see dev's windows. It closes Explorer windows and Explorer's error
+boxes, stops Windows Update's restart prompt and its requester, dismisses
+notification toasts, closes an open Start or Search pane, then checks again and exits 1 if any is still there or if
+the taskbar is gone. It never kills `explorer.exe`: when that was tried, the
+taskbar went with it and Windows did not restart the shell. There is no
+command of its own. `glaze-check -windows` runs it before the first program and
+after the last, printing what it closed, so a program that left something open
+is named in the log. `vm-repair` runs it at the end unless it reboots.
+`docs/screens/vm/desktop-before-reset.png` is the VM's desktop before any of
+this, with two Explorer windows and the restart prompt;
+`docs/screens/vm/desktop-after-glaze-check.png` is the same desktop straight
+after a full `glaze-check -windows`, with nothing on it.
+
+**At the source**, the answer file and `vm-repair` turn off Windows Update
+notifications, restart warnings included (`SetUpdateNotificationLevel` 1 with
+`UpdateNotificationLevel` 2, and `SetAutoRestartNotificationDisable`), turn
+off OneDrive (`DisableFileSyncNGSC`) and notification toasts
+(`NoToastApplicationNotification`, a per-user policy written into dev's hive),
+and remap both Windows keys to nothing (`Scancode Map`). OneDrive's "Turn On
+Windows Backup" toast arrived a minute after the reboot that installed the
+pending update. UTM forwards the Mac's
+Command key as the Windows key, so every Cmd-Tab on the Mac opened Start in the
+guest. The remap is read at boot. `vm-repair` says whether it is in effect,
+needs a reboot, or cannot tell (set by the answer file with no record of when).
+UTM's only related settings are app-wide, not per VM: `IsCtrlCmdSwapped`
+(Settings, Input: swap Control and Command) and the input-capture options
+(`WindowFocusAutoCapture`, `FullScreenAutoCapture`). None of them simply stops
+forwarding Command, and this tool does not change UTM's preferences.
+
+**What a `vm-screen` shows is current.** It captures UTM's window, and the
+taskbar clock in each capture advanced minute by minute. A capture taken inside
+the guest (`CopyFromScreen` in dev's session) matched it pixel for pixel,
+update prompt included. When a window seems to survive being killed, the
+process that owns it is not the one that was killed. See the traps below.
+
 ## Known traps
 
 Each of these fails silently or misleadingly. UTM rejects a bad config with one
@@ -601,4 +654,11 @@ detail there and only the reminder here.
 | `menu.Set` with `Options.Dispatch` set **before** `Run` | `Set` blocks until its UI work has run, and nothing drains the queue until the run loop starts | call it after `Run` starts |
 | `file://` URL built by concatenation | Windows paths are `C:\dir`; the URL needs `file:///C:/dir`. Without the leading slash `net/url` writes `file:C:/dir` and ShellExecuteW rejects it | build it with `net/url` and a leading slash |
 | `openurl.Open != nil` as a capability check | a function value is never nil, so it checks nothing; `go vet` says so | call it and check the error |
+| Windows Update's restart prompt, "We've got an update for you" | killing `MoNotificationUx.exe` leaves it on screen: that process only requests it. The window is a `Shell_SystemDialogProxy` owned by `PickerHost.exe`, and `WM_CLOSE` to the proxy removes the window but leaves its picture | stop `PickerHost.exe`, then the requester, as `desktop-reset.ps1` does |
+| `EnumWindows` or UI Automation to find what is on the Windows screen | both list only the desktop's own z-order band. The taskbar, Start, Search and the update prompt live in others, so all of them were missing while on screen | walk top-level windows with `FindWindowEx(NULL, prev, NULL, NULL)`, and treat a cloaked window as hidden |
+| checking the foreground window for an open Start menu | the check runs in a console of its own, which has the foreground, while Start stays open behind it | look for an uncloaked `CoreWindow` of `StartMenuExperienceHost` or `SearchHost` |
+| a notification toast (OneDrive's "Turn On Windows Backup") | an uncloaked `CoreWindow` of `ShellExperienceHost` titled "New notification". Stopping that host brings it straight back | stop the sending app and clear its notification history (`ToastNotificationManager.History.Clear`) |
+| `$null` passed to a `string` parameter of a .NET method from PowerShell | PowerShell passes `""`, so `FindWindow('Shell_TrayWnd', $null)` asks for an empty title and `FindWindowEx(0, h, $null, $null)` finds nothing | call from C# (`Add-Type`) or pass `[NullString]::Value` |
+| the Mac's Command key | UTM forwards it as the Windows key, so Cmd-Tab on the Mac opens Start in the guest, over screenshots and `-gui` windows | `Scancode Map` remaps both Windows keys (answer file, `vm-repair`); a reboot applies it |
+| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §5](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` before anything slow on the main goroutine |
 | an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([UPSTREAM.md §1b](UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |

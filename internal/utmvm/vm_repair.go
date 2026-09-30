@@ -18,8 +18,10 @@ var vmRepairScript string
 
 // VMRepair fixes what silently breaks -gui runs on a VM that has
 // lived a while: an expired password (AutoLogon stops, no desktop session), a
-// stale WebView2 registration (every webview reports the runtime missing), and
-// Windows Update restarting the VM on its own in the middle of a run.
+// stale WebView2 registration (every webview reports the runtime missing),
+// Windows Update restarting the VM on its own in the middle of a run or putting
+// its prompts on the screen, and a desktop littered with what earlier runs left
+// (DesktopReset, unless it reboots).
 //
 // It runs as SYSTEM through the guest agent, so it works exactly when it is
 // needed: nobody can log in, but the agent still answers. With reboot, the VM
@@ -48,8 +50,17 @@ func VMRepair(vmRef, user string, reboot bool, say func(string, ...any)) error {
 		if _, err := appExec(vmRef, []string{"shutdown", "/r", "/t", "5"}, time.Minute, say); err != nil {
 			return fmt.Errorf("requesting the reboot: %w", err)
 		}
+		return nil
 	}
-	return nil
+	// The desktop too, which the SYSTEM half above cannot reach. Skipped, and
+	// said, when nobody is logged in: that is what -reboot is for, and the
+	// repair itself has already worked.
+	err = DesktopReset(vmRef, user, say)
+	if errors.Is(err, ErrNoDesktopSession) {
+		say("desktop: not reset, nobody is logged in (-reboot brings AutoLogon back)")
+		return nil
+	}
+	return err
 }
 
 // ErrNoDesktopSession is returned before a -gui launch when nobody is logged in.

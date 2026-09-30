@@ -22,7 +22,7 @@ rewritten later.
 |---|---|---|---|
 | **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) | high | `PATCHED LOCALLY` · reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
 | **glaze** | WebView2 "not found" when the registered runtime folder is stale (self-update left `EBWebView` pointing at a deleted version) — see `.plans/2026-09-30_1250_glaze-webview2-stale-registration.md` | high | reported as [glaze#34](https://github.com/crgimenes/glaze/issues/34) |
-| **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `FOUND HERE` — not reported |
+| **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `PATCHED LOCALLY` — committed on branch `fix/windows-custom-scheme` (`75f3ea1`) in the glaze clone, not pushed; **not verified on Windows**; not reported — see `.plans/2026-09-30_1745_glaze-1b-upstream.md` |
 | **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — not reported |
 | **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported |
 | **UTM** | [`utmctl` reports failure and exits 0](#utm) | high | `FOUND HERE` — not reported |
@@ -35,8 +35,9 @@ rewritten later.
 What the words mean, and they are chosen so none of them can flatter:
 
 - `FOUND HERE` — diagnosed and written up. **Upstream does not know.**
-- `PATCHED LOCALLY` — a fix exists, as **uncommitted edits in a clone on one
-  machine**. Not committed, not pushed, not proposed.
+- `PATCHED LOCALLY` — a fix exists **only in a clone on one machine**, as
+  uncommitted edits or a local branch (the row says which). Not pushed, not
+  proposed.
 - `FILED` — reported upstream, with the link.
 - `FIXED UPSTREAM` — landed in a release, with the version.
 - `OPEN` — observed, cause not established, not yet filable.
@@ -171,19 +172,29 @@ written by the developer do not.
   `https://app.localhost/x`, so two hosts collide silently.
 
 **The fix** is to stop emulating: WebView2 supports real custom schemes through
-`ICoreWebView2EnvironmentOptions4::SetCustomSchemeRegistrations`, with
-`HasAuthorityComponent` for the host and `TreatAsSecure`. That is COM plumbing
-glaze does not have yet, and is a bigger change than the ones below — which is
-why it is written up rather than patched here.
+`ICoreWebView2EnvironmentOptions4::GetCustomSchemeRegistrations`, with
+`HasAuthorityComponent` for the host and `TreatAsSecure`. glaze passed `null`
+environment options; the fix passes a read-only options object it implements
+over Go vtables (cgo-free, as its completion handlers already are), filters
+`app:*`, and deletes the vhost rewrite. A window with schemes gets its own
+WebView2 user data folder, because WebView2 refuses different registrations on
+one browser process. Design, checks and the upstream text:
+`.plans/2026-09-30_1745_glaze-1b-upstream.md`.
 
 **Interim, for anyone using glaze today:** reference assets **relatively**.
 It works on both platforms. `examples/verify-events` was changed to do
 exactly that, and with it the Events bridge passes completely on Windows.
 
-**Status**: `FOUND HERE` — diagnosed and reproducible, **not fixed**, not
-reported. The probe now
-distinguishes the two cases, so this cannot silently regress into a bare
-"timed out" again.
+**Status**: `PATCHED LOCALLY` — committed on branch `fix/windows-custom-scheme`
+(`75f3ea1`, on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed.
+Checked on the Mac only: builds for all six targets, `go vet` and
+`golangci-lint` clean for darwin/linux/windows, glaze's macOS tests pass.
+**Not run on Windows**, so not verified: that needs `mise run upstream:link &&
+mise run glaze:windows` with the branch checked out (verify must PASS) and
+`mise run upstream:test:windows`. **Not reported**: nobody upstream knows (no
+issue or PR as of 30 Sep 2026; released v0.0.61 still emulates). The issue text
+is written and waits on the owner's go-ahead. The probe distinguishes the two
+cases, so this cannot silently regress into a bare "timed out" again.
 
 ## 2. native + glaze — `ErrUnsupported` sentinels do not wrap `errors.ErrUnsupported`
 

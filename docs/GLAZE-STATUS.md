@@ -52,16 +52,16 @@ comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-gla
 | TestFileDialog | PASS |  |
 <!-- /glaze-status:mac -->
 
-<!-- glaze-status:windows commit=0870aec6de077bd3cdb359814bd187e4f06f4256 examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
-## On Windows — NO: failed: TestMenu TestNoCapture
+<!-- glaze-status:windows commit=8cda2ecf105f14262ad4b9d7e194784e1bfecd1d examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
+## On Windows — KNOWN BUGS ONLY: TestAppScheme/absolute_subresources (docs/UPSTREAM.md §1b) fail, known upstream bugs listed in docs/UPSTREAM.md; nothing else did
 
-- when: 2026-09-30 15:13 +0700, took 3m28s
+- when: 2026-09-30 15:21 +0700, took 30s
 - platform: windows/arm64, VM irgo-win11 (through app-create -gui)
-- this repository: commit `0870aec6de07`
+- this repository: commit `8cda2ecf105f`
 - glaze v0.0.61 (released)
 - native v0.1.15 (released)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-151343.log`
-- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-151343.json`
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-152124.log`
+- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-windows-20260930-152124.json`
 
 | test | result | first message |
 |---|---|---|
@@ -90,6 +90,8 @@ comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-gla
 | TestTray | PASS |  |
 | TestTray/running | PASS |  |
 | TestTray/stop_removes_it | PASS |  |
-| TestMenu | **FAIL** | `windowed_test.go:163: the UI thread did not run a dispatched function within 10s` |
-| TestNoCapture | **UNFINISHED** | `panic: test timed out after 3m0s` |
+| TestMenu | PASS |  |
+| TestNoCapture | PASS |  |
+| TestAppIcon | skip | `windowed_test.go:191: appicon is unsupported on windows by design: glaze: setting the application icon at runtime is not supported on this platform` |
+| TestFileDialog | PASS |  |
 <!-- /glaze-status:windows -->

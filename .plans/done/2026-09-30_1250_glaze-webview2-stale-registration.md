@@ -1,6 +1,6 @@
 # glaze: survive a stale WebView2 registration (upstream PR to crgimenes/glaze)
 
-Status: REPORTED — waiting on upstream ([glaze#34](https://github.com/crgimenes/glaze/issues/34)) · 2026-09-30 · fix lives upstream — "a glaze or native bug is fixed at crgimenes, not here"
+Status: CLOSED (reported upstream) ([glaze#34](https://github.com/crgimenes/glaze/issues/34)) · 2026-09-30 · fix lives upstream — "a glaze or native bug is fixed at crgimenes, not here"
 
 ## Problem
 
@@ -123,3 +123,7 @@ and `doctor` follow-ups for WebView2 registration live there).
 **When glaze releases a fix:** bump glaze in `glaze-probes` / `examples`, break the registration as
 in *Reproduce and verify* step 1, run `mise run app:create:verify` (must PASS on the release),
 restore with `setup.exe`, run `mise run upstream:test:windows`, then move this plan to `done/`.
+
+## Closed (2026-09-30)
+
+Our side is done: reported as glaze#34 with evidence and a reproduction; `vm-repair` works around it on our VM. Re-check when glaze releases a fix (steps above), via `upstream:test:windows` and the probes.

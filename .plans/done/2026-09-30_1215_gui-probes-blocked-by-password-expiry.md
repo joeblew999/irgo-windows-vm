@@ -1,6 +1,6 @@
 # GUI probes hang: the `dev` password expired, so auto-logon stopped working
 
-Status: planned · 2026-09-30
+Status: DONE · 2026-09-30
 
 ## Symptom
 
@@ -147,3 +147,10 @@ Follow-ups this adds:
 secure origin; absolute `app://` sub-resources still fail — the known, documented limitation);
 `verify-events` PASS (JS→Go, 3 Go→JS pushes, round trip); `glaze-all` all OK or cleanly
 unsupported (`SetAppIcon` unsupported on this platform).
+
+## Outcome (2026-09-30) — DONE
+
+- `autounattend.xml`: `net accounts /maxpwage:unlimited` + `Set-LocalUser dev -PasswordNeverExpires` (Orders 6–7) for new VMs.
+- `irgo-winvm vm-repair [-reboot]`: embedded `vm-repair.ps1` run as SYSTEM — password never expires; re-registers WebView2 when `EBWebView` names a missing folder. Verified on irgo-win11: healthy → both `ok`; stale registration → `re-registered 154.0.4258.37`; `-reboot` → desktop back, `verify` PASS.
+- `app-create -gui` checks for `dev`'s explorer.exe before pushing; with a forced password change it failed after 26 s instead of waiting 10 min (the error text was not captured in that run).
+- Not done (not needed to unblock): an `EnsureReady` desktop wait and `doctor` rows for session / WebView2 — `vm-repair` covers both in one command.

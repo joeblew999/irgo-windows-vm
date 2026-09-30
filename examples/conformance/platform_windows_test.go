@@ -31,13 +31,17 @@ const (
 // Found through the OS, not through glaze: GetWindow(GW_ENABLEDPOPUP) is the
 // enabled popup the window owns, and answers the window itself while there is
 // none. So "the dialog is on screen" is Windows' answer, not the library's.
-func dismissFileDialog(w glaze.WebView, timeout time.Duration) error {
+//
+// whileUp is given the dialog's HWND while it is on screen, before it is
+// closed, so the test can photograph it.
+func dismissFileDialog(w glaze.WebView, timeout time.Duration, whileUp func(dialog uintptr)) error {
 	owner := uintptr(w.Window())
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		dlg, _, _ := procGetWindow.Call(owner, gwEnabledPopup)
 		if dlg != 0 && dlg != owner {
 			var buf [64]uint16
+			whileUp(dlg)
 			n, _, _ := procGetClassNameW.Call(dlg, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 			if r, _, err := procPostMessageW.Call(dlg, wmClose, 0, 0); r == 0 {
 				return fmt.Errorf("the dialog (window class %q) is up, and WM_CLOSE could not be posted to it: %v", syscall.UTF16ToString(buf[:n]), err)

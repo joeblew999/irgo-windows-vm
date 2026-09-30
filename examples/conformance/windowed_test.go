@@ -4,6 +4,7 @@ package conformance
 
 import (
 	"errors"
+	"image"
 	"io/fs"
 	"path/filepath"
 	"testing"
@@ -111,6 +112,8 @@ func TestTray(t *testing.T) {
 			}
 			err := tray.SetItems([]tray.Item{{Title: "conformance test"}, {Separator: true}, {Title: "still here"}})
 			if err == nil {
+				shootOr(t, func() (image.Image, error) { return grabTray(w) }, // the icon is up
+					func() (image.Image, error) { return grabWindow(w) }, "the window the tray was started beside")
 				return
 			}
 			if !errors.Is(err, tray.ErrNotRunning) || time.Now().After(deadline) {
@@ -160,15 +163,21 @@ func TestMenu(t *testing.T) {
 	if m == nil {
 		t.Fatal("menu.Set returned no menu and no error")
 	}
+	shootOr(t, func() (image.Image, error) { return grabMenu(w) }, // installed, not yet released
+		func() (image.Image, error) { return grabWindow(w) }, "the window the menu was installed for")
 	onUI(t, w, m.Release)
 }
 
 // TestNoCapture excludes the window from screen capture, and on Windows reads
 // the window's display affinity back from the OS rather than trusting nil.
 func TestNoCapture(t *testing.T) {
-	w := openWindow(t, glaze.Options{}, nil)
+	w := openWindow(t, glaze.Options{}, labelled(t))
 	var err error
 	onUI(t, w, func() { err = nocapture.Protect(w.Window()) })
+	// Before require, which skips on macOS: there the picture is the window
+	// the OS would not hide. On Windows a black one is the proof.
+	shootExpecting(t, "black: the window is excluded from capture, which is what Protect is for",
+		func() (image.Image, error) { return grabWindow(w) })
 	require(t, "nocapture", err, "nocapture.Protect")
 	checkCaptureExcluded(t, w)
 }
@@ -176,9 +185,10 @@ func TestNoCapture(t *testing.T) {
 // TestAppIcon sets the application's icon. Unsupported on Windows by design:
 // there a process's icon is the executable's, decided before it runs.
 func TestAppIcon(t *testing.T) {
-	w := openWindow(t, glaze.Options{}, nil)
+	w := openWindow(t, glaze.Options{}, labelled(t))
 	var err error
 	onUI(t, w, func() { err = glaze.SetAppIcon(tinyPNG) })
+	shoot(t, func() (image.Image, error) { return grabWindow(w) }) // before require, which skips on Windows
 	require(t, "appicon", err, "glaze.SetAppIcon")
 }
 
@@ -191,18 +201,24 @@ func TestAppIcon(t *testing.T) {
 // present the dialog and leave it open until the process exited; dismissing it
 // is what lets this run in a suite, with other tests after it.
 func TestFileDialog(t *testing.T) {
-	w := openWindow(t, glaze.Options{}, nil)
+	w := openWindow(t, glaze.Options{}, labelled(t))
 	type result struct {
 		path string
 		err  error
 	}
 	got := make(chan result, 1)
+	dir := t.TempDir()
 	go func() {
-		p, err := w.OpenFile(glaze.FileDialogOptions{Title: "irgo conformance (closes itself)"})
+		// An empty directory of its own, so the screenshot of the dialog shows
+		// nothing of whoever ran the suite.
+		p, err := w.OpenFile(glaze.FileDialogOptions{Title: "irgo conformance (closes itself)", Directory: dir})
 		got <- result{p, err}
 	}()
 
-	if err := dismissFileDialog(w, uiTimeout); err != nil {
+	whileUp := func(dialog uintptr) {
+		shoot(t, func() (image.Image, error) { return grabDialog(dialog) })
+	}
+	if err := dismissFileDialog(w, uiTimeout, whileUp); err != nil {
 		t.Errorf("%v", err)
 	}
 	select {

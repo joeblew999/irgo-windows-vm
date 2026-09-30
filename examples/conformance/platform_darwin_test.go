@@ -23,11 +23,15 @@ import (
 //
 // modalWindow is read from this goroutine. It is a property read, polled until
 // the panel is up; nothing is changed off the main thread.
-func dismissFileDialog(_ glaze.WebView, timeout time.Duration) error {
+//
+// whileUp is given the panel (its NSWindow) while it is on screen, before it
+// is dismissed, so the test can photograph it.
+func dismissFileDialog(_ glaze.WebView, timeout time.Duration, whileUp func(dialog uintptr)) error {
 	app := objc.ID(objc.GetClass("NSApplication")).Send(objc.RegisterName("sharedApplication"))
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if app.Send(objc.RegisterName("modalWindow")) != 0 {
+		if panel := app.Send(objc.RegisterName("modalWindow")); panel != 0 {
+			whileUp(uintptr(panel))
 			app.Send(objc.RegisterName("performSelectorOnMainThread:withObject:waitUntilDone:"),
 				objc.RegisterName("abortModal"), objc.ID(0), false)
 			return nil

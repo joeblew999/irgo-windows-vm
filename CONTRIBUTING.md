@@ -65,7 +65,14 @@ not a trade worth making.
 
 ## Running the probes
 
-The four guest programs are what this repository exists to run. Each has a task:
+The four guest programs are what this repository exists to run. Run all four
+natively on your Mac first, which takes about 15 seconds and needs no VM:
+
+```sh
+mise run app:mac                    # probe, verify, verify-events, glaze-all -probe
+```
+
+Then run them on Windows, which is the real gate. Each has a task:
 
 ```sh
 mise run app:create:probe           # headless: clipboard, power, single-instance, mmap

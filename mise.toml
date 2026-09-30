@@ -113,6 +113,39 @@ run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/verify.exe"
 description = "Take verify-events off the VM"
 run = "go run ./cmd/irgo-winvm app-delete {{config_root}}/.bin/win/verify-events.exe"
 
+[tasks."app:mac"]
+# The inner loop. glaze and native run natively on macOS, cgo-free, so the same
+# four programs the app:create:* tasks put on the VM run here in seconds, no VM.
+# Windows stays the gate before a commit; this is for every edit before it.
+#
+# All four run even if one fails, so one run shows everything that is broken.
+# Measured 2026-09-30, darwin/arm64, released glaze and the linked fix branch
+# alike: all four exit 0. The fast-dev-cycle plan said glaze-all crashed here
+# (SIGTRAP in windowInit); it does not, -probe or interactive.
+#
+# Works linked or not: with upstream:link it tests your local glaze/native.
+description = "Run probe, verify, verify-events and glaze-all natively on this Mac — seconds, no VM"
+run = '''
+set -e
+out="{{config_root}}/.bin/mac"; mkdir -p "$out"
+[ -f "{{config_root}}/go.work" ] && echo "LINKED: building against $UPSTREAM_DIR" || echo "released glaze/native (go.mod versions)"
+build() { echo "--- build $2"; go -C "{{config_root}}/$1" build -o "$out/$2" "$3"; }
+build probe        probe         .
+build glaze-probes verify        ./verify
+build glaze-probes verify-events ./verifyevents
+build examples     glaze-all     ./glaze-all
+fail=0
+for p in probe verify verify-events "glaze-all -probe"; do
+  echo; echo "=== $p"
+  start=$(date +%s)
+  if ! $out/$p; then echo "FAILED: $p"; fail=1; fi
+  echo "($(( $(date +%s) - start ))s)"
+done
+echo
+[ $fail = 0 ] && echo "all four passed on $(go env GOOS)/$(go env GOARCH)" || echo "FAILURES above"
+exit $fail
+'''
+
 [tasks."app:test"]
 description = "Put a binary on a VM, run it, and remove it"
 run = '''

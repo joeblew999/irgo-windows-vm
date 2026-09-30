@@ -16,6 +16,15 @@ builds:
     # leaves in dist/ is the file SHA256SUMS names and the release publishes.
     # Without these the binary sits at dist/irgo-winvm_darwin_arm64_v8.0/irgo-winvm
     # and only takes its published name on upload.
+    #
+    # This makes GoReleaser warn "artifact already present in the list ... might
+    # cause errors when publishing", twice. It is harmless, and checked rather
+    # than assumed: the check (internal/artifact/artifact.go, Add) compares each
+    # uploadable artefact's name against every artefact, including the Binary
+    # one the build made, and Binary is not uploadable (isUploadable). So one
+    # file per name is uploaded. dist/artifacts.json after a build lists two
+    # Binary and two UploadableBinary entries (both print as "Binary") and the
+    # Checksum -- the same three assets v0.4.1 published.
     binary: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     no_unique_dist_dir: true
     env:

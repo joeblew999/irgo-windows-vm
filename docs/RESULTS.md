@@ -1,5 +1,24 @@
 # Probe results
 
+## GoReleaser reproduces the published v0.4.1 byte for byte — verified 30 Sep 2026
+
+The release build moved from a shell loop in `mise.toml` to `.goreleaser.yaml`.
+To show the move changed nothing a user downloads, a scratch clone checked out
+v0.4.1, added only `.goreleaser.yaml`, re-tagged it locally, and ran
+`goreleaser release --clean --skip=publish` (GoReleaser 2.18.2, Go 1.26.5 as
+that tag's `mise.toml` pins):
+
+| file | published SHA256SUMS | GoReleaser rebuild |
+|---|---|---|
+| `irgo-winvm-darwin-arm64` | `ce0f9f0a…3f29c2` | `ce0f9f0a…3f29c2` |
+| `irgo-winvm-darwin-amd64` | `55f2de63…3496c5` | `55f2de63…3496c5` |
+
+Identical. And the negative case: the same commit tagged `v9.9.9` instead
+hashed differently (arm64 `3f058b88…`), because the version is compiled in — so
+the match above is the tag and the source, not a comparison that cannot fail.
+Two snapshot builds of one commit, each with an empty `GOCACHE`, also produced
+identical `SHA256SUMS`.
+
 ## An agent uploaded, pushed, and ran a binary over HTTP — verified 16 Aug 2026
 
 The upload path — content-addressed, chunked `app-upload` — was driven end to

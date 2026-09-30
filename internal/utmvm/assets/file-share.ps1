@@ -20,9 +20,19 @@ $name = 'irgo-drop'
 $path = 'C:\irgo-drop'
 $rule = 'irgo-winvm: SMB from the host'
 
+# Windows 11 24H2 enables this group itself when a share is created, open to
+# any address, and leaves it on when the share is removed (measured 30 Sep
+# 2026, build 26100). Turned off both ways, so our own rule is the only way in
+# and the undo leaves 445 closed.
+function closeWindowsSMBRule {
+  Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing (Restrictive)' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Enabled -eq 'True' } | Disable-NetFirewallRule
+}
+
 if ($Remove) {
   if (Get-SmbShare -Name $name -ErrorAction SilentlyContinue) { Remove-SmbShare -Name $name -Force }
   Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+  closeWindowsSMBRule
   if (Test-Path $path) { Remove-Item -LiteralPath $path -Recurse -Force }
   "file share: removed (\\$env:COMPUTERNAME\$name, $path, firewall rule)"
   return
@@ -53,5 +63,6 @@ if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue))
   New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow -Protocol TCP `
     -LocalPort 445 -RemoteAddress LocalSubnet -Profile Any | Out-Null
 }
+closeWindowsSMBRule
 
 "file share: ok (\\$env:COMPUTERNAME\$name is $path, for $User, TCP 445 from the local subnet)"

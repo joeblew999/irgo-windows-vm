@@ -158,19 +158,20 @@ func dialShare(vmRef string) (string, *smb2.Session, error) {
 		}
 		forgetGuestIP(vmRef)
 	}
+	// ipconfig only when utmctl gave no answer: when it did, the address is
+	// known and the share is what is missing, and a guest round trip would only
+	// delay the fallback.
 	if ips, err := Named(vmRef).ipAddressWithin(3 * time.Second); err == nil {
 		if got, s := try(ips); s != nil {
 			return got, s, nil
 		}
-	} else {
+	} else if res, xerr := appExec(vmRef, []string{"ipconfig"}, time.Minute, func(string, ...any) {}); xerr == nil {
 		errs = append(errs, err)
-	}
-	if res, err := appExec(vmRef, []string{"ipconfig"}, time.Minute, func(string, ...any) {}); err == nil {
 		if got, s := try(ipconfigIPv4(res.Stdout)); s != nil {
 			return got, s, nil
 		}
 	} else {
-		errs = append(errs, fmt.Errorf("ipconfig in the guest: %w", err))
+		errs = append(errs, err, fmt.Errorf("ipconfig in the guest: %w", xerr))
 	}
 	if len(errs) == 0 {
 		return "", nil, errors.New("the guest reported no IPv4 address")

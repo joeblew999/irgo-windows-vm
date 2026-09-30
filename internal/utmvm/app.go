@@ -139,7 +139,7 @@ func Push(vmRef, localPath, guestPath string, say func(string, ...any)) error {
 		say("pushed %s over SMB to %s in %s", HumanBytes(info.Size()), ip, time.Since(start).Round(10*time.Millisecond))
 		return nil
 	}
-	say("pushing %s compressed through utmctl: the SMB share did not work (%s); `irgo-winvm vm-repair` opens it",
+	say("pushing %s compressed through utmctl, because the SMB share did not work (%s); if it is missing, `irgo-winvm vm-repair` opens it",
 		HumanBytes(info.Size()), firstLine(serr.Error()))
 	start = time.Now()
 	if err := pushZipped(vmRef, localPath, guestPath); err != nil {

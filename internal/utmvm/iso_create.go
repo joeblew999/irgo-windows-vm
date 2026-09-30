@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"compress/flate"
 	"crypto/sha1" //nolint:gosec // the catalog publishes SHA-1; the choice is Microsoft's
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -344,7 +346,21 @@ func isoFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCa
 // staging path and only ever links or renames into place once the hash matches,
 // and refuses outright if the destination is in use.
 
-// isoDownload fetches url to dest, resuming a partial file and verifying sha1.
+// digest is the hash a download must have, and how to compute it. The zero
+// value checks nothing.
+type digest struct {
+	algo string // named in the mismatch message
+	hex  string
+	new  func() hash.Hash
+}
+
+// sha1Digest is what Microsoft's catalog publishes for the .esd.
+func sha1Digest(hex string) digest { return digest{"sha1", hex, sha1.New} }
+
+// sha256Digest is what the golden image's manifest records for each chunk.
+func sha256Digest(hex string) digest { return digest{"sha256", hex, sha256.New} }
+
+// isoDownload fetches url to dest, resuming a partial file and verifying want.
 //
 // dest must not exist. The staging file is dest+".part", which is resumable
 // across runs: a 4 GB download that dies at 90% costs the last 10%, not the
@@ -352,7 +368,7 @@ func isoFilterCatalog(all []ISOCatalogEntry, arch, lang, edition string) []ISOCa
 //
 // progress, if non-nil, is called about once a second with bytes so far and the
 // total. A 4 GB download with no output looks identical to a hung one.
-func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) error {
+func isoDownload(url, dest string, want digest, progress func(done, total int64)) error {
 	if err := isoRefuseUnsafeDest(dest); err != nil {
 		return err
 	}
@@ -437,7 +453,7 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 	// unreachable — verified by disabling it and watching the test still pass.
 	// The genuine gap is a chunked response (ContentLength -1) truncated
 	// mid-stream, which is indistinguishable from a clean end at this layer and
-	// is caught only by the SHA-1, when the caller supplies one.
+	// is caught only by the digest, when the caller supplies one.
 	if err := f.Sync(); err != nil {
 		_ = f.Close() // already failing
 		return err
@@ -449,29 +465,32 @@ func isoDownload(url, dest, wantSHA1 string, progress func(done, total int64)) e
 		progress(done, total)
 	}
 
-	if wantSHA1 != "" {
-		got, hErr := isoFileSHA1(part)
+	if want.hex != "" {
+		got, hErr := fileDigest(part, want.new)
 		if hErr != nil {
 			return hErr
 		}
-		if !strings.EqualFold(got, wantSHA1) {
+		if !strings.EqualFold(got, want.hex) {
 			// Kept, not deleted: 4 GB is expensive to re-fetch, and a mismatch
 			// is more often a truncated resume than a corrupt server.
-			return fmt.Errorf("utmvm: sha1 mismatch\n  want %s\n  got  %s\n  kept %s — delete it to start over",
-				wantSHA1, got, part)
+			return fmt.Errorf("%w: %s mismatch\n  want %s\n  got  %s\n  kept %s — delete it to start over",
+				errDigestMismatch, want.algo, want.hex, got, part)
 		}
 	}
 	return os.Rename(part, dest)
 }
 
-// isoFileSHA1 hashes a file, which for a 4 GB ESD takes a few seconds.
-func isoFileSHA1(path string) (string, error) {
+// errDigestMismatch is a download whose bytes are not the ones asked for.
+var errDigestMismatch = errors.New("utmvm: download")
+
+// fileDigest hashes a file, which for a 4 GB ESD takes a few seconds.
+func fileDigest(path string, newHash func() hash.Hash) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // caller-supplied path
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = f.Close() }() // read-only
-	h := sha1.New()                  //nolint:gosec // matching the catalog's published digest
+	h := newHash()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
@@ -597,7 +616,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	if err := os.MkdirAll(ISODir(), 0o755); err != nil {
 		return "", "", false, err
 	}
-	if dErr := isoDownload(e.FilePath, esd, e.Sha1, func(done, total int64) {
+	if dErr := isoDownload(e.FilePath, esd, sha1Digest(e.Sha1), func(done, total int64) {
 		if total > 0 {
 			say("      %s / %s", HumanBytes(done), HumanBytes(total))
 		}

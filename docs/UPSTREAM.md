@@ -20,16 +20,17 @@ rewritten later.
 
 | | finding | severity | status |
 |---|---|---|---|
-| **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) | high | `PATCHED LOCALLY` · reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
-| **glaze** | WebView2 "not found" when the registered runtime folder is stale (self-update left `EBWebView` pointing at a deleted version) — see `.plans/2026-09-30_1250_glaze-webview2-stale-registration.md` | high | reported as [glaze#34](https://github.com/crgimenes/glaze/issues/34) |
+| **glaze** | [`New` blocks forever if anything ran `NSApp` first](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) — while that loop is still running (tray callback) | high | `FIXED UPSTREAM` in **v0.0.48** (bd5d994), reported by someone else as [glaze#31](https://github.com/crgimenes/glaze/issues/31) |
+| **glaze** | [the same, after that loop has stopped](#1-glaze--new-blocks-forever-if-anything-ran-nsapp-first) (tray ran and returned, then `New`) — still hangs in v0.0.61 | high | `PATCHED LOCALLY` — branch `fix/nsapp-first` (`8623e26`) in the glaze clone, on trunk, not pushed; not reported — text ready in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **glaze** | WebView2 "not found" when the registered runtime folder is stale (self-update left `EBWebView` pointing at a deleted version) — see `.plans/2026-09-30_1250_glaze-webview2-stale-registration.md` | high | `FILED` as [glaze#34](https://github.com/crgimenes/glaze/issues/34) on 30 Sep 2026, no reply yet; fix on branch `fix/webview2-stale-registration` (`ba8775b`), pushed to the fork, **no PR opened** |
 | **glaze** | [absolute `app://` URLs silently do not load on Windows](#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows) | high | `PATCHED LOCALLY` — committed on branch `fix/windows-custom-scheme` (`75f3ea1`) in the glaze clone, not pushed; **not verified on Windows**; not reported — see `.plans/2026-09-30_1745_glaze-1b-upstream.md` |
-| **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — not reported |
-| **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported |
-| **UTM** | [`utmctl` reports failure and exits 0](#utm) | high | `FOUND HERE` — not reported |
-| **UTM** | [`utmctl exec` never returns the guest's output](#utm) | high | `FOUND HERE` — not reported |
-| **UTM** | [`suspend --save-state` power-cuts the guest](#utm) | high | `FOUND HERE` — not reported |
-| **UTM** | [`ip-address` hangs rather than failing](#utm) | medium | `FOUND HERE` — not reported |
-| **UTM** | [a rejected config names no field](#utm) | medium | `FOUND HERE` — not reported |
+| **glaze + native** | [`ErrUnsupported` sentinels do not wrap the standard one](#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) | medium | `PATCHED LOCALLY` — branch `fix/errunsupported-wrap` in each clone, on trunk (glaze `50cc331`, native `854cdb9`), not pushed; not reported — text ready in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **native** | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | low | `FOUND HERE` — a limitation, not reported; question drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **UTM** | [`utmctl` reports failure and exits 0](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **UTM** | [`utmctl exec` never returns the guest's output](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **UTM** | [`suspend --save-state` power-cuts the guest](#utm) | high | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **UTM** | [`ip-address` hangs rather than failing](#utm) | medium | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
+| **UTM** | [a rejected config names no field](#utm) | medium | `FOUND HERE` — not reported; drafted in `.plans/2026-09-30_1800_upstream-reports.md` |
 | **UTM** | [the guest agent stops answering](#the-guest-agent-stops-answering) | — | `OPEN` — cause not isolated |
 
 What the words mean, and they are chosen so none of them can flatter:
@@ -42,15 +43,34 @@ What the words mean, and they are chosen so none of them can flatter:
 - `FIXED UPSTREAM` — landed in a release, with the version.
 - `OPEN` — observed, cause not established, not yet filable.
 
-**Nothing in this file has been reported upstream by this project.** That is
-worth stating plainly rather than leaving to be inferred: glaze#31 is the same
-defect as §1, and it was filed on 12 Aug 2026 by **@nako-ruru** — a stranger who
-hit it independently, twelve days after it was diagnosed here. Finding bugs and
-not reporting them is how that happens.
+**One thing in this file has been reported upstream by this project:**
+glaze#34, on 30 Sep 2026. Everything else is unreported, and every unreported
+finding has its issue (and, where there is a patch, PR) text drafted in
+`.plans/2026-09-30_1800_upstream-reports.md`, waiting for the owner's go-ahead.
+That is worth stating plainly: glaze#31 is the same defect as §1, filed on
+12 Aug 2026 by **@nako-ruru** — a stranger who hit it independently, twelve days
+after it was diagnosed here, and it was the maintainer's fix for *their* report
+that shipped. Finding bugs and not reporting them is how that happens.
 
-Patches live in clones at `~/workspace/go/src/github.com/crgimenes/{glaze,native}`
-as **working-tree changes** — 4 modified files in glaze, 15 in native, none
-committed. A `git checkout` in either would destroy them.
+Patches live as **commits on local branches** in the clones at
+`$UPSTREAM_DIR` = `~/workspace/go/src/github.com/crgimenes/{glaze,native}`.
+None is pushed except `fix/webview2-stale-registration` (to the fork, for #34).
+
+| clone | branch | commit | on | what |
+|---|---|---|---|---|
+| glaze | `fix/nsapp-first` | `8623e26` | trunk `0dce849` (v0.0.61) | §1, the stopped-loop case, with a test |
+| glaze | `fix/errunsupported-wrap` | `50cc331` | trunk `0dce849` (v0.0.61) | §2, glaze half, a test per package |
+| glaze | `fix/windows-custom-scheme` | `75f3ea1` | — | §1b (see its plan) |
+| glaze | `fix/webview2-stale-registration` | `ba8775b` | trunk `0dce849` | glaze#34 |
+| native | `fix/errunsupported-wrap` | `854cdb9` | trunk `58f48b7` (v0.1.15) | §2, native half, all ten packages, a test each |
+
+Superseded, kept only until the PRs exist: `patch/nsapp-new-blocks` (`2b145f9`,
+glaze) and `patch/errunsupported-wraps-std` (glaze `a5fedb7`, native
+`66b4497`). These are the original working-tree edits, committed on 30 Sep —
+nothing was lost — but on the stale `master` branches (glaze v0.0.47, native
+v0.1.6), not on `trunk`, which is what upstream releases from. The `fix/*`
+branches are those patches carried onto trunk and extended to what trunk has
+added since.
 
 A fix is not listed as verified until it has been *run*: their tests, our tests,
 and the probe binary built from the edit executing on Windows 11 ARM64 in the
@@ -72,7 +92,7 @@ Nothing in glaze's documentation says a window must be created first, and the
 failure names nothing:
 
 ```
-goroutine 1 [syscall, locked to thread]:
+goroutine 1 [syscall, locked to thread]:          (glaze v0.0.47)
   ...objc.ID.Send
   glaze.(*webview).windowInit.func2()       webview_darwin.go:504
   glaze.NewWithOptions(...)                 webview_darwin.go:477
@@ -80,12 +100,35 @@ goroutine 1 [syscall, locked to thread]:
   main.main()
 ```
 
-**Reproducer** — `tray.Run` (which stops itself after 1.5s), then `glaze.New`.
-Before the fix it never reaches step 3.
+There are two routes in, and upstream has fixed one of them.
 
-**Fix**: ask AppKit whether it has already launched, and if so take the same
-path the delegate callback would have taken, minus the stop that has nothing to
-stop.
+**Route 1 — `New` while someone else's loop is still running** (from a tray
+`OnClick`). Reported by somebody else as
+[glaze#31](https://github.com/crgimenes/glaze/issues/31), *"[macOS]
+glaze.New(true) blocks indefinitely when initialized inside tray OnClick
+callback"*, opened on 12 Aug 2026 by **@nako-ruru** — twelve days after this
+was diagnosed here, while the fix sat uncommitted in a local clone. The
+maintainer fixed it in bd5d994 (*"darwin: a webview born under someone else's
+run loop"*): when `[NSApp isRunning]`, glaze skips the bootstrap and marshals
+itself to the main thread. **`FIXED UPSTREAM` in v0.0.48**; this repo is on
+v0.0.61.
+
+**Route 2 — `New` after that loop has stopped** (`tray.Run` returned after
+`tray.Stop`, a dialog closed, another toolkit's window gone). `isRunning` is
+false by then, so bd5d994's check does not fire, the bootstrap is taken, and it
+waits for a notification AppKit already sent. **Still hangs in v0.0.61**,
+measured on 30 Sep 2026 with the reproducer below (Mac, no VM):
+
+```
+tray.Run (stops itself after 1.5s), then glaze.New
+  released glaze v0.0.61       step 1, step 2, then nothing — killed at 20s
+  stack: glaze.(*webview).windowInit.func1()  webview_darwin.go:651  (the temporary [NSApp run])
+  glaze fix/nsapp-first        step 1, 2, 3, 4, exit 0
+```
+
+**Fix** (route 2, on trunk): also ask AppKit whether it has already launched,
+and if so take the path the delegate callback would have taken, minus the stop
+that has nothing to stop.
 
 ```go
 func appFinishedLaunching() bool {
@@ -100,25 +143,21 @@ func appFinishedLaunching() bool {
 The body shared with `onApplicationDidFinishLaunching` is split into
 `finishLaunching`, so the two paths cannot drift.
 
-**Status**: fixed, with a negative control. The same reproducer binary, built
-against the same clone with only this change stashed and restored:
+**Status**: `PATCHED LOCALLY` — branch `fix/nsapp-first`, commit `8623e26`, on
+glaze trunk `0dce849` (v0.0.61), not pushed, **not reported**. It carries the
+original patch (`2b145f9`, made on v0.0.47) onto the code bd5d994 rewrote, plus
+`TestNewAfterAppFinishedLaunching`, which runs route 2 in a child process of
+the test binary: it hangs on trunk and passes with the fix (negative control
+run). glaze `go test ./...` and `-short` pass on macOS 27; `GOOS=windows` and
+`GOOS=linux` build and vet; `golangci-lint run` for darwin and windows reports 0
+issues. macOS-only code, so the Windows VM has nothing to say about it. Issue
+and PR text: `.plans/2026-09-30_1800_upstream-reports.md` §1.
 
-| glaze | result |
-|---|---|
-| upstream `v0.0.47` | reaches step 2, then hangs indefinitely — killed at 20s |
-| patched | reaches step 3 and 4, exits 0 |
-
-macOS-only code, so the Windows VM has nothing to say about it; `go test ./...`
-passes in glaze.
-
-**Reported by somebody else.** [glaze#31](https://github.com/crgimenes/glaze/issues/31),
-*"[macOS] glaze.New(true) blocks indefinitely when initialized inside tray
-OnClick callback"*, was opened on 12 Aug 2026 by **@nako-ruru** — the same
-defect, reached by the same route (a tray callback), reported independently
-twelve days after it was diagnosed here and while the fix above sat uncommitted
-in a local clone.
-
-Their report is the one upstream will act on. This entry is not a claim on it.
+Nothing in this repo works around route 2 — no example creates a web view after
+a loop has stopped. The comment on `probeTray` in `examples/glaze-all` still
+describes route 1 as unfixed ("this order is what a released glaze still
+requires"); since v0.0.48 that is no longer true, and the window-first order is
+kept only because the tray is posted with `w.Dispatch`, which needs the window.
 
 ---
 
@@ -200,12 +239,12 @@ cases, so this cannot silently regress into a bare "timed out" again.
 
 **Severity: medium.** Correct programs on correct platforms report failure.
 
-Nine packages define their own sentinel with `errors.New`, so none of them
+Twelve packages define their own sentinel with `errors.New`, so none of them
 matches the one check the standard library defines for exactly this purpose:
 
 | package | sentinel |
 |---|---|
-| `native/clipboard`, `power`, `singleinstance`, `mmap`, `openurl`, `nocapture`, `tray` | `ErrUnsupported` |
+| `native/alert`, `bookmark`, `clipboard`, `mmap`, `nocapture`, `openurl`, `pointer`, `power`, `singleinstance`, `tray` | `ErrUnsupported` |
 | `glaze/menu` | `ErrUnsupported` |
 | `glaze` | `ErrIconUnsupported` |
 
@@ -228,28 +267,45 @@ the package sentinel still matches.
 var ErrUnsupported = fmt.Errorf("clipboard: not supported on this platform: %w", errors.ErrUnsupported)
 ```
 
-**Status**: `PATCHED LOCALLY` — fixed in all nine packages and **verified on
-Windows 11 ARM64**, but the change is an uncommitted edit in a clone and has not
-been proposed upstream.
-Each native package gained an `unsupported_test.go` asserting the wrapping, and
-glaze an `appicon_unsupported_test.go` covering both of its sentinels, so a
-package added later cannot reintroduce it. `go test ./...` passes in both
-repos; native's README, which documented the old pattern as the house style, is
-updated.
+**Status**: `PATCHED LOCALLY` — branch `fix/errunsupported-wrap` in each
+clone, on trunk: glaze `50cc331` (on `0dce849`, v0.0.61), native `854cdb9` (on
+`58f48b7`, v0.1.15). Not pushed, **not reported**; issue and PR text in
+`.plans/2026-09-30_1800_upstream-reports.md` §2 and §3. Checked upstream on
+30 Sep 2026: neither trunk wraps, and no issue or PR mentions it.
 
-The run that proves it — `examples/glaze-all` built against the patched clones,
-executed in the VM. The trailing `: unsupported operation` is the wrapped
-sentinel, and it is the only visible difference:
+Each package has a test asserting the wrapping (native: `unsupported_test.go`
+in all ten; glaze: `appicon_unsupported_test.go` for both sentinels and
+`menu/unsupported_test.go`), so a package added later cannot reintroduce it.
+native's README, which documented the old pattern as the house style, is
+updated. Both repos: `go test ./...` passes on macOS 27, `GOOS=windows` and
+`GOOS=linux` build, `golangci-lint run` for darwin and windows reports 0 issues.
+
+This repo against those branches (a `go.work` pointing at them, not
+committed), with the stand-in below **deleted** so `glaze-all` makes the one
+standard check: `go -C examples build/vet/test ./...` pass, `GOOS=windows`
+builds, and `mise run glaze:mac` answers "YES: all four passed on
+darwin/arm64", with
 
 ```
-glaze.SetAppIcon   UNSUPPORTED  glaze: setting the application icon at runtime
-                                is not supported on this platform: unsupported operation
-...
-all capabilities OK or cleanly unsupported
+nocapture.Protect        UNSUPPORTED  nocapture: not supported on this platform: unsupported operation
 ```
 
-Before the fix that same line read `FAILED`, and the process exited non-zero on
-a run in which nothing was wrong.
+The same deletion against the released v0.0.61 / v0.1.15 reads
+`nocapture.Protect  FAILED` — the negative control.
+
+Windows: the original patch (the seven native packages of v0.1.6, glaze
+v0.0.47) was run in the VM, where `glaze.SetAppIcon` read `UNSUPPORTED ...:
+unsupported operation` and the run passed. The trunk branches have **not** been
+run on Windows yet.
+
+**Why `examples/glaze-all` still has a workaround.** `unsupportedErrs` and
+`isUnsupported` in `examples/glaze-all/main.go`, marked *STANDING IN FOR AN
+UPSTREAM FIX*, list each package's sentinel by name. That is the workaround the
+rule forbids, and it stays only because the fix is in no released glaze or
+native: deleting it today makes every macOS run fail on `nocapture`. **What
+removes it:** a glaze and a native release containing the wrapping; then bump
+`examples/go.mod` to them and replace the list with one
+`errors.Is(err, errors.ErrUnsupported)`, exactly as verified above.
 
 ---
 
@@ -260,7 +316,8 @@ of each package is correct on its own.
 
 **Status**: `FOUND HERE` — not reported. Nothing upstream knows this has been
 hit, and the workaround below is undocumented, so it is luck rather than
-contract.
+contract. A question (not a bug report) is drafted in
+`.plans/2026-09-30_1800_upstream-reports.md` §4.
 
 `tray.Run` blocks driving the OS event loop and its doc requires the main
 goroutine locked to the main OS thread. A `glaze.WebView` wants exactly the
@@ -285,7 +342,12 @@ is a live defect rather than an artefact of running something old.
 
 These have been treated as local traps to work around, which is the opposite of
 the rule applied to glaze and native. They are listed here so that stops being
-invisible. None has been reported.
+invisible. None has been reported; a search of utmapp/UTM issues on 30 Sep 2026
+found no existing report of any of them (related, not the same: UTM#3819,
+UTM#7669). Reports for all five are drafted in
+`.plans/2026-09-30_1800_upstream-reports.md` §5–§9. Reading `utmctl`'s source
+located the exit-status one: its event error handler prints and returns, and
+only `snapshot create` checks the failure it records.
 
 ### `utmctl` reports failure and exits 0
 

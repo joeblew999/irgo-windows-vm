@@ -41,11 +41,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
-	ghtml "github.com/yuin/goldmark/renderer/html"
 )
 
 //go:embed page.tmpl
@@ -126,7 +121,12 @@ type page struct {
 	Title, Blurb string
 	Body         template.HTML
 	Nav          []nav
-	Repo         string
+
+	// TOC is the page's own sections, from the same parse as Body. Empty on a
+	// page too short to need one, and the template then draws no sidebar.
+	TOC template.HTML
+
+	Repo string
 
 	// Build is the commit and time this page was generated, so a cached copy
 	// can be told from a current one. Two agents were served a page from a
@@ -250,11 +250,8 @@ func build(root, out, repo, siteURL, sha string) error {
 		return err
 	}
 
-	md := goldmark.New(
-		goldmark.WithExtensions(extension.GFM), // tables: half this repo's docs are tables
-		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
-		goldmark.WithRendererOptions(ghtml.WithUnsafe()),
-	)
+	// Configured in render.go, with the reason for every extension.
+	md := newMarkdown()
 
 	var corpus []corpusEntry
 	for _, p := range pages {
@@ -300,9 +297,9 @@ func build(root, out, repo, siteURL, sha string) error {
 		// one pass producing both renderings.
 		body := rewriteLinks(raw, repo, p.Src)
 
-		var buf bytes.Buffer
-		if cErr := md.Convert(body, &buf); cErr != nil {
-			return fmt.Errorf("converting %s: %w", p.Src, cErr)
+		html, cErr := renderMarkdown(md, body)
+		if cErr != nil {
+			return fmt.Errorf("converting %s: %w", p.Out, cErr)
 		}
 		corpus = append(corpus, corpusEntry{Title: p.Title, Out: p.Out, Blurb: p.Blurb, Markdown: body})
 
@@ -315,7 +312,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: template.HTML(buf.String()), Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName()}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName()}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}
@@ -330,6 +327,13 @@ func build(root, out, repo, siteURL, sha string) error {
 	}
 
 	if err := os.WriteFile(filepath.Join(out, "style.css"), styleCSS, 0o644); err != nil {
+		return err
+	}
+	syntax, err := syntaxCSS()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(out, syntaxFile), syntax, 0o644); err != nil {
 		return err
 	}
 

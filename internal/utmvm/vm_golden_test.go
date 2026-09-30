@@ -30,6 +30,18 @@ func TestCloneScriptTakesItsArguments(t *testing.T) {
 	}
 }
 
+// TestImportAndEjectScriptsTakeOneArgument, for the same reason.
+func TestImportAndEjectScriptsTakeOneArgument(t *testing.T) {
+	for name, s := range map[string]string{
+		"import": fmt.Sprintf(importScript, "/tmp/x y.utm"),
+		"eject":  fmt.Sprintf(ejectScript, "E39605C4-02F5-4085-AD1A-7AD49F5E4D9B"),
+	} {
+		if strings.Contains(s, "%!") {
+			t.Errorf("the %s script and its caller disagree about its arguments:\n%s", name, s)
+		}
+	}
+}
+
 // TestSealStepsAreTheScripts: a step the Go side runs and the script does not
 // accept fails in the guest, forty minutes into a seal, as a ValidateSet error.
 //

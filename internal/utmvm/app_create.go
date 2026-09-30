@@ -77,7 +77,7 @@ func AppCreate(vmRef, localPath string, o AppOptions) (AppResult, error) {
 	}
 	guestPath := dir + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
 	say("pushing %s to %s", path.Base(strings.ReplaceAll(localPath, `\`, "/")), guestPath)
-	if err := Push(vmRef, localPath, guestPath); err != nil {
+	if err := Push(vmRef, localPath, guestPath, say); err != nil {
 		return AppResult{}, err
 	}
 	if o.GUI {

@@ -51,10 +51,6 @@ const (
 	execPrefix    = "irgox-"
 )
 
-// Push copies a local file into the guest.
-//
-// utmctl's file push reads the payload from stdin rather than taking a source
-// path, so the file is streamed in.
 // pushScript writes a batch file, sends it to the guest, and removes the local
 // copy.
 //
@@ -79,7 +75,7 @@ func pushScript(vmRef, guestPath, script string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return Push(vmRef, tmp.Name(), guestPath)
+	return Push(vmRef, tmp.Name(), guestPath, func(string, ...any) {})
 }
 
 // batchFile builds the CRLF batch text that runs argv, capturing its output and
@@ -89,17 +85,47 @@ func pushScript(vmRef, guestPath, script string) error {
 // always exits 0, so a suite that ran nothing looks exactly like one that
 // passed.
 func batchFile(argv []string, outFile, rcFile string) string {
-	return "@echo off\r\n" +
-		quoteForCmd(argv) + " > \"" + outFile + "\" 2>&1\r\n" +
-		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
+	return batchSteps([][]string{argv}, outFile, rcFile)
 }
 
-// Anything over pushZipMin goes compressed. utmctl file push moves about
-// 0.4 MB/s — measured 30 Sep 2026: a 3-byte file in 0.19 s, a 6.9 MB Go binary
-// in 17.8 s — so the time is the bytes, not the call. Zipped, that binary is
-// about 2.9 MB (stripped, 2.0 MB) and the push takes a third of the time; bsdtar,
-// which ships with Windows 11, expands it in the guest in well under a second.
-func Push(vmRef, localPath, guestPath string) error {
+// batchSteps is batchFile for several commands run in order. The first that
+// exits non-zero stops the rest, and its code is the one recorded.
+//
+// The test is `%ERRORLEVEL% neq 0`, not `if errorlevel 1`: that one means "1 or
+// more", so a crash (exit code -1073741819) would count as success.
+// %ERRORLEVEL% reads the previous line's code because cmd parses a batch file
+// a line at a time, as it runs.
+func batchSteps(cmds [][]string, outFile, rcFile string) string {
+	var b strings.Builder
+	b.WriteString("@echo off\r\n")
+	for i, argv := range cmds {
+		redir := " > "
+		if i > 0 {
+			redir = " >> "
+		}
+		b.WriteString(quoteForCmd(argv) + redir + "\"" + outFile + "\" 2>&1\r\n")
+		if i < len(cmds)-1 {
+			b.WriteString("if %ERRORLEVEL% neq 0 goto done\r\n")
+		}
+	}
+	if len(cmds) > 1 {
+		b.WriteString(":done\r\n")
+	}
+	b.WriteString("echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n")
+	return b.String()
+}
+
+// Push copies a local file into the guest, and says which way it went.
+//
+// utmctl file push moves about 0.4 MB/s — measured 30 Sep 2026: a 3-byte file
+// in 0.19 s, a 6.9 MB Go binary in 17.8 s — so the time is the bytes, not the
+// call. Anything over pushZipMin therefore goes over the guest's SMB share when
+// it has one (pushShared), and otherwise compressed through utmctl: zipped, that
+// binary is about 2.9 MB and the push takes a third of the time; bsdtar, which
+// ships with Windows 11, expands it in the guest in well under a second. Small
+// files, batch files and scripts, go through utmctl as they are: one call is
+// cheaper than either route's extra guest round trip.
+func Push(vmRef, localPath, guestPath string, say func(string, ...any)) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return err
@@ -107,11 +133,23 @@ func Push(vmRef, localPath, guestPath string) error {
 	if info.Size() < pushZipMin {
 		return pushRaw(vmRef, localPath, guestPath)
 	}
-	return pushZipped(vmRef, localPath, guestPath)
+	start := time.Now()
+	ip, serr := pushShared(vmRef, localPath, guestPath)
+	if serr == nil {
+		say("pushed %s over SMB to %s in %s", HumanBytes(info.Size()), ip, time.Since(start).Round(10*time.Millisecond))
+		return nil
+	}
+	say("pushing %s compressed through utmctl: the SMB share did not work (%s); `irgo-winvm vm-repair` opens it",
+		HumanBytes(info.Size()), firstLine(serr.Error()))
+	start = time.Now()
+	if err := pushZipped(vmRef, localPath, guestPath); err != nil {
+		return err
+	}
+	say("pushed in %s", time.Since(start).Round(10*time.Millisecond))
+	return nil
 }
 
-// pushZipMin is the size above which Push compresses. Batch files and scripts
-// stay raw: they are tiny, and zipping them would add an expand step for nothing.
+// pushZipMin is the size below which Push sends a file through utmctl as it is.
 const pushZipMin = 256 << 10
 
 // pushZipped zips localPath on the host as one entry named after guestPath,
@@ -174,7 +212,8 @@ func zipOne(localPath, name string) (string, error) {
 	return tmp.Name(), nil
 }
 
-// pushRaw streams localPath into the guest as it is.
+// pushRaw streams localPath into the guest as it is. utmctl's file push reads
+// the payload from stdin rather than taking a source path.
 func pushRaw(vmRef, localPath, guestPath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -227,9 +266,21 @@ type AppResult struct {
 // also makes %ERRORLEVEL% read the previous command's code rather than being
 // expanded early, as it is in a single chained line.
 func appExec(vmRef string, argv []string, timeout time.Duration, say func(string, ...any)) (AppResult, error) {
+	return appExecSteps(vmRef, [][]string{argv}, timeout, say)
+}
+
+// appExecSteps is appExec for several commands in one batch (see batchSteps).
+// A guest command costs its round trips — a push, an exec, polls and a pull,
+// about a second — not its work, so related commands share one.
+func appExecSteps(vmRef string, cmds [][]string, timeout time.Duration, say func(string, ...any)) (AppResult, error) {
 	var res AppResult
-	if len(argv) == 0 {
+	if len(cmds) == 0 {
 		return res, fmt.Errorf("no command given")
+	}
+	for _, argv := range cmds {
+		if len(argv) == 0 {
+			return res, fmt.Errorf("no command given")
+		}
 	}
 	if timeout == 0 {
 		timeout = 10 * time.Minute
@@ -242,7 +293,7 @@ func appExec(vmRef string, argv []string, timeout time.Duration, say func(string
 	outFile := guestTemp + `\` + execPrefix + `out-` + stamp + `.txt`
 	rcFile := guestTemp + `\` + execPrefix + `rc-` + stamp + `.txt`
 
-	if err := pushScript(vmRef, batFile, batchFile(argv, outFile, rcFile)); err != nil {
+	if err := pushScript(vmRef, batFile, batchSteps(cmds, outFile, rcFile)); err != nil {
 		return res, err
 	}
 	if _, err := Named(vmRef).Exec("cmd.exe", "/c", batFile); err != nil {

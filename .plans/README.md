@@ -7,6 +7,7 @@ A plan must stand on its own: symptom, evidence, cause, the exact change, and ho
 
 | # | Plan | State |
 |---|---|---|
+| 0 | [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md) — the whole work order and which agent owns each part; one agent on the VM at a time | in progress |
 | 1 | [`2026-09-30_1500_fast-dev-cycle.md`](2026-09-30_1500_fast-dev-cycle.md) — macOS-first loop, batched Windows gate, build tool once, poll not sleep, full logs, `vm:repair:test` | in progress — 1 and 4 done (`go:tool`, `glaze:mac`); 2 half done (`glaze:windows`, one verdict, still one push per binary) |
 
 Earlier work is in Done: [`done/`](done/) — upstream workflow restored (`upstream:*`), glaze#34 reported,

@@ -68,20 +68,19 @@ func generateMCP(root string) (string, error) {
 	var b strings.Builder
 	b.WriteString(`# The MCP server
 
-An agent writing a Go desktop app on a Mac cannot find out whether it works on
-Windows. This lets it ask, get an answer from real Windows, and see the screen
-when the answer is that it hung.
+` + "`" + `irgo-winvm mcp` + "`" + ` lets an AI agent test a Go desktop app on real Windows. An
+agent writing the app on a Mac can run it in the VM, get the output back, and
+see the screen when the program hangs.
 
-Everything on this page was captured from the compiled binary by listing a live
-server, so it is what a client is actually told rather than what a file says it
-should be.
+This page is captured from the compiled binary by listing a live server, so it
+shows exactly what a client is told.
 
-## Connecting
+## Connect
 
-The server speaks the Model Context Protocol on stdin and stdout. A client
-spawns it:
+The server speaks the Model Context Protocol on stdin and stdout. Configure your
+client to spawn it:
 
-` + "```json" + `
+` + "```" + `json
 {
   "mcpServers": {
     "irgo-winvm": {
@@ -92,17 +91,18 @@ spawns it:
 }
 ` + "```" + `
 
-It needs macOS on Apple Silicon and UTM, which ` + "`vm-create`" + ` installs itself. A
-client on any other platform can start it and get nothing useful from it.
+- **Agents working in this repository** are already connected: ` + "`" + `.mcp.json` + "`" + `
+  registers the server.
+- **It needs macOS on Apple Silicon** and UTM, which ` + "`" + `vm-create` + "`" + ` installs. A
+  client on another platform can start the server but gets nothing useful.
+- **Nothing else may write to stdout** while it runs, because stdout is the
+  protocol channel. Commands print progress, so the server collects that output
+  and returns it in the tool result.
 
-Nothing else may write to stdout while it runs: that is the protocol channel.
-Commands print their progress, which is why the server collects that output and
-returns it in the result instead.
+## Tools
 
-## What the tools are
-
-The tools are the commands, generated from one list — there is no separate MCP
-surface that could offer something the CLI cannot do, or drift from it.
+Each tool is one CLI command, generated from the same list. The MCP surface
+can't offer anything the CLI can't do, and can't drift from it.
 
 `)
 
@@ -121,8 +121,8 @@ surface that could offer something the CLI cannot do, or drift from it.
 	b.WriteString(`
 ## Arguments
 
-Each tool's flags are typed properties, with their real defaults, plus
-` + "`args`" + ` for anything positional — the path to a ` + "`.exe`" + `, or a directory.
+Each tool's flags are typed properties with their real defaults. Anything
+positional, such as the path to a ` + "`" + `.exe` + "`" + ` or a directory, goes in ` + "`" + `args` + "`" + `.
 
 `)
 	for _, t := range tools {
@@ -141,119 +141,123 @@ Each tool's flags are typed properties, with their real defaults, plus
 	}
 
 	b.WriteString(`
-None of that is transcribed. The schema is generated from the same
-` + "`flag.FlagSet`" + ` the command line parses, so a default shown here cannot differ
-from the one the CLI uses — not because a test compares them, but because there
-is only one registration and both read it.
+None of this is transcribed. The schema is generated from the same
+` + "`" + `flag.FlagSet` + "`" + ` the command line parses, so a default shown here can't differ
+from the CLI's: there is one registration, and both read it.
 
-## What a failure looks like
+## Handle failures
 
-A command that fails returns a **result**, not a protocol error, so the model
-can see it and correct itself. The result carries structured content:
+A failed command returns a **result**, not a protocol error, so the model can
+see it and correct itself. The result carries structured content:
 
-` + "```json" + `
+` + "```" + `json
 {"command": "app-create", "code": 4, "status": "no-agent",
  "meaning": "the VM is there, the guest agent is not answering — wait and try again",
  "retryable": true}
 ` + "```" + `
 
-Match on ` + "`status`" + ` or ` + "`code`" + `, never on the wording — the wording will change.
+- **Match on ` + "`" + `status` + "`" + ` or ` + "`" + `code` + "`" + `**, never on the wording. The wording will change.
+- **Check ` + "`" + `retryable` + "`" + ` first.** It is true for two codes: 4 (` + "`" + `no-agent` + "`" + `) and 6
+  (` + "`" + `busy` + "`" + `). Windows Update takes the guest agent away for minutes at a time
+  while the VM is fine, and another client may hold the mutation lock. An agent
+  that can't tell these from "no such VM" either abandons a working VM or
+  retries forever against one that will never exist.
 
-**` + "`retryable`" + ` is the field that matters.** Windows Update takes the guest agent
-away for minutes at a time and the VM is fine. An agent that cannot tell that
-from "no such VM" either abandons a working VM or retries forever against one
-that will never exist. It is true for exactly one code, and the full table is in
-the [README](index.html).
+Every code is explained in [Development](development.html#what-it-exits-with).
 
-## Seeing the screen
+## See the screen
 
-` + "`vm-screen`" + ` returns the PNG itself, as image content. From the host a stuck
-boot and a working one are identical — that is why the command exists — and a
-file path is useless to a caller that cannot open one, or that is on another
-machine.
+` + "`" + `vm-screen` + "`" + ` returns the PNG itself, as image content, not a file path. From the
+host, a stuck boot and a working one look identical, which is why the tool
+exists. A path would be useless to a caller that can't open files, or that is on
+another machine.
 
-## The long calls do not block
+## Long calls return a job
 
-` + "`vm-create -install`" + ` takes about 45 minutes and ` + "`iso-create -fetch`" + ` downloads
-4.2 GB. Both start the work and return a job id immediately, because every
-client times out long before that:
+` + "`" + `vm-create -install` + "`" + ` takes about 45 minutes, and ` + "`" + `iso-create -fetch` + "`" + ` downloads
+4.2 GB. Every client times out long before either finishes, so both start the
+work and return a job id immediately:
 
-` + "```json" + `
+` + "```" + `json
 {"command": "vm-create", "job": "vm-create-20260814-150000", "running": true}
 ` + "```" + `
 
-The work runs in its own process group and outlives the connection that asked
-for it — closing the client does not kill the install. Call ` + "`status`" + ` with the id
-to find out whether it is still alive, and ` + "`vm-screen`" + ` to see what it is doing.
+- **The work outlives the connection.** It runs in its own process group, so
+  closing the client doesn't kill the install.
+- **Call ` + "`" + `status` + "`" + `** with the id to find out whether it is still running, and
+  ` + "`" + `vm-screen` + "`" + ` to see what it is doing.
+- **Liveness is measured**, by signalling the process, not read from a file
+  that claims it is running. A handle that says "running" forever because
+  nothing checked is worse than no handle.
+- **Asking twice is safe.** The same command with the same arguments returns
+  the job already running instead of starting a second one. A client that timed
+  out can simply ask again without starting two installs against one VM.
 
-Whether a job is alive is measured by signalling the process, not by reading a
-file that claims it is running. A handle that says "running" forever because
-nothing checked is worse than no handle.
+## Read the reference offline
 
-Starting the same command with the same arguments twice returns the job already
-running rather than beginning a second one — a client that timed out simply asks
-again, and two installs against one VM is the failure that would cause.
+The server offers one resource, ` + "`" + `irgo-winvm://reference` + "`" + `: every command, flag
+and default, generated from the running binary's own flag definitions. Read it
+before guessing at arguments.
 
-## Reading the documentation without a network
+For the prose documentation, it links to [llms-full.txt](llms-full.txt) rather
+than embedding it. Embedding would mean committing a generated file: ` + "`" + `go:embed` + "`" + `
+needs it at compile time, and it is built into a directory git ignores, so a
+fresh clone wouldn't build. A committed copy goes stale, and a placeholder
+overwritten at release means a development build silently serves an empty
+document. A link is better than a stale answer.
 
-The server offers one resource, ` + "`irgo-winvm://reference`" + `: every command, every
-flag and every default, generated from the running binary's own flag
-definitions. An agent can read it before guessing at arguments.
+## Serve over HTTP
 
-It is generated rather than embedded, and that was a decision rather than an
-oversight. Embedding the whole documentation would mean committing a generated
-file — ` + "`go:embed`" + ` needs it present at compile time and it is produced into a
-directory git ignores, so a fresh clone would not build. Committing it makes a
-second copy that goes stale; a placeholder overwritten at release means a
-development build serves an empty document and says nothing about it.
+` + "`" + `irgo-winvm mcp -http 127.0.0.1:8129` + "`" + ` serves the same tools over Streamable HTTP
+instead of stdin and stdout.
 
-So the binary serves what it genuinely knows and links to
-[llms-full.txt](llms-full.txt) for the prose it does not carry. A stale answer
-is worse than a link.
+> [!WARNING]
+> **Read the [threat model](threat-model.html) first.** The tool exists to run
+> arbitrary binaries, so anything that can call it can run code of its choice
+> in the guest.
 
-## Has this been run for real?
+| you pass | what happens |
+|---|---|
+| a loopback address | serves on this machine only |
+| a bare port, such as ` + "`" + `:8129` + "`" + ` | resolved to ` + "`" + `127.0.0.1:8129` + "`" + `. A port means this machine, not every interface |
+| any other address | refused, unless you also pass ` + "`" + `-allow-remote` + "`" + ` **and** set ` + "`" + `IRGO_WINVM_TOKEN` + "`" + ` |
 
-Yes, on 14 August 2026, from a real client against a real VM: nine tools listed,
-` + "`doctor`" + ` returned as a result, ` + "`vm-screen`" + ` returned a 4.4 MB PNG of a live
-Windows desktop, and ` + "`app-create`" + ` pushed a Go binary into Windows on ARM64 and
-brought its output back. The measurements are in [Results](results.html).
+Off loopback, the token is mandatory: a server that would start unauthenticated
+is refused, not warned about. Clients send it as a bearer token, and it is
+compared in constant time.
 
-One thing is still unproven: a **genuinely long** job. The detached path works
-and survives the client exiting, but the 45-minute ` + "`vm-create -install`" + ` it was
-written for has not been driven over MCP.
+**Upload a binary.** A remote agent with a freshly cross-compiled ` + "`" + `.exe` + "`" + ` and no
+shared disk sends it in chunks with ` + "`" + `app-upload` + "`" + `. The server stages it under
+` + "`" + `bin/` + "`" + `, named by its SHA-256, and verifies the hash before committing it. Pass
+the staged path to ` + "`" + `app-create` + "`" + `.
 
-## Over HTTP, on this machine only
+**One mutation at a time.** A second client that tries to change something while
+another is working gets exit code 6 (` + "`" + `busy` + "`" + `, retryable). It is refused, never
+silently queued.
 
-` + "`irgo-winvm mcp -http 127.0.0.1:8129`" + ` serves the same tools over HTTP instead
-of stdin and stdout. **Read the [threat model](threat-model.html) first**: the
-product is "run this arbitrary binary on my machine", so anything reaching that
-port can execute code of its choosing in the guest.
+**Sessions are stateless**, as the current protocol revision requires; a stateful
+server negotiates down to the older one. GET and DELETE return 405 and
+server-to-client requests are rejected, which is why a long job is keyed by an
+id in the tool arguments rather than by a session.
 
-A non-loopback address is **refused**, not warned about — authentication is not
-built yet, so the only defence is that nothing off this machine can reach it. A
-bare ` + "`:8129`" + ` is refused too: it reads like a local default and binds every
-interface, and it is rejected rather than quietly rewritten, because rewriting
-would make the flag do something other than what it says.
+**DNS-rebinding protection is on.** A request arriving on loopback with a
+non-localhost ` + "`" + `Host` + "`" + ` header is rejected. The SDK provides this; the work here
+was to leave it alone.
 
-The session is stateless, which the current protocol revision requires — a
-stateful server negotiates down to the older one. GET and DELETE return 405, and
-server-to-client requests are rejected outright, which is why a long job is
-keyed by an id in the tool arguments rather than by a session.
+## Verified against a real VM
 
-DNS rebinding protection is on: a request arriving on loopback with a
-non-localhost ` + "`Host`" + ` header is rejected. That defence comes from the SDK, and
-the work here was to leave it alone.
+- **14 August 2026**, over stdio: nine tools listed (the server now has more),
+  ` + "`" + `doctor` + "`" + ` returned as a result, ` + "`" + `vm-screen` + "`" + ` returned a 4.4 MB PNG of a live
+  Windows desktop, and ` + "`" + `app-create` + "`" + ` pushed a Go binary into Windows on ARM64
+  and brought its output back.
+- **16 August 2026**, over HTTP: ` + "`" + `app-upload` + "`" + ` staged a binary in four chunks,
+  and ` + "`" + `app-create` + "`" + ` ran it in the VM.
 
-## What it does not do yet
+The measurements are in [Results](results.html).
 
-**Authentication.** Until it exists, the HTTP transport is loopback-only by
-refusal rather than by default.
-
-**Uploads.** ` + "`app-create`" + ` takes a path on the server's filesystem, so a remote
-agent with a freshly cross-compiled binary and no shared disk cannot yet do the
-one thing this tool is for.
-
-**A lock.** Two clients could drive one VM at once.
+**Not yet proven: a long job.** The detached path works and survives the client
+exiting, but the 45-minute ` + "`" + `vm-create -install` + "`" + ` it was written for has not been
+driven over MCP. See the [roadmap](roadmap.html).
 `)
 	return b.String(), nil
 }

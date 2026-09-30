@@ -49,9 +49,10 @@ func generateReference(root string) ([]byte, error) {
 
 	var b strings.Builder
 	b.WriteString("# Commands\n\n")
-	b.WriteString("Every command and every flag, captured from the binary when this page\n")
-	b.WriteString("was built. Nothing here is transcribed, so it cannot disagree with the\n")
-	b.WriteString("tool: if a flag is wrong here, it is wrong in the binary.\n\n")
+	b.WriteString("Every command and flag, exactly as `irgo-winvm help` and `-h` print them.\n")
+	b.WriteString("This page is captured from the binary each time the site is built, so it\n")
+	b.WriteString("always matches the tool. If a flag is wrong here, fix the Go code.\n\n")
+	b.WriteString("For exit codes and what each step costs, see [Development](development.html).\n\n")
 
 	overview, err := capture(bin, "help")
 	if err != nil {

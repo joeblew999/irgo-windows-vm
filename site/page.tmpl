@@ -62,12 +62,12 @@
 <footer>
   <div class="footer-inner">
   <p>
-  {{- if .Source}}Generated from <a href="{{.Repo}}/blob/main/{{.Source}}">{{.Source}}</a> in the repository — if this page is wrong, that file is wrong.
-  {{- else}}Captured from the compiled binary at build time, so no flag or default is ever transcribed — if this page is wrong, the Go code is wrong and no markdown will fix it.
+  {{- if .Source}}Generated from <a href="{{.Repo}}/blob/main/{{.Source}}">{{.Source}}</a> in the repository. To correct this page, edit that file.
+  {{- else}}Captured from the compiled binary at build time; nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it.
   {{- end}}</p>
-  <p>Reading with a machine?
+  <p>For machines:
   <a href="llms.txt">llms.txt</a> ·
-  <a href="llms-full.txt">the whole thing in one file</a></p>
+  <a href="llms-full.txt">all the docs in one file</a></p>
   <p><a href="{{.Repo}}">Source</a> ·
   <a href="{{.Repo}}/releases">Releases</a> ·
   <a href="{{.Repo}}/blob/main/LICENSE">MIT</a></p>

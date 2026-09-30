@@ -43,6 +43,12 @@ type Result struct {
 	// Inherited is a parent that failed only because a subtest did, and
 	// printed nothing of its own. It is shown, and not counted again.
 	Inherited bool
+
+	// Shot is the screenshot the test logged, as the suite names it
+	// (<os>/<Test>.png, relative to the directory it was given), and ShotNote
+	// what it said about the picture. NoShot is why a test that tried took
+	// none. All three are empty for a test that opens no window.
+	Shot, ShotNote, NoShot string
 }
 
 func (r Result) failed() bool { return r.Outcome == Fail || r.Outcome == Unfinished }
@@ -69,6 +75,9 @@ type Section struct {
 	Results []Result
 	Log     string
 	JSON    string // the test2json events, beside the log
+
+	// RunURL is the GitHub Actions run this was recorded in, when it was.
+	RunURL string
 }
 
 // Verdict is one line: YES, KNOWN BUGS ONLY, NO, UNEXPECTED PASS, or CANNOT
@@ -161,6 +170,12 @@ func (s Section) markdown() string {
 	if s.JSON != "" {
 		fmt.Fprintf(&b, "- test2json events: `%s`\n", s.JSON)
 	}
+	if s.RunURL != "" {
+		fmt.Fprintf(&b, "- CI run: %s\n", s.RunURL)
+	}
+	if taken, tried := s.shotCounts(); tried > 0 {
+		fmt.Fprintf(&b, "- screenshots: %d of the %d tests that open a window took one — see [Screenshots](#screenshots)\n", taken, tried)
+	}
 	b.WriteString("\n")
 
 	switch {
@@ -171,28 +186,44 @@ func (s Section) markdown() string {
 	default:
 		b.WriteString("| test | result | first message |\n|---|---|---|\n")
 		for _, r := range s.Results {
-			var res string
-			switch {
-			case r.Inherited:
-				res = "fail (a subtest failed)"
-			case r.failed() && r.Known != "":
-				res = "**FAIL** — known upstream: " + r.Known
-			case r.Outcome == Unfinished:
-				res = "**UNFINISHED**"
-			case r.failed():
-				res = "**FAIL**"
-			case r.Outcome == Skip:
-				res = "skip"
-			case r.Known != "":
-				res = "PASS — **known failure " + r.Known + " no longer fails**"
-			default:
-				res = "PASS"
-			}
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, res, cell(r.Detail))
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(), cell(r.Detail))
 		}
 	}
 	b.WriteString(closeMarker(s.Target) + "\n")
 	return b.String()
+}
+
+// label is how the tables word a result.
+func (r Result) label() string {
+	switch {
+	case r.Inherited:
+		return "fail (a subtest failed)"
+	case r.failed() && r.Known != "":
+		return "**FAIL** — known upstream: " + r.Known
+	case r.Outcome == Unfinished:
+		return "**UNFINISHED**"
+	case r.failed():
+		return "**FAIL**"
+	case r.Outcome == Skip:
+		return "skip"
+	case r.Known != "":
+		return "PASS — **known failure " + r.Known + " no longer fails**"
+	default:
+		return "PASS"
+	}
+}
+
+// shotCounts is how many tests took a picture, of those that tried.
+func (s Section) shotCounts() (taken, tried int) {
+	for _, r := range s.Results {
+		if r.Shot != "" {
+			taken++
+		}
+		if r.Shot != "" || r.NoShot != "" {
+			tried++
+		}
+	}
+	return taken, tried
 }
 
 // cell makes a line safe inside a table cell: pipes split cells, and a
@@ -258,13 +289,21 @@ func sections(body string) map[string]string {
 // is the file both an owner and an agent will trust, and a half-written one
 // would be believed.
 func Record(root string, s Section) (string, error) {
+	return record(root, s.Target, s.markdown())
+}
+
+// record writes one target's section, already rendered, into the status file
+// under root, keeps the other's, and redraws the Screenshots table from both
+// targets' manifests. Import calls it with a section read from a CI run's
+// file.
+func record(root, target, section string) (string, error) {
 	path := filepath.Join(root, StatusFile)
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 	have := sections(string(old))
-	have[s.Target] = s.markdown()
+	have[target] = section
 
 	var b strings.Builder
 	b.WriteString(header)
@@ -277,6 +316,13 @@ func Record(root string, s Section) (string, error) {
 			sec = placeholder(t)
 		}
 		b.WriteString(sec)
+	}
+	shots, err := gallery(root)
+	if err != nil {
+		return "", err
+	}
+	if shots != "" {
+		b.WriteString("\n" + shots)
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".glaze-status-*")

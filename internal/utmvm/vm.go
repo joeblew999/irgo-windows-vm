@@ -2,8 +2,8 @@ package utmvm
 
 import (
 	"bytes"
-	_ "embed"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"net"

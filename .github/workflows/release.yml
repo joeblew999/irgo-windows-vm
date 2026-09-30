@@ -1,14 +1,15 @@
 # Publish binaries a user can download and run.
 #
-# Same shape as check.yml: install mise, call the task. The build lives in
-# `mise run go:build` so a maintainer can produce byte-identical artefacts
-# locally and see what CI will publish before tagging.
+# Same shape as check.yml: install mise, run what a maintainer runs. The build
+# is .goreleaser.yaml, and GoReleaser is pinned in mise.toml, so a maintainer
+# running `mise run go:build` on a clean checkout of the tag produces the same
+# bytes this publishes, and can see them before tagging.
 #
-# That sentence was false when it was written, and is true now because it was
-# checked. v0.1.0's published binary could not be reproduced from its own tag:
-# Go stamps the commit, the build time and a dirty-tree flag into every binary,
-# so CI (vcs.modified=false), a working copy (true) and a clean worktree (no
-# stamps at all) produced three different binaries from one commit. go:build
+# That sentence was false once, and is true because it was checked. v0.1.0's
+# published binary could not be reproduced from its own tag: Go stamps the
+# commit, the build time and a dirty-tree flag into every binary, so CI
+# (vcs.modified=false), a working copy (true) and a clean worktree (no stamps at
+# all) produced three different binaries from one commit. .goreleaser.yaml
 # passes -buildvcs=false, and the checksums mean something again.
 #
 # macOS only, deliberately. The tool drives UTM, which is macOS-only, so a Linux
@@ -18,12 +19,8 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # A dry run: a snapshot build uploaded as an artefact. Nothing is published.
   workflow_dispatch:
-    inputs:
-      version:
-        description: "version to build (a dry run; nothing is published)"
-        required: false
-        default: dev
 
 permissions:
   contents: write
@@ -35,10 +32,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # GoReleaser reads the tags to find this release and the one before
+          # it, for the version and the changelog. A shallow clone has neither.
+          fetch-depth: 0
       - uses: jdx/mise-action@v4.2.4
 
-      # go:build compiles for two Mac architectures; same cache as everywhere
-      # else so it is not doing that from cold.
+      # Two Mac architectures; same cache as everywhere else so it is not doing
+      # that from cold.
       - uses: actions/cache@v6.1.0
         with:
           path: |
@@ -66,60 +67,46 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          sha="${{ github.sha }}"
-          echo "commit: $sha"
+          echo "commit: $SHA"
 
           # --json is used rather than parsing text: a column layout change
           # would silently turn this into a check that passes on anything.
-          runs=$(gh run list --workflow=check.yml --commit "$sha" \
+          runs=$(gh run list --workflow=check.yml --commit "$SHA" \
                    --json conclusion,status,databaseId,url)
 
           if [ "$(echo "$runs" | jq 'length')" = "0" ]; then
-            echo "::error::no check run exists for $sha — refusing to publish an unverified commit"
+            echo "::error::no check run exists for $SHA — refusing to publish an unverified commit"
             exit 1
           fi
           echo "$runs" | jq -r '.[] | "  \(.status)/\(.conclusion // "pending")  \(.url)"'
 
           if [ "$(echo "$runs" | jq '[.[] | select(.conclusion == "success")] | length')" = "0" ]; then
-            echo "::error::no SUCCESSFUL check run for $sha — refusing to publish"
+            echo "::error::no SUCCESSFUL check run for $SHA — refusing to publish"
             exit 1
           fi
           echo "a green check exists for this commit; publishing"
 
-      - name: build
-        env:
-          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
-        run: mise run go:build
-
+      # Builds, checksums, writes the notes (the header in .goreleaser.yaml plus
+      # the commits since the last tag) and creates the GitHub release. It
+      # refuses a dirty tree and a commit that is not the tag, so what it
+      # publishes is what the tag names.
       - name: publish
         if: github.ref_type == 'tag'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" dist/irgo-winvm-darwin-* dist/SHA256SUMS \
-            --title "$GITHUB_REF_NAME" \
-            --notes "$(printf '%s\n' \
-              'A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.' \
-              '' \
-              'Download the one for your Mac — `arm64` for Apple Silicon — then:' \
-              '' \
-              '    chmod +x irgo-winvm-darwin-arm64' \
-              '    xattr -d com.apple.quarantine irgo-winvm-darwin-arm64' \
-              '    ./irgo-winvm-darwin-arm64' \
-              '' \
-              'The second line is macOS refusing anything downloaded from the internet;' \
-              'without it Gatekeeper reports the binary as damaged.' \
-              '' \
-              'Three steps, in order: iso-create, vm-create, app-create. Each has an undo.' \
-              'It installs UTM itself if you do not have it.' \
-              '' \
-              'Checksums are in SHA256SUMS, and they are reproducible: `mise run go:build`' \
-              'on the same tag produces byte-identical binaries.')"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: goreleaser release --clean
+
+      - name: build (dry run)
+        if: github.ref_type != 'tag'
+        run: mise run go:build
 
       - uses: actions/upload-artifact@v7.0.1
         if: github.ref_type != 'tag'
         with:
           name: irgo-winvm-dev
-          path: dist/
+          path: |
+            dist/irgo-winvm-darwin-*
+            dist/SHA256SUMS

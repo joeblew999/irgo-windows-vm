@@ -1,0 +1,103 @@
+# The release: two raw Mac binaries and SHA256SUMS, published by release.yml on
+# a v* tag. `mise run go:build` runs this same file locally.
+#
+# macOS only, deliberately. The tool drives UTM, which is macOS-only, so a Linux
+# or Windows binary would build and then refuse to do anything useful. The
+# cross-compile in go:check exists to prove `targets` still reports honestly on
+# those hosts, not to ship them.
+version: 2
+
+project_name: irgo-winvm
+
+builds:
+  - id: irgo-winvm
+    main: ./cmd/irgo-winvm
+    # Built under its download name, straight into dist/, so what a local build
+    # leaves in dist/ is the file SHA256SUMS names and the release publishes.
+    # Without these the binary sits at dist/irgo-winvm_darwin_arm64_v8.0/irgo-winvm
+    # and only takes its published name on upload.
+    #
+    # This makes GoReleaser warn "artifact already present in the list ... might
+    # cause errors when publishing", twice. It is harmless, and checked rather
+    # than assumed: the check (internal/artifact/artifact.go, Add) compares each
+    # uploadable artefact's name against every artefact, including the Binary
+    # one the build made, and Binary is not uploadable (isUploadable). So one
+    # file per name is uploaded. dist/artifacts.json after a build lists two
+    # Binary and two UploadableBinary entries (both print as "Binary") and the
+    # Checksum -- the same three assets v0.4.1 published.
+    binary: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [arm64, amd64]
+    # -buildvcs=false so the checksums mean something. Go stamps the commit, the
+    # build time and whether the tree was dirty into every binary, so the same
+    # source built in CI and on a laptop differed -- and the release notes used
+    # to claim a maintainer could produce byte-identical artefacts locally,
+    # which was measured and was not true: CI had vcs.modified=false, a working
+    # copy had true, and a clean worktree had no vcs stamps at all. Three
+    # different binaries, one commit. v0.1.0's published binary could not be
+    # reproduced from its own tag for exactly this reason.
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    # The version, compiled in, so it is part of the bytes the checksums cover.
+    #
+    # The tag itself (v0.4.1), not .Version (0.4.1): every release before
+    # GoReleaser printed the v, and `version` and `doctor` should not change
+    # what they say because the build tool did.
+    #
+    # A snapshot says `dev` (see snapshot below) rather than claiming the last
+    # tag: a commit after v0.4.1 is not v0.4.1.
+    ldflags:
+      - -s -w -X main.version={{ if .IsSnapshot }}{{ .Version }}{{ else }}{{ .Tag }}{{ end }}
+    # The file's mtime from the commit, not the clock, so two builds of one
+    # commit are identical on disk as well as in content.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  # The binary itself, not a tarball of it. A user who downloads one thing
+  # should be able to run that thing: `tar xzf` before you can try a CLI is a
+  # step that exists only because the release process wanted it. It also made
+  # the published checksum useless for verifying the binary, since gzip stamps
+  # a timestamp into the archive and no two builds of identical code produced
+  # the same tar.
+  #
+  # Named as every release before GoReleaser named them -- irgo-winvm-darwin-arm64
+  # -- so the README's download and releases/latest links keep working.
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+snapshot:
+  # Anything that is not a clean checkout of a tag. Before GoReleaser a
+  # non-release build also said `dev`; `-dirty` is kept from then too, since
+  # whatever is uncommitted is not what any commit says.
+  version_template: "dev{{ if .IsGitDirty }}-dirty{{ end }}"
+
+changelog:
+  use: git
+  sort: asc
+
+release:
+  header: |
+    A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.
+
+    Download the one for your Mac — `arm64` for Apple Silicon — then:
+
+        chmod +x irgo-winvm-darwin-arm64
+        xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
+        ./irgo-winvm-darwin-arm64
+
+    The second line is macOS refusing anything downloaded from the internet;
+    without it Gatekeeper reports the binary as damaged.
+
+    Three steps, in order: iso-create, vm-create, app-create. Each has an undo.
+    It installs UTM itself if you do not have it.
+
+    Checksums are in SHA256SUMS, and they are reproducible: `mise run go:build`
+    on a clean checkout of the same tag produces byte-identical binaries.

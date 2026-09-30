@@ -191,23 +191,36 @@ CI publishes them; you tag them.
 git tag -a v0.1.2 -m "..." && git push origin v0.1.2
 ```
 
+The build is [GoReleaser](https://goreleaser.com), configured in
+`.goreleaser.yaml` and pinned in `mise.toml`. That file holds the targets
+(darwin arm64 and amd64 only), the flags, the download names
+(`irgo-winvm-darwin-arm64`, raw binaries rather than tarballs) and the release
+notes' install instructions — edit them there.
+
 `release.yml` does **not** re-run the gate — a tag names a commit `check` has
 already passed on both a Mac and ubuntu, and re-running it was 124s of a 171s
 release. It asks GitHub whether that commit has a green `check` run and refuses
-to publish if it does not, then runs `go:build` and publishes the binaries and
-`SHA256SUMS`. The version comes from the tag and from nowhere
-else, so nothing in the tree needs editing first.
+to publish if it does not, then runs `goreleaser release --clean`, which builds,
+writes `SHA256SUMS`, and creates the GitHub release with the header from
+`.goreleaser.yaml` and the commits since the previous tag. The version comes
+from the tag and from nowhere else, so nothing in the tree needs editing first.
+Running `release.yml` by hand (workflow_dispatch) is a dry run: a snapshot
+build uploaded as an artefact, nothing published.
 
-The checksums are reproducible: `mise run go:build` on the same tag produces
-byte-identical binaries, which is why `-buildvcs=false` is there. If you change
-the build, check that is still true rather than assuming it.
+`mise run go:build` is the same build locally, into `dist/`. On a clean checkout
+of a tag it builds exactly what that release published; anywhere else it is a
+snapshot and the binary says `dev` (`dev-dirty` with uncommitted changes),
+never the tag below it.
+
+The checksums are reproducible: `mise run go:build` on a clean checkout of the
+same tag produces byte-identical binaries, which is why `-buildvcs=false` and
+`mod_timestamp` are in `.goreleaser.yaml`. If you change the build, check that
+is still true rather than assuming it — build twice and compare `SHA256SUMS`.
 
 It takes the version from the tag your checkout is on, because the version is
 compiled into the binary and so is part of those bytes. That sentence was false
 until v0.2.1 — CI passed `VERSION` and a maintainer running the same command by
-hand did not, so the local build said `dev` and hashed differently. A tree with
-uncommitted changes builds `<tag>-dirty`, since whatever you have not committed
-is not what was released.
+hand did not, so the local build said `dev` and hashed differently.
 
 ## Licence
 

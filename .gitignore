@@ -17,7 +17,7 @@
 go.work
 go.work.sum
 
-# Release artefacts, built by mise run go:build.
+# Release artefacts, built by mise run go:build (GoReleaser, .goreleaser.yaml).
 /dist/
 
 # Probe binaries built into their own source directory. Every mise task builds

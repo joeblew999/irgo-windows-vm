@@ -24,7 +24,8 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// version is set at build time by go:build. 'dev' when built by hand.
+// version is set at build time by .goreleaser.yaml (mise run go:build, and
+// release.yml): the tag for a release, `dev` for a snapshot or a plain go build.
 var version = "dev"
 
 // What this process exits with, and why each one is worth telling apart.

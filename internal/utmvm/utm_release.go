@@ -108,44 +108,70 @@ func pickUTMReleases(list []ghRelease) UTMReleases {
 
 // fetchUTMReleases asks GitHub for UTM's releases, giving up after timeout.
 func fetchUTMReleases(ctx context.Context, timeout time.Duration) (UTMReleases, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, utmReleasesAPI, nil)
+	list, err := fetchUTMReleaseList(ctx, timeout)
 	if err != nil {
 		return UTMReleases{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return UTMReleases{}, fmt.Errorf("asking GitHub for UTM's releases: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return UTMReleases{}, fmt.Errorf("GitHub returned %s for UTM's releases", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return UTMReleases{}, fmt.Errorf("reading UTM's releases: %w", err)
-	}
-	var list []ghRelease
-	if err := json.Unmarshal(body, &list); err != nil {
-		return UTMReleases{}, fmt.Errorf("parsing UTM's releases: %w", err)
 	}
 	r := pickUTMReleases(list)
 	r.Checked = time.Now().UTC()
 	return r, nil
 }
 
+// fetchUTMReleaseList is the raw release list from GitHub.
+func fetchUTMReleaseList(ctx context.Context, timeout time.Duration) ([]ghRelease, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, utmReleasesAPI, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("asking GitHub for UTM's releases: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub returned %s for UTM's releases", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading UTM's releases: %w", err)
+	}
+	var list []ghRelease
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("parsing UTM's releases: %w", err)
+	}
+	return list, nil
+}
+
 // latestStableUTMDMG is the .dmg of UTM's newest stable release: what
 // vm-create installs when UTM is missing. Never a pre-release — betas change
 // the config schema this package writes (see VerifiedVersion).
+//
+// Also never a new major version: only releases with VerifiedVersion's major
+// are installed, so the day UTM 5.0 goes stable a fresh machine still gets
+// 4.x until 5.x has passed the trial in .plans/2026-09-30_2000_utm-5.md and
+// VerifiedVersion is moved.
 func latestStableUTMDMG() (UTMRelease, error) {
-	r, err := fetchUTMReleases(context.Background(), 30*time.Second)
+	list, err := fetchUTMReleaseList(context.Background(), 30*time.Second)
 	if err != nil {
 		return UTMRelease{}, fmt.Errorf("utmvm: %w", err)
 	}
+	return installableUTM(list)
+}
+
+// installableUTM is the newest stable release sharing VerifiedVersion's major.
+func installableUTM(list []ghRelease) (UTMRelease, error) {
+	var same []ghRelease
+	for _, g := range list {
+		if sameMajor(strings.TrimPrefix(strings.TrimSpace(g.TagName), "v"), VerifiedVersion) {
+			same = append(same, g)
+		}
+	}
+	r := pickUTMReleases(same)
 	if r.Stable == nil {
-		return UTMRelease{}, errors.New("utmvm: GitHub lists no stable UTM release with a UTM.dmg")
+		return UTMRelease{}, fmt.Errorf("utmvm: GitHub lists no stable UTM %s.x release with a UTM.dmg", strings.SplitN(VerifiedVersion, ".", 2)[0])
 	}
 	return *r.Stable, nil
 }

@@ -236,3 +236,25 @@ func TestCompareVersions(t *testing.T) {
 		}
 	}
 }
+
+// TestInstallableUTMStaysOnVerifiedMajor: when a new major goes stable, a
+// fresh install still gets the newest release of VerifiedVersion's major.
+// Negative control, run by hand: returning pickUTMReleases(list).Stable
+// unfiltered fails the first case with 5.0.0.
+func TestInstallableUTMStaysOnVerifiedMajor(t *testing.T) {
+	dmg := []struct {
+		Name string `json:"name"`
+		URL  string `json:"browser_download_url"`
+	}{{"UTM.dmg", "u"}}
+	got, err := installableUTM([]ghRelease{
+		{TagName: "v5.0.0", Assets: dmg},
+		{TagName: "v4.7.5", Assets: dmg},
+		{TagName: "v4.7.4", Assets: dmg},
+	})
+	if err != nil || got.Version != "4.7.5" {
+		t.Fatalf("got %+v, %v; want 4.7.5 (VerifiedVersion's major), not 5.0.0", got, err)
+	}
+	if _, err := installableUTM([]ghRelease{{TagName: "v5.0.0", Assets: dmg}}); err == nil {
+		t.Fatal("installed a 5.x release when no 4.x stable exists; want an error")
+	}
+}

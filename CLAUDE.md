@@ -1,4 +1,4 @@
-Read [AGENTS.md](AGENTS.md) before writing code in this repository.
+Everything is in [docs/](docs/); [AGENTS.md](AGENTS.md) lists what is where.
+Read docs/DEVELOPMENT.md before writing code — it is imported below.
 
-It is short, and it exists because most of the duplication this project has had
-to clean up was written by an agent that did not check what already existed.
+@docs/DEVELOPMENT.md

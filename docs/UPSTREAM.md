@@ -144,7 +144,7 @@ So the document loads from `https://app.localhost/`, and an absolute
 request is never made. No error, no console message — just a page with no CSS
 and no JavaScript.
 
-**Measured**, Windows 11 ARM64, by `glaze-probes/verify` loading the same asset
+**Measured**, Windows 11 ARM64, by `examples/verify` loading the same asset
 twice, once absolutely and once relatively:
 
 ```
@@ -177,7 +177,7 @@ glaze does not have yet, and is a bigger change than the ones below — which is
 why it is written up rather than patched here.
 
 **Interim, for anyone using glaze today:** reference assets **relatively**.
-It works on both platforms. `glaze-probes/verifyevents` was changed to do
+It works on both platforms. `examples/verify-events` was changed to do
 exactly that, and with it the Events bridge passes completely on Windows.
 
 **Status**: `FOUND HERE` — diagnosed and reproducible, **not fixed**, not

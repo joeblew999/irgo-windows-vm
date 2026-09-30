@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crgimenes/glaze"
@@ -90,8 +91,15 @@ window.addEventListener('load', async () => {
   }
 });`
 
-func main() {
-	done := make(chan string, 1)
+// The exit code is the verdict: 0 only when the page, its absolute app://
+// sub-resources and the JS -> Go call all worked. It printed PASS and exited 0
+// on Windows for months while the absolute URLs failed (docs/UPSTREAM.md §1b), and
+// exited 0 on a timeout too, so nothing driving it could ever see a failure.
+func main() { os.Exit(run()) }
+
+func run() int {
+	type result struct{ msg, text string }
+	done := make(chan result, 1)
 
 	w, err := glaze.NewWithOptions(glaze.Options{
 		SchemeHandlers: map[string]glaze.SchemeHandler{
@@ -114,7 +122,7 @@ func main() {
 	})
 	if err != nil {
 		fmt.Println("FAIL: NewWithOptions:", err)
-		os.Exit(1)
+		return 1
 	}
 	defer w.Destroy()
 
@@ -126,14 +134,14 @@ func main() {
 			for _, k := range []string{"origin", "href", "secureContext", "cryptoSubtle", "localStorage", "pushState", "css"} {
 				fmt.Fprintf(&b, "    %-14s %v\n", k+":", m[k])
 			}
-			done <- b.String()
+			done <- result{msg, b.String()}
 		} else {
-			done <- fmt.Sprintf("msg=%q n=%d raw=%s", msg, n, caps)
+			done <- result{msg, fmt.Sprintf("msg=%q n=%d raw=%s", msg, n, caps)}
 		}
 		return "round-trip-complete", nil
 	}); err != nil {
 		fmt.Println("FAIL: Bind:", err)
-		os.Exit(1)
+		return 1
 	}
 
 	w.SetTitle("glaze verify")
@@ -145,7 +153,7 @@ func main() {
 		dir, err := os.MkdirTemp("", "glaze-verify-*")
 		if err != nil {
 			fmt.Println("FAIL: temp dir:", err)
-			os.Exit(1)
+			return 1
 		}
 		defer os.RemoveAll(dir)
 		for name, body := range map[string]string{
@@ -157,7 +165,7 @@ func main() {
 		} {
 			if err := os.WriteFile(dir+"/"+name, []byte(body), 0o600); err != nil {
 				fmt.Println("FAIL: write:", err)
-				os.Exit(1)
+				return 1
 			}
 		}
 		fmt.Println("  loading over file:// from", dir)
@@ -166,10 +174,21 @@ func main() {
 		w.Navigate("app://home/index.html")
 	}
 
+	// Set on the watcher goroutine, read after Run returns on this one.
+	var code atomic.Int32
+	code.Store(1)
 	go func() {
 		select {
 		case got := <-done:
-			fmt.Println("PASS: JS -> Go round trip:", got)
+			switch got.msg {
+			case "hello-from-js":
+				fmt.Println("PASS: page, absolute app:// sub-resources, JS -> Go round trip:", got.text)
+				code.Store(0)
+			case "ABSOLUTE-SUBRESOURCES-FAILED":
+				fmt.Println("FAIL: absolute app:// sub-resources never loaded (glaze bug, docs/UPSTREAM.md §1b); relative ones did:", got.text)
+			default:
+				fmt.Println("FAIL: page reported", got.text)
+			}
 		case <-time.After(20 * time.Second):
 			fmt.Println("FAIL: timed out waiting for JS to call Go")
 		}
@@ -177,4 +196,5 @@ func main() {
 	}()
 
 	w.Run()
+	return int(code.Load())
 }

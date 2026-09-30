@@ -125,7 +125,7 @@ is not an oversight: an unattended install needs a plaintext credential to
 create the account and log in with nobody typing, and it guards a throwaway
 local VM with no route in from anywhere but your Mac. It is also what makes
 `-gui` possible — anything that opens a window needs a desktop session to open
-it in. [AGENTS.md](AGENTS.md) has the detail.
+it in. [DEVELOPMENT.md](docs/DEVELOPMENT.md) has the detail.
 
 Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
 explains the sequence. This file lists no flags and so cannot go stale about
@@ -173,7 +173,7 @@ intends to close.
 
 The VM itself is **4 CPUs and 8192 MiB**, on that 64 GiB sparse disk. All three
 are fixed and none is settable by a flag — changing one means editing
-`setDefaults` in `utmvm/vm_create.go`, deliberately, because a VM whose shape
+`setDefaults` in `internal/utmvm/vm_create.go`, deliberately, because a VM whose shape
 differs between two machines produces results that cannot be compared. Nothing
 in the tree records *why* those particular numbers, only that they are fixed.
 
@@ -251,36 +251,18 @@ to everyone using those libraries. Worse, the workaround hides it: the probe
 goes green, the report says the capability works, and the next person to hit it
 starts from nothing.
 
-If `-gui` runs fail on a VM that has been around a while, run
-`irgo-winvm vm-repair -reboot`: Windows expires local passwords after 42 days
-(AutoLogon then stops, so there is no desktop session), and an interrupted
-WebView2 update can leave its registration naming a deleted folder. `vm-repair`
-fixes both as SYSTEM, and `app-create -gui` now refuses up front, naming the
-problem, when nobody is logged in instead of waiting out its timeout.
-
-How a fix is made and proven, from this repo:
-
-```sh
-mise run upstream:clone    # glaze + native clones in $UPSTREAM_DIR, on trunk
-# edit on a branch in $UPSTREAM_DIR/glaze (or native)
-mise run upstream:verify   # their tests + go:check, built against the local clones
-mise run upstream:lint     # their lint (golangci-lint), darwin + windows
-mise run upstream:test:windows  # their test suites, run on the VM (GUI scenarios included)
-mise run app:create:verify # our probes on Windows, built from the edit (any app:create:* task)
-mise run upstream:unlink   # back to the released versions
-```
-
-Then open an issue and a PR from your fork, and record the finding in
-[UPSTREAM.md](UPSTREAM.md).
+How a fix is made and proven, and how to check glaze works on the Mac and on
+Windows, is in [CONTRIBUTING.md](docs/CONTRIBUTING.md#does-glaze-work). What
+has been found is in [UPSTREAM.md](docs/UPSTREAM.md).
 
 ## The rest
 
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to set up, what to run, how to
+- **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** — how to set up, what to run, how to
   land a change.
-- **[AGENTS.md](AGENTS.md)** — read before changing any of this. How the code is
+- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** — read before changing any of this. How the code is
   organised, and every trap that cost hours.
-- **[RESULTS.md](RESULTS.md)** — what has been measured, dated.
-- **[UPSTREAM.md](UPSTREAM.md)** — what was found and where it was fixed.
+- **[RESULTS.md](docs/RESULTS.md)** — what has been measured, dated.
+- **[UPSTREAM.md](docs/UPSTREAM.md)** — what was found and where it was fixed.
 - **[Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
   — every command and every flag. It has no file in this repository: it is
   captured from the compiled binary at build time, so no default is ever

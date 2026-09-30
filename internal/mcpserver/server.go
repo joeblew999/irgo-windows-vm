@@ -9,7 +9,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/command"
 )
 
 // Deps is what the server needs from the program that wires it.

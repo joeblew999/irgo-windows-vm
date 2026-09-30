@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joeblew999/irgo-windows-vm/command"
-	"github.com/joeblew999/irgo-windows-vm/job"
-	"github.com/joeblew999/irgo-windows-vm/mcpserver"
-	"github.com/joeblew999/irgo-windows-vm/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/job"
+	"github.com/joeblew999/irgo-windows-vm/internal/mcpserver"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // version is set at build time by go:build. 'dev' when built by hand.
@@ -41,7 +41,7 @@ var version = "dev"
 // Update takes the agent away for minutes at a time.
 //
 // It matters more here than in most tools because `utmctl` itself exits 0 on
-// failure, documented in AGENTS.md. This CLI is the only honest signal a caller
+// failure, documented in docs/DEVELOPMENT.md. This CLI is the only honest signal a caller
 // gets, so it had better say something.
 
 // errRefused is a destructive command declining to act without -force.
@@ -420,8 +420,8 @@ When something is wrong:
      doctor       what is installed, what is missing, and where this run
                   wrote its log and screenshots
 
-Your .exe is anything you built with GOOS=windows GOARCH=arm64. The probes
-in probe/ and glaze-probes/ are examples of that, and what this repository
+Your .exe is anything you built with GOOS=windows GOARCH=arm64. The programs
+in examples/ are examples of that, and what this repository
 uses to find out what breaks in glaze and native on Windows.
 
 Every command takes -h for its flags.
@@ -962,7 +962,7 @@ func runISODelete(args []string) error {
 			if all {
 				msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
 			} else {
-				// 40s, measured — see RESULTS.md. It said "about three minutes"
+				// 40s, measured — see docs/RESULTS.md. It said "about three minutes"
 				// from before the figure was taken.
 				msg += "\n  The .esd is kept, so iso-create rebuilds this in about 40s with\n" +
 					"  no network. Add -all to delete that too."

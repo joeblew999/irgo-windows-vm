@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crgimenes/glaze"
@@ -21,7 +22,7 @@ const indexHTML = `<!doctype html><html><head><meta charset="utf-8"></head>
 // That is not a style choice. On Windows glaze emulates the custom scheme with
 // a virtual host, so the document loads from https://app.localhost/ and an
 // absolute app:// URL inside it names a scheme WebView2 does not know — the
-// request never arrives and the page silently has no script. See UPSTREAM.md.
+// request never arrives and the page silently has no script. See docs/UPSTREAM.md.
 //
 // Relative works on both platforms, so using it here means this probe measures
 // the Events bridge rather than re-measuring that bug, which verify/ covers.
@@ -43,7 +44,11 @@ window.addEventListener('load', () => {
   glaze.events.emit("ready", "js-listener-installed");
 });`
 
-func main() {
+// The exit code is the verdict: 0 only when every step passed. It printed FAIL
+// and exited 0, so nothing driving it could see a failure.
+func main() { os.Exit(run()) }
+
+func run() int {
 	ready := make(chan string, 1)
 	done := make(chan string, 1)
 
@@ -60,14 +65,14 @@ func main() {
 	})
 	if err != nil {
 		fmt.Println("FAIL: NewWithOptions:", err)
-		os.Exit(1)
+		return 1
 	}
 	defer w.Destroy()
 
 	ev, err := glaze.NewEvents(w)
 	if err != nil {
 		fmt.Println("FAIL: NewEvents:", err)
-		os.Exit(1)
+		return 1
 	}
 
 	ev.On("ready", func(args ...json.RawMessage) {
@@ -81,6 +86,9 @@ func main() {
 	w.SetSize(420, 300, glaze.HintNone)
 	w.Navigate("app://home/index.html")
 
+	// Set on the watcher goroutine, read after Run returns on this one.
+	var code atomic.Int32
+	code.Store(1)
 	go func() {
 		select {
 		case r := <-ready:
@@ -92,10 +100,12 @@ func main() {
 		}
 
 		// Unsolicited server-side pushes — what SSE would be doing.
+		emitted := true
 		for i := 1; i <= 3; i++ {
 			time.Sleep(300 * time.Millisecond)
 			if err := ev.Emit("tick", i, time.Now().Format("15:04:05.000")); err != nil {
 				fmt.Println("FAIL: Emit:", err)
+				emitted = false
 			}
 		}
 
@@ -103,6 +113,9 @@ func main() {
 		case d := <-done:
 			fmt.Println("PASS: Go -> JS   : 3 unsolicited pushes delivered")
 			fmt.Println("PASS: round trip :", d)
+			if emitted {
+				code.Store(0)
+			}
 		case <-time.After(15 * time.Second):
 			fmt.Println("FAIL: JS did not confirm receipt of pushes")
 		}
@@ -110,4 +123,5 @@ func main() {
 	}()
 
 	w.Run()
+	return int(code.Load())
 }

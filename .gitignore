@@ -38,11 +38,13 @@ go.work.sum
 #
 # Every name below was measured by running the build, not worked out. The
 # obvious rule — "the binary is named after its directory" — is wrong here:
-# probe/go.mod says `module nativeprobe`, so building it drops `nativeprobe`,
-# and an entry reading /probe/probe silently guards nothing.
-/probe/nativeprobe
-/glaze-probes/verify/verify
-/glaze-probes/verifyevents/verifyevents
+# probe/ was once its own module, `module nativeprobe`, so building it dropped
+# `nativeprobe` and an entry reading /probe/probe silently guarded nothing. All
+# four now live in the examples module, and each binary is named after its
+# directory — measured 30 Sep 2026 with a bare `go build` in each.
+/examples/probe/probe
+/examples/verify/verify
+/examples/verify-events/verify-events
 /examples/glaze-all/glaze-all
 
 # The tool itself, from `go build ./cmd/irgo-winvm` at the root. This one was

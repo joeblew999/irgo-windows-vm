@@ -33,8 +33,8 @@ jobs:
   check:
     # Both, because the code is macOS-only in what it DOES and cross-platform in
     # what it must COMPILE to. macOS is not redundant: it is the only
-    # darwin/arm64 compile coverage, and utmvm/vm_delete_test.go and
-    # utmvm/iso_delete_test.go are `//go:build darwin`, so they run nowhere else.
+    # darwin/arm64 compile coverage, and internal/utmvm/vm_delete_test.go and
+    # internal/utmvm/iso_delete_test.go are `//go:build darwin`, so they run nowhere else.
     # Only macOS would miss a macOS-only syscall with no counterpart elsewhere,
     # which broke the Linux build once and was invisible from a Mac.
     strategy:

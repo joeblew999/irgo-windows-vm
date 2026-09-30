@@ -81,7 +81,7 @@ func markdownName(out string) string {
 // two pages could share a title, they cannot share a URL.
 //
 // The markdown is stored exactly as the HTML rendering received it, which means
-// links have already been rewritten from `AGENTS.md` to `agents.html`. That is
+// links have already been rewritten from `DEVELOPMENT.md` to `development.html`. That is
 // deliberate: this file is served from the site root, so those relative links
 // resolve against its own URL. The raw markdown would carry `.md` targets that
 // point at nothing from a published text file.

@@ -25,7 +25,7 @@ func TestTheRealBinaryServesTheCommandsItReports(t *testing.T) {
 	}
 	bin := filepath.Join(t.TempDir(), "irgo-winvm")
 	build := exec.Command("go", "build", "-o", bin, "./cmd/irgo-winvm")
-	build.Dir = ".."
+	build.Dir = filepath.Join("..", "..") // the repo root, from internal/mcpserver
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building the CLI: %v: %s", err, out)
 	}

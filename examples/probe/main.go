@@ -151,7 +151,21 @@ func main() {
 
 	fmt.Printf("%-26s %-12s %s\n", "CAPABILITY", "STATUS", "DETAIL")
 	fmt.Println("-------------------------- ------------ ------------------------------------")
+	failed := 0
 	for _, r := range results {
 		fmt.Printf("%-26s %-12s %s\n", r.name, r.status, r.detail)
+		if r.status == "ERROR" {
+			failed++
+		}
 	}
+
+	// The exit code is the verdict. It exited 0 whatever the table said, so an
+	// ERROR row reached nobody who was not reading the table. MISSING and
+	// UNSUPPORTED are answers, not failures.
+	fmt.Println()
+	if failed > 0 {
+		fmt.Printf("%d capability/capabilities ERROR\n", failed)
+		os.Exit(1)
+	}
+	fmt.Println("all capabilities OK, cleanly unsupported, or not built yet")
 }

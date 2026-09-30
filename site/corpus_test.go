@@ -202,7 +202,7 @@ var htmlID = regexp.MustCompile(`id="([^"]+)"`)
 // written here would have to reproduce all three or disagree with the published
 // HTML, and disagree silently.
 //
-// Negative control, run by hand: renaming "## UTM" in UPSTREAM.md fails this,
+// Negative control, run by hand: renaming "## UTM" in docs/UPSTREAM.md fails this,
 // naming agents.html as the file whose link broke.
 func TestEveryAnchorResolves(t *testing.T) {
 	out := buildToTemp(t)

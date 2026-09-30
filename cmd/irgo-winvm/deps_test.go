@@ -7,8 +7,8 @@ package main
 // mean the thing under test is part of the instrument, and a glaze bug could
 // break the tool that was supposed to report it.
 //
-// Nothing enforced that. The module split is what keeps them out — probe,
-// glaze-probes and examples are separate modules for this reason — and a split
+// Nothing enforced that. The module split is what keeps them out — examples
+// is a separate module for this reason — and a split
 // is one `import` away from being undone, in a change that builds and passes
 // every other check.
 
@@ -23,7 +23,7 @@ import (
 // modulePath reduces a package path to the module that provides it:
 // github.com/pierrec/lz4/v4/internal/lz4block -> github.com/pierrec/lz4.
 //
-// The licence table in CONTRIBUTING.md is written in modules, so this counts the
+// The licence table in docs/CONTRIBUTING.md is written in modules, so this counts the
 // same unit rather than a number nothing else uses.
 var modulePath = regexp.MustCompile(`^(github\.com/[^/]+/[^/]+|golang\.org/x/[^/]+)`)
 
@@ -87,5 +87,5 @@ func TestShippedBinaryLinksNothingUnderTest(t *testing.T) {
 	}
 	sort.Strings(names)
 	t.Logf("%d third-party modules reach the binary: %s", len(names), strings.Join(names, " "))
-	t.Log("if that number changed, CONTRIBUTING.md's licence table needs re-checking")
+	t.Log("if that number changed, docs/CONTRIBUTING.md's licence table needs re-checking")
 }

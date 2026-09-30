@@ -31,7 +31,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/command"
 )
 
 const (

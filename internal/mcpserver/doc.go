@@ -21,7 +21,7 @@
 //
 // # Why it is not inside utmvm
 //
-// AGENTS.md says do not split utmvm, because iso, vm and app are coupled and
+// docs/DEVELOPMENT.md says do not split utmvm, because iso, vm and app are coupled and
 // separating them means one reaching into another's paths. That rule protects
 // those three stages. It is not an argument for putting a protocol server in
 // with them: the server depends on utmvm and on package command, and neither

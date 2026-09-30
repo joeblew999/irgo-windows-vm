@@ -62,7 +62,7 @@ is the mechanism, not the duration.
 
 ## A self-built ISO installs Windows — verified 12 Aug 2026
 
-![Windows 11 installing from an ISO this repo built](docs/screens/vm/copying.png)
+![Windows 11 installing from an ISO this repo built](screens/vm/copying.png)
 
 That is UTM, booted from an ISO mastered by `irgo-winvm iso-create`, installing
 unattended. It settles every open question about replacing CrystalFetch:
@@ -82,14 +82,14 @@ destroyed an install when surplus presses reached Setup's UI. Media built with
 the no-prompt loader does not need it.
 
 Full detail, including the two failed attempts and why they failed, is in
-the trap table in [README.md](README.md).
+the trap table in [README.md](../README.md).
 
 ---
 
 The point of this repo is parity: the same probes, the same glaze version, on
 both platforms. A pass on one OS proves nothing on its own. Probes are built
-from `probe/` (native capabilities) and `glaze-probes/` (glaze's `app://` scheme
-and its Events bridge).
+from `examples/probe/` (native capabilities) and `examples/verify`,
+`examples/verify-events` (glaze.s `app://` scheme and its Events bridge).
 
 ## Suspend and resume — 400 ms, verified 12 Aug 2026
 
@@ -116,7 +116,7 @@ idempotent path is the fast one.
 version is not offered; `utmctl suspend --save-state` either refuses (naming GPU
 acceleration, then NVMe) or *reports success and power-cuts the guest* — exit 0,
 no state file, next boot through "Diagnosing your PC". See the trap table in
-[README.md](README.md).
+[README.md](../README.md).
 
 ## macOS — verified
 
@@ -187,7 +187,7 @@ A failing guest binary fails the command. The host does **not** exit with the
 guest's code — a binary exiting 3 exits `app-create` **1**, with "exited 3 in
 the guest" in the message. The two must not look alike, because a missing VM
 exits 3 and a busy guest agent exits 4; see the contract in
-[README.md](README.md).
+[README.md](../README.md).
 
 ### Native capabilities — windows/arm64, native
 
@@ -305,9 +305,10 @@ emulation.
   on ARM Windows decides whether Mac-local testing has any fidelity at all, or
   whether x64 testing must live on x86 hardware.
 
-The tooling for it exists — `probe/run-probe.cmd` runs the ARM64-native and the
-x64-emulated build in turn — so what is missing is the run and the record of it,
-not the means. Last evidence gathered 13 Aug 2026, all of it ARM64.
+The tooling for it exists — `app-create` runs any build, so an x64 `examples/probe` can be pushed the same
+way as the ARM64 one — what is missing is the run and the record of it, not the
+means. (`probe/run-probe.cmd`, the hand-run script this once named, was removed
+30 Sep 2026.) Last evidence gathered 13 Aug 2026, all of it ARM64.
 
 One further item is **exercised but not recorded**. glaze's hand-written ARM64
 ABI code (`putbounds_arm64.go`, a 16-byte RECT passed in two registers per

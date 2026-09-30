@@ -7,7 +7,7 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/joeblew999/irgo-windows-vm/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // The mutation-lock wrapper tests run only on macOS, because the lock itself is

@@ -17,7 +17,7 @@
 // SYSTEM in session 0, where there is no window station and every windowed call
 // fails.
 //
-// The headless half — clipboard, power, single-instance, mmap — is probe/, and
+// The headless half — clipboard, power, single-instance, mmap — is examples/probe/, and
 // is not repeated here. It was, once, and the copy is the reason this file is
 // named for the window rather than for native: a program called `nativeall`
 // that duplicated four of native's capabilities and added glaze on top told you
@@ -63,7 +63,7 @@ var (
 
 // unsupportedErrs are the "no backend on this platform" sentinels.
 //
-// STANDING IN FOR AN UPSTREAM FIX — see UPSTREAM.md §2. Delete this list, and
+// STANDING IN FOR AN UPSTREAM FIX — see docs/UPSTREAM.md §2. Delete this list, and
 // isUnsupported with it, once the wrapping lands in a released glaze and
 // native; the whole thing collapses back to one errors.Is against the standard
 // sentinel.
@@ -79,7 +79,7 @@ var (
 // errors.ErrUnsupported stays first: it is what this list becomes.
 //
 // Only the packages this program reports on: clipboard, power, singleinstance
-// and mmap are probe/'s to answer for, and their sentinels belong in probe/'s
+// and mmap are examples/probe/'s to answer for, and their sentinels belong in examples/probe/'s
 // copy of this list, not here.
 var unsupportedErrs = []error{
 	errors.ErrUnsupported,
@@ -149,9 +149,9 @@ var tinyPNG = []byte{
 //
 // clipboard, power, single-instance and mmap used to be probed here too, with
 // the same canary, the same "second acquire must fail", the same temp-file
-// write-through as probe/. Two programs asserting the same four things is two
+// write-through as examples/probe/. Two programs asserting the same four things is two
 // places to update when native changes and two reports to reconcile when they
-// disagree. probe/ owns them now: it is headless all the way down, so it runs
+// disagree. examples/probe/ owns them now: it is headless all the way down, so it runs
 // under the guest agent with no window at all, which is the strictest place
 // they can be checked.
 //
@@ -232,7 +232,7 @@ const trayVisibleFor = 2 * time.Second
 // temporary [NSApp run] that ends only when applicationDidFinishLaunching
 // fires — once per process. A tray started first consumes that, and glaze.New
 // then blocks forever with no window and no error to say why. That is an
-// upstream bug, fixed in glaze rather than ordered around here (UPSTREAM.md
+// upstream bug, fixed in glaze rather than ordered around here (docs/UPSTREAM.md
 // §1); this order is what a released glaze still requires.
 func probeTray(w glaze.WebView) {
 	done := make(chan error, 1)
@@ -322,7 +322,7 @@ func probeFileDialog(w glaze.WebView) {
 func report() int {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Printf("\nwindowed capability probe — %s/%s\n(the headless four are probe/)\n\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("\nwindowed capability probe — %s/%s\n(the headless four are examples/probe/)\n\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("%-24s %-12s %s\n", "CAPABILITY", "STATUS", "DETAIL")
 	fmt.Println(strings.Repeat("-", 78))
 	failed := 0

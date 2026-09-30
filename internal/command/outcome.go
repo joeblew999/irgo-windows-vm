@@ -14,7 +14,7 @@ package command
 // Code is a process exit status, and the classification of a tool result.
 type Code int
 
-// The codes. utmctl exits 0 when it fails — documented in AGENTS.md — so this
+// The codes. utmctl exits 0 when it fails — documented in docs/DEVELOPMENT.md — so this
 // tool is the only honest signal a caller gets, and it had better say something
 // specific.
 const (

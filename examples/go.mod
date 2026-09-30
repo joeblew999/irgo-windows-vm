@@ -1,5 +1,7 @@
-// Runnable examples. Separate module so glaze and native stay out of the VM
-// tooling's dependency graph.
+// The four programs this repo runs on Windows (and on the Mac) to find out what
+// breaks in glaze and native: probe, verify, verify-events, glaze-all. Each
+// exits non-zero when anything it checks failed. Separate module so glaze and
+// native stay out of the VM tooling's dependency graph.
 module github.com/joeblew999/irgo-windows-vm/examples
 
 go 1.27.1
@@ -9,4 +11,4 @@ require (
 	github.com/crgimenes/native v0.1.15
 )
 
-require github.com/ebitengine/purego v0.11.0 // indirect
+require github.com/ebitengine/purego v0.11.1 // indirect

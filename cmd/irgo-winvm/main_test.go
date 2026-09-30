@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joeblew999/irgo-windows-vm/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 
-	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/command"
 )
 
 // TestHelpIsNotAnError covers the whole point of swallowing flag.ErrHelp: -h

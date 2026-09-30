@@ -3,7 +3,7 @@
 **This page is intent, not record.** Every other page here states what is true
 now; this one states what is meant to happen next, and it will be wrong in the
 ordinary way plans are wrong. What has actually been measured is in
-[Results](results.html); what was found upstream is in [Upstream](upstream.html).
+[Results](RESULTS.md); what was found upstream is in [Upstream](UPSTREAM.md).
 
 It is the working plan in full rather than a summary of one, because a summary
 is worth nothing to whoever picks this up next — including a later session of
@@ -50,7 +50,7 @@ tools listed; `doctor` returned **as a result**, which is what proves
 4,447,777-byte PNG of a live Windows desktop, **looked at**; `iso-create -fetch`
 detached and survived the client exiting; `app-create` ran a probe on
 windows/arm64 — 5 capabilities OK, 3 missing upstream. `mise run app:test`
-re-run green. Measurements dated in [Results](results.html).
+re-run green. Measurements dated in [Results](RESULTS.md).
 
 ### Typed schemas — v0.4.0, `cd4d203`
 
@@ -97,7 +97,7 @@ build here — what follows is what remains.
 timeout, and DNS-rebinding protection left on. `checkLoopback` refuses a bare
 `:port` deliberately — the flag does what it says rather than being silently
 rewritten — and refuses any non-loopback address outright. Proven by
-`mcpserver/http_test.go`: the refusal cases, the refusal message, refuse before
+`internal/mcpserver/http_test.go`: the refusal cases, the refusal message, refuse before
 listen, and an HTTP round-trip.
 
 ### The wider bind and authentication — 15 Aug 2026, `136a3e5`
@@ -107,7 +107,7 @@ bearer token behind it, compared in constant time through the SDK's
 `auth.RequireBearerToken`. A bare `:port` now resolves to loopback, replacing
 `ac16122`'s refusal. Off loopback both consent and token are mandatory: a server
 that starts unauthenticated because a token was missing is refused outright.
-Proven by `mcpserver/http_test.go`: 401 without the token, 405 with it, and the
+Proven by `internal/mcpserver/http_test.go`: 401 without the token, 405 with it, and the
 SDK's own HTTP client round-tripping a tool call with the token.
 
 ### Content-addressed, chunked uploads — 15 Aug 2026, `136a3e5`
@@ -115,7 +115,7 @@ SDK's own HTTP client round-tripping a tool call with the token.
 `app-upload` stages a binary as `bin/<sha256>.exe` from base64 chunks; the full
 SHA-256 is verified before the committed file exists, a mismatch is removed, and
 an unchanged binary transfers nothing. `app-delete` clears the stage. Proven by
-`utmvm/app_upload_test.go`: commit and byte equality, mismatch rejection, truncation
+`internal/utmvm/app_upload_test.go`: commit and byte equality, mismatch rejection, truncation
 never commits, idempotent retry, and clearing twice.
 
 ### The mutation lock — 15 Aug 2026, `136a3e5`
@@ -123,7 +123,7 @@ never commits, idempotent retry, and clearing twice.
 One mutation at a time, refused not queued: a flock on `mutation.lock`, taken in
 `runTool` for every mutating command — including the detached job child — with a
 probe before forking. A lock whose state cannot be read refuses. Exit code 6
-(`busy`, retryable) is the refusal. Proven by `utmvm/lock_test.go`, including
+(`busy`, retryable) is the refusal. Proven by `internal/utmvm/lock_test.go`, including
 the cross-process case.
 
 ---
@@ -217,13 +217,13 @@ a second.
 This page is the plan. The reasoning that has to survive is in the code, beside
 what it explains:
 
-- `mcpserver/doc.go` — why the server holds no behaviour of its own, and why
+- `internal/mcpserver/doc.go` — why the server holds no behaviour of its own, and why
   nothing may print to stdout while it runs
-- `mcpserver/resource.go` — why the documentation is generated rather than
+- `internal/mcpserver/resource.go` — why the documentation is generated rather than
   embedded, and every option that was rejected
-- `job/doc.go` — why long work is its own package, and why reporting a *dead*
+- `internal/job/doc.go` — why long work is its own package, and why reporting a *dead*
   process is the constraint that decides the design
 - `cmd/irgo-winvm/flags.go` — why the `FlagSet` is the source and the schema is
   derived from it
-- [Agents](agents.html) — how the code is organised, and every trap that cost
+- [Agents](DEVELOPMENT.md) — how the code is organised, and every trap that cost
   hours

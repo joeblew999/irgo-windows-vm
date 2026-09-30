@@ -4,7 +4,7 @@ This file is the mechanics: how to get set up, what to run, how to land a
 change.
 
 It deliberately says nothing about how the code is written. That is
-[AGENTS.md](AGENTS.md), and it is not optional reading — most of the duplication
+[DEVELOPMENT.md](DEVELOPMENT.md), and it is not optional reading — most of the duplication
 this project has had to remove was written by someone who did not check what
 already existed. Read it before writing code, not after.
 
@@ -36,8 +36,8 @@ exits non-zero if anything failed. Use it rather than a `sleep` loop: `gh run
 list --commit` matches the full 40-character SHA only, and returns an empty list
 for a short one — which looks exactly like a run that has not started.
 
-`go:check` covers **five** separate Go modules — the root, `probe`,
-`glaze-probes`, `examples` and `site` — and cross-compiles for Linux and Windows
+`go:check` covers **three** separate Go modules — the root, `examples`
+and `site` — and cross-compiles for Linux and Windows
 as well as macOS. That is not ceremony: deleting a function from
 `sysfile_other.go` once passed every check being run, because they were all
 darwin.
@@ -63,26 +63,36 @@ Use a disposable VM for anything destructive. `vm:test` already does — it buil
 `irgo-test-cycle`, never your real one. Losing a 45-minute install to a test is
 not a trade worth making.
 
-## Running the probes
+## Does glaze work?
 
-The four guest programs are what this repository exists to run. Run all four
-natively on your Mac first, which takes about 15 seconds and needs no VM:
-
-```sh
-mise run app:mac                    # probe, verify, verify-events, glaze-all -probe
-```
-
-Then run them on Windows, which is the real gate. Each has a task:
+Four programs in `examples/` answer it: `probe` (clipboard, power,
+single-instance, mmap), `verify` (glaze's portless `app://` path),
+`verify-events` (glaze's Events bridge) and `glaze-all` (tray, menus, file
+dialogs, app icon). Each exits non-zero when anything it checks failed.
 
 ```sh
-mise run app:create:probe           # headless: clipboard, power, single-instance, mmap
-mise run app:create:glaze-all       # windowed: tray, menus, file dialogs, app icon
-mise run app:create:verify          # glaze's portless app:// path
-mise run app:create:verify-events   # glaze's Events bridge
+mise run glaze:mac       # all four natively on this Mac, ~15 s, no VM
+mise run glaze:windows   # all four on the VM, ~2 min, the real gate
 ```
 
-Each has a matching `app:delete:*`. `app:create:glaze-all:hands` leaves the
-window up on the guest's desktop to drive by hand instead of reporting.
+Each ends with one line, `YES` or `NO: failed: <names>`, and exits non-zero on
+NO. Run the Mac one on every edit and the Windows one before you commit.
+
+To work on glaze or native themselves, point everything at your local clones
+first. Both commands then test your edits:
+
+```sh
+mise run upstream:clone && mise run upstream:link
+mise run glaze:mac && mise run glaze:windows
+mise run upstream:verify         # their own tests, then this repo's, against the clones
+mise run upstream:lint && mise run upstream:test:windows
+mise run upstream:unlink         # back to the released versions
+```
+
+One at a time: `mise run app:create:<name>` / `app:delete:<name>`.
+`app:create:glaze-all:hands` leaves the window up on the guest's desktop to
+drive by hand. If a `-gui` run fails with no desktop session, run
+`irgo-winvm vm-repair -reboot`.
 
 When something is stuck, `mise run vm:screen` photographs the guest — from the
 host a stuck boot and a working one look identical.
@@ -121,7 +131,7 @@ directions. That invariant is the reason the corpus can be trusted, and it is
 exactly the kind of thing that is invisible when you look at output that renders
 correctly — a corpus quietly missing a page still looks complete.
 
-`README.md`, `RESULTS.md`, `UPSTREAM.md`, `AGENTS.md` and this file each become
+`README.md`, `RESULTS.md`, `UPSTREAM.md`, `DEVELOPMENT.md` and this file each become
 a page. Adding another means one line in `site/main.go` — nothing is discovered
 by scanning a directory, so nothing gets published by accident.
 
@@ -200,7 +210,7 @@ is not what was released.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). A contribution is offered under it.
+MIT — see [LICENSE](../LICENSE). A contribution is offered under it.
 
 The dependencies that link into the published binary were checked against that
 before it was chosen, because the licence is a claim about the whole artefact

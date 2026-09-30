@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -71,19 +72,19 @@ var pages = []struct {
 	Src, Out, Title, Nav, Blurb string
 }{
 	{"README.md", "index.html", "irgo-windows-vm", "", "What it is and what it is for"},
-	{"RESULTS.md", "results.html", "Results", "Results", "What has been measured, dated"},
-	{"UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "What was found, and where it was fixed"},
-	{"AGENTS.md", "agents.html", "Agents", "Agents", "How the code is organised, and every trap that cost hours"},
-	{"CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},
+	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, dated"},
+	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "What was found, and where it was fixed"},
+	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code is organised, and every trap that cost hours"},
+	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Setup, what to run, how to land a change"},
 
 	// The only page that states intent rather than fact, and it says so in its
-	// first line. It lives in docs/ because the check that every command named
-	// in root markdown exists in the binary would fail on a roadmap — naming
-	// what does not exist yet is the point of one.
+	// first line. The check that every command named in the docs exists in the
+	// binary exempts it by name (cmd/irgo-winvm/docs_test.go) — naming what does
+	// not exist yet is the point of a roadmap.
 	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one thing not yet verified"},
 
-	// Written before the HTTP transport exists. In docs/ for the same reason as
-	// the roadmap: it names commands in the context of what an attacker could
+	// Written before the HTTP transport exists. Exempt from that check for the
+	// same reason as the roadmap: it names commands in the context of what an attacker could
 	// call, which is not the same as telling a reader to run them.
 	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "Threat model", "What someone who reaches the HTTP port can do"},
 
@@ -297,7 +298,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		// corpus is built from exactly what the HTML is built from. Two
 		// traversals of `pages` would be two chances to skip a page; this is
 		// one pass producing both renderings.
-		body := rewriteLinks(raw, repo)
+		body := rewriteLinks(raw, repo, p.Src)
 
 		var buf bytes.Buffer
 		if cErr := md.Convert(body, &buf); cErr != nil {
@@ -406,7 +407,7 @@ var schemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
 // is once the site is built. Three destinations, and getting any of them wrong
 // is a 404 on a page that looked fine locally:
 //
-//   - a file that becomes a page  -> that page          (AGENTS.md -> agents.html)
+//   - a file that becomes a page  -> that page          (docs/DEVELOPMENT.md -> development.html)
 //   - a published screenshot      -> the published copy (docs/screens/x.png -> screens/x.png)
 //   - anything else in the repo   -> the repository     (LICENSE -> github.com/.../blob/main/LICENSE)
 //
@@ -414,11 +415,23 @@ var schemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
 // would resolve it against the repository. It does not: <base href="./"> is the
 // site's own root, so `LICENSE` resolved to a file the site does not publish
 // and the only broken link on the site was the licence.
-func rewriteLinks(raw []byte, repo string) []byte {
+//
+// Targets are relative to src, the markdown file they are written in, exactly
+// as GitHub reads them — so docs/RESULTS.md writes ../README.md and README.md
+// writes docs/RESULTS.md, and both work on GitHub and here. A target that is
+// already a generated page's name (mcp.html) is left as it is.
+func rewriteLinks(raw []byte, repo, src string) []byte {
 	generated := map[string]string{}
+	outs := map[string]bool{}
 	for _, p := range pages {
-		generated[p.Src] = p.Out
+		if p.Src != "" {
+			generated[p.Src] = p.Out
+		}
+		outs[p.Out] = true
 	}
+	// Files the build writes beside the pages. The MCP page links llms-full.txt,
+	// which was sent to the repository, where it does not exist.
+	outs["llms.txt"], outs["llms-full.txt"] = true, true
 	return anyLink.ReplaceAllFunc(raw, func(m []byte) []byte {
 		sub := anyLink.FindSubmatch(m)
 		target, anchor := string(sub[1]), string(sub[2])
@@ -428,6 +441,10 @@ func rewriteLinks(raw []byte, repo string) []byte {
 		if target == "" || hasScheme(target) || strings.HasPrefix(target, "/") {
 			return m
 		}
+		if outs[target] {
+			return m
+		}
+		target = path.Join(path.Dir(src), target)
 		if out, ok := generated[target]; ok {
 			return []byte("](" + out + anchor + ")")
 		}

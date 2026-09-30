@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/joeblew999/irgo-windows-vm/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,7 +13,7 @@ import (
 // The documentation and the binary have to name the same commands, and this
 // checks it in both directions.
 //
-// It exists because they did not. RESULTS.md told readers to run
+// It exists because they did not. docs/RESULTS.md told readers to run
 // `irgo-winvm build-iso` and `irgo-winvm setup` — neither of which this binary
 // has ever had — on a site that rendered perfectly and a build that stayed
 // green. Nothing could have caught that, because nothing was looking.
@@ -50,27 +50,39 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// markdownFiles returns every .md file at the repository root.
+// intentDocs name commands that do not exist yet, on purpose: a roadmap says
+// what is next, and the threat model names what an attacker could call. Every
+// other page states what is true now, so every other page is checked.
+var intentDocs = map[string]bool{
+	"docs/ROADMAP.md":      true,
+	"docs/THREAT-MODEL.md": true,
+}
+
+// markdownFiles returns every .md file at the repository root and in docs/,
+// keyed by path from the root, minus intentDocs.
 func markdownFiles(t *testing.T) map[string]string {
 	t.Helper()
 	root := repoRoot(t)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
 	out := map[string]string{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	for _, dir := range []string{".", "docs"} {
+		entries, err := os.ReadDir(filepath.Join(root, dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-		b, rErr := os.ReadFile(filepath.Join(root, e.Name()))
-		if rErr != nil {
-			t.Fatal(rErr)
+		for _, e := range entries {
+			name := filepath.ToSlash(filepath.Join(dir, e.Name()))
+			if e.IsDir() || !strings.HasSuffix(name, ".md") || intentDocs[name] {
+				continue
+			}
+			b, rErr := os.ReadFile(filepath.Join(root, name))
+			if rErr != nil {
+				t.Fatal(rErr)
+			}
+			out[name] = string(b)
 		}
-		out[e.Name()] = string(b)
 	}
-	if len(out) == 0 {
-		t.Fatal("no markdown found at the repository root; this test would pass vacuously")
+	if len(out) < 5 {
+		t.Fatalf("found %d markdown files; the docs moved and this test would pass vacuously", len(out))
 	}
 	return out
 }
@@ -132,7 +144,7 @@ var exitRow = regexp.MustCompile(`\|\s*\*\*(\d)\*\*\s*\|`)
 // renderings of one list — and the markdown is the one that cannot be checked
 // by compiling, so it is the one that goes stale.
 //
-// It is not hypothetical for this repository: RESULTS.md once told readers to
+// It is not hypothetical for this repository: docs/RESULTS.md once told readers to
 // run two commands this binary has never had, on a site that rendered perfectly
 // and a build that stayed green.
 //

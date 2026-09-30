@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/joeblew999/irgo-windows-vm/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // values reads parsed flags back by name.

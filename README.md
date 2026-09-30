@@ -257,7 +257,9 @@ How a fix is made and proven, from this repo:
 mise run upstream:clone    # glaze + native clones in $UPSTREAM_DIR, on trunk
 # edit on a branch in $UPSTREAM_DIR/glaze (or native)
 mise run upstream:verify   # their tests + go:check, built against the local clones
-mise run app:create:verify # the proof on Windows (any app:create:* task)
+mise run upstream:lint     # their lint (golangci-lint), darwin + windows
+mise run upstream:test:windows  # their test suites, run on the VM (GUI scenarios included)
+mise run app:create:verify # our probes on Windows, built from the edit (any app:create:* task)
 mise run upstream:unlink   # back to the released versions
 ```
 

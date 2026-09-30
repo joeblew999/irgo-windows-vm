@@ -4,7 +4,7 @@ idiomatic_version_file_enable_tools = ["go"]
 
 [tools]
 # Pinned so CI installs what a maintainer has. mise-action reads this.
-golangci-lint = "2.11.2"
+golangci-lint = "2.14.0"
 
 [env]
 # Where local clones of glaze and native live. A bug in either is fixed THERE,
@@ -440,6 +440,49 @@ echo "  $UPSTREAM_DIR/native ($(git -C "$UPSTREAM_DIR/native" branch --show-curr
 echo "undo with: mise run upstream:unlink"
 '''
 
+[tasks."upstream:lint"]
+# Their `make lint`, for both targets glaze and native exist for: the Windows
+# code only compiles, and so only lints, with GOOS=windows.
+description = "golangci-lint glaze and native (their make lint), for darwin and windows"
+run = '''
+set -e
+for repo in glaze native; do
+  for goos in darwin windows; do
+    echo "--- $repo  GOOS=$goos ---"
+    (cd "$UPSTREAM_DIR/$repo" && GOOS=$goos golangci-lint run ./...)
+  done
+done
+'''
+
+[tasks."upstream:test:windows"]
+# Their own test suites, on the Windows they claim to support. glaze's tests
+# open windows (TestMain runs GUI scenarios unless -short), so everything runs
+# in dev's desktop session via -gui. A package whose binary exits non-zero
+# fails the task.
+description = "Build glaze's and native's own test suites for Windows and run them on the VM"
+run = '''
+set -e
+out="$MISE_PROJECT_ROOT/.bin/win/upstream-tests"
+rm -rf "$out"; mkdir -p "$out"
+for repo in glaze native; do
+  for pkg in $(go -C "$UPSTREAM_DIR/$repo" list ./...); do
+    name="$repo-$(echo "${pkg#github.com/crgimenes/$repo}" | tr '/' '-' | sed 's/^-//')"
+    name="${name%-}"
+    GOOS=windows GOARCH=${ARCH:-arm64} CGO_ENABLED=0 \
+      go -C "$UPSTREAM_DIR/$repo" test -c -o "$out/$name.test.exe" "$pkg"
+  done
+done
+fail=0
+for exe in "$out"/*.test.exe; do
+  [ -e "$exe" ] || continue   # packages without tests produce no binary
+  echo "=== $(basename "$exe")"
+  if ! go -C "$MISE_PROJECT_ROOT" run ./cmd/irgo-winvm app-create -gui "$exe" -- -test.v -test.timeout 300s; then
+    echo "FAILED: $(basename "$exe")"; fail=1
+  fi
+done
+exit $fail
+'''
+
 [tasks."upstream:unlink"]
 description = "Go back to the released glaze and native modules"
 run = '''
@@ -462,6 +505,7 @@ echo "--- this repo, against them ---"
 mise run go:check
 echo
 echo "prove it on Windows (still LINKED):"
+echo "  mise run upstream:lint && mise run upstream:test:windows   # their lint + their tests, on the VM"
 echo "  mise run app:create:probe | app:create:verify | app:create:verify-events | app:create:glaze-all"
 echo "then: mise run upstream:unlink"
 '''

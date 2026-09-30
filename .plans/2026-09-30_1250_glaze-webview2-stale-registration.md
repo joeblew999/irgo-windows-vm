@@ -1,6 +1,6 @@
 # glaze: survive a stale WebView2 registration (upstream PR to crgimenes/glaze)
 
-Status: planned · 2026-09-30 · fix lives upstream — "a glaze or native bug is fixed at crgimenes, not here"
+Status: REPORTED — waiting on upstream ([glaze#34](https://github.com/crgimenes/glaze/issues/34)) · 2026-09-30 · fix lives upstream — "a glaze or native bug is fixed at crgimenes, not here"
 
 ## Problem
 
@@ -106,3 +106,20 @@ state and call `GetAvailableCoreWebView2BrowserVersionString`.
 
 `.plans/2026-09-30_1215_gui-probes-blocked-by-password-expiry.md` (how this surfaced; `vm-repair`
 and `doctor` follow-ups for WebView2 registration live there).
+
+## Outcome (2026-09-30)
+
+- **Reported, not fixed by us:** [crgimenes/glaze#34](https://github.com/crgimenes/glaze/issues/34) —
+  evidence, the one-command reproduction, and an offer to re-test. The maintainer fixes his own bugs;
+  we do not send a PR unless asked.
+- **Diagnosis confirmed** with a local patch (branch `fix/webview2-stale-registration` in the clone,
+  also on the fork `joeblew999/glaze`): on the VM, with `EBWebView` pointed at the deleted `151…`
+  folder, released v0.0.61 `verify` FAILS ("not found"); linked to the patch it PASSES (finds
+  `154.0.4258.37` beside it). glaze's full Windows test suite passes with the patch
+  (`upstream:test:windows`), lint clean darwin + windows (`upstream:lint`).
+- **Repeatable now:** `upstream:lint` and `upstream:test:windows` were added so this testing is a
+  task, not a one-off script.
+
+**When glaze releases a fix:** bump glaze in `glaze-probes` / `examples`, break the registration as
+in *Reproduce and verify* step 1, run `mise run app:create:verify` (must PASS on the release),
+restore with `setup.exe`, run `mise run upstream:test:windows`, then move this plan to `done/`.

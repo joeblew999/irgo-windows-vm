@@ -8,16 +8,16 @@ hand. Each run replaces only its own section. Every row is one test of
 `examples/conformance`, from its test2json events; what each checks is in its
 comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
 
-<!-- glaze-status:mac commit=8a12fec99a0fbdb56ae394c66e2d5b274c581cfb examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
+<!-- glaze-status:mac commit=e3899f1f7a49d01848c8d1b10cefa6b9d7f6f957 examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
 ## On the Mac — YES: 28 passed, 1 skipped
 
-- when: 2026-09-30 14:55 +0700, took 6s
+- when: 2026-09-30 14:57 +0700, took 4s
 - platform: darwin/arm64 (this machine, natively)
-- this repository: commit `8a12fec99a0f`
+- this repository: commit `e3899f1f7a49`
 - glaze v0.0.61 (released)
 - native v0.1.15 (released)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-145518.log`
-- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-145518.json`
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-145720.log`
+- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-145720.json`
 
 | test | result | first message |
 |---|---|---|

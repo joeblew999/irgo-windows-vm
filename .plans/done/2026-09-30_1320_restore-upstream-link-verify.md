@@ -1,6 +1,6 @@
 # Restore the upstream workflow: `upstream:clone` / `link` / `verify` / `unlink`
 
-Status: planned · 2026-09-30 · prerequisite for `2026-09-30_1250_glaze-webview2-stale-registration.md`
+Status: DONE · 2026-09-30 · prerequisite for `2026-09-30_1250_glaze-webview2-stale-registration.md`
 
 ## Why
 
@@ -108,3 +108,20 @@ build the Windows binaries they push, so while linked they carry the local edit.
 ## Out of scope
 
 The WebView2 fix itself (its own plan), and any change inside glaze or native.
+
+## Outcome (2026-09-30)
+
+Done as planned, with three differences found while doing it:
+- **Link lists every module** via `go work init && go work use -r .` instead of the old hand list:
+  `site/` (added after the tasks were first written) was missing, and `go:check` failed with
+  "directory prefix . does not contain modules listed in go.work".
+- **TOML literal strings (`'''`)** for the scripts, like the rest of the file: a basic string
+  rejects the backslash-backtick escapes in the go.work comment.
+- **Dirty-clone guard** in `upstream:clone`: both clones held uncommitted work, the
+  `PATCHED LOCALLY` fixes from UPSTREAM.md. They were saved first, locally, on branches:
+  glaze `patch/nsapp-new-blocks` and `patch/errunsupported-wraps-std`, native
+  `patch/errunsupported-wraps-std`. The clones are now on `trunk`.
+
+Verified: clone twice, idempotent (both on trunk); link makes `go list -m` resolve glaze to the
+local path; `upstream:verify` green (glaze tests, native tests, go:check across 5 modules); a panic
+added to the local glaze reached our build; unlink returns to glaze v0.0.61.

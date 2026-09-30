@@ -124,9 +124,13 @@ the display is `virtio-ramfb-gl`, why ESD image 3 needs `--boot`, why
 `utmctl suspend --save-state` must never be called, why `%q` must not be
 re-escaped for AppleScript.
 
-Move them with their code. Do not compress or tidy them. If one is wrong, fix
-the fact — do not delete the explanation. When you correct a measurement, look
-for the other copy.
+Move them with their code. If one is wrong, fix the fact — do not delete the
+explanation. When you correct a measurement, look for the other copy.
+
+Keep them to Go's norm otherwise: a doc comment says what the thing does and,
+in a sentence or two, the non-obvious why. A measured trap or a warning stays,
+tightly worded; the story of how it was found belongs in `RESULTS.md` or here,
+not in the code. `cmd/irgo-winvm` and `internal/command` are written this way.
 
 ## Verify against the VM
 
@@ -184,7 +188,7 @@ and one rule decides the packages:
 | `internal/mcpserver` | the MCP surface, and **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it — a 45-minute install an MCP client cannot wait on. Not in `utmvm` because all three stages start such work, and whoever owns it must be able to report a **dead** process |
 | `internal/glazecheck` | does glaze work: build the four examples, run them here or through app-create, record the verdict. Needs a checkout, so it is not in `utmvm`, which must work on a machine that has never seen this repo |
-| `cmd/irgo-winvm` | wiring: flags, handlers, exit codes |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 Three Go modules, and the split is load-bearing rather than organisational:
 
@@ -205,6 +209,12 @@ Behaviour that exists only when driven over MCP is a second answer to a question
 already answered, and it is the one nobody tests — the cycle tests drive the
 CLI and so does a developer. If a tool needs logic, the logic goes in `utmvm`
 where both callers get it.
+
+Adding a command is two edits: declare it in `command.All` (name, summary,
+undo, whether it mutates), and add a `<name>Flags` func and a `run<Name>` func
+in the matching file in `cmd/irgo-winvm`, joined by one row in the table in
+`main.go`. The binary panics at start if the two lists disagree, and the MCP
+tool, its schema, the usage text and the site's reference follow on their own.
 
 It needs macOS on Apple Silicon, and UTM, which `vm-create` installs from its
 signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by

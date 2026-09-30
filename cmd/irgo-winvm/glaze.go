@@ -57,10 +57,11 @@ func runGlazeCheck(args []string) error {
 		if fErr != nil {
 			return fErr
 		}
-		// Once, around all four. app-create is called directly below rather
-		// than through runTool, which would take the lock again and be refused
-		// by the holder — this process.
-		release, lErr := utmvm.AcquireMutation()
+		// Once, around all four, and only this VM's: glaze-check on one VM
+		// must not refuse app-create on another. app-create is called directly
+		// below rather than through runTool, which would take the lock again
+		// and be refused by the holder — this process.
+		release, lErr := utmvm.Acquire(utmvm.VMLock(e.Name))
 		if lErr != nil {
 			return lErr
 		}

@@ -54,16 +54,22 @@ type Command struct {
 	// as a claim about what is safe to call.
 	Destructive bool
 
-	// Mutates marks a command that changes state on disk — media, a VM, or a
-	// staged binary — and therefore needs the mutation lock.
+	// Locks says which mutation locks the command takes, and so whether it
+	// changes state on disk — media, a VM, the golden image or a staged
+	// binary. Zero means it takes none.
 	//
 	// Declared, not inferred. The obvious rule, "!ReadOnly means mutates", is
 	// wrong in exactly one place: `mcp` changes nothing itself but serves
 	// mutations, so it is not read-only and also not a mutation. One
 	// exception is enough to make the rule a guess.
-	Mutates bool
+	//
+	// It was a bool, Mutates, when there was one lock for the whole machine.
+	// With a lock per VM the question is no longer whether but which, and a
+	// bool beside a list of locks would be two answers that can disagree.
+	Locks Locks
 
-	// Detach names the flag that makes this command long-running.
+	// Detach names the flag that makes this command long-running, or
+	// DetachAlways for a command that is long-running whatever it is given.
 	//
 	// With that flag present, an MCP call starts the work and returns a handle
 	// instead of blocking: vm-create -install is about 45 minutes and every
@@ -73,6 +79,8 @@ type Command struct {
 	// A flag rather than a duration, because the duration is a property of what
 	// was asked for, not of the command. `iso-create` rebuilds from a local
 	// .esd in about 50 seconds; `iso-create -fetch` downloads 4.2 GB first.
+	// vm-golden-create has no quick form — it seals Windows, which is minutes
+	// of decryption and component cleanup at best — so it is DetachAlways.
 	Detach string
 
 	// OverMCP is false for a command that makes no sense as a tool.
@@ -85,6 +93,31 @@ type Command struct {
 	OverMCP bool
 }
 
+// Locks is which mutation locks a command takes. The locks themselves, and
+// what each one guards, are in internal/utmvm/lock.go; this only declares
+// which a command needs, so the MCP server and the CLI read one answer.
+type Locks uint8
+
+const (
+	// LockMachine is for what every VM shares: the media and the golden image.
+	LockMachine Locks = 1 << iota
+
+	// LockVM is for the one VM the command's -vm flag names.
+	LockVM
+
+	// LockStage is for the binaries staged under bin/ for app-create.
+	LockStage
+)
+
+// Mutates reports whether the command changes state on disk, which is the
+// same as taking any lock.
+func (c Command) Mutates() bool { return c.Locks != 0 }
+
+// DetachAlways is Detach for a command that is long-running whatever it is
+// given. Not a real flag, and never matched against one: it cannot be spelled
+// on a command line.
+const DetachAlways = "(always)"
+
 // All is the only place a command is declared.
 //
 // It was a switch and a hand-typed usage block — two copies of the same list,
@@ -95,27 +128,28 @@ type Command struct {
 //
 // Order is the order the usage prints, which is the order they are run in.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Mutates: true, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Mutates: true, Detach: "-install", OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Mutates: true, OverMCP: true},
-	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Mutates: true, OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, OverMCP: true},
+	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, OverMCP: true},
 
-	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
-	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
+	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
+	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
-	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Mutates: true, OverMCP: true},
+	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
 	// Only in a checkout of this repository: they build and read examples/.
 	// See internal/glazecheck for why they are in the shipped binary at all.
 	//
-	// glaze-check is not Mutates: the Mac run touches no VM, and making it
-	// take the lock would refuse the fifteen-second inner loop for the whole of
-	// a 45-minute install. The Windows run takes the lock itself, once, around
-	// all four app-create runs. -windows is about a minute and a half, often
-	// more when the guest has to be recovered first, so over MCP it is a job.
+	// glaze-check takes no lock here: the Mac run touches no VM, and making it
+	// take one would refuse the fifteen-second inner loop for the whole of a
+	// 45-minute install. The Windows run takes that VM's lock itself, once,
+	// around all four app-create runs. -windows is about a minute and a half,
+	// often more when the guest has to be recovered first, so over MCP it is a
+	// job.
 	{Name: "glaze-check", Summary: "does glaze work? run the four examples here or -windows, record the verdict", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
@@ -130,8 +164,11 @@ var All = []Command{
 // writes whichever it prefers and a missed match means a 45-minute call that
 // blocks — the exact failure jobs exist to prevent.
 func (c Command) DetachedBy(args []string) bool {
-	if c.Detach == "" {
+	switch c.Detach {
+	case "":
 		return false
+	case DetachAlways:
+		return true
 	}
 	for _, a := range args {
 		if a == c.Detach || strings.HasPrefix(a, c.Detach+"=") {

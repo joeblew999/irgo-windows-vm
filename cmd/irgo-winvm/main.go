@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -358,13 +359,18 @@ func mcpDeps() mcpserver.Deps {
 			// the lock itself and is the source of truth, but asking first
 			// means a second mutation is told "busy" now rather than after it
 			// has forked. "Cannot tell" is refused too.
-			held, err := utmvm.MutationHeld()
+			c, ok := command.Find(name)
+			if !ok {
+				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
+			}
+			// Taken and let go rather than asked about, so a refusal names
+			// which lock was busy — the VM, or the machine — instead of a
+			// bare "busy". The child takes them again for real.
+			release, err := utmvm.Acquire(locksFor(c, args)...)
 			if err != nil {
 				return "", err
 			}
-			if held {
-				return "", utmvm.ErrMutationInProgress
-			}
+			release()
 			s, err := job.Start(name, args)
 			if err != nil {
 				return "", err
@@ -477,14 +483,52 @@ func runTool(name string, args []string) error {
 	if !ok || c.Run == nil {
 		return fmt.Errorf("%w: no such command %q", errUsage, name)
 	}
-	if c.Mutates && !wantsHelp(args) {
-		release, err := utmvm.AcquireMutation()
+	if c.Mutates() && !wantsHelp(args) {
+		release, err := utmvm.Acquire(locksFor(c.Command, args)...)
 		if err != nil {
 			return err
 		}
 		defer release()
 	}
 	return c.Run(args)
+}
+
+// locksFor turns what a command declares into the locks it takes for these
+// arguments: LockVM becomes the lock of the VM its -vm flag names.
+//
+// The -vm value is read with the command's own flag set, so the default
+// (irgo-win11) and every spelling the flag package accepts — `-vm a1`,
+// `-vm=a1`, `--vm a1` — resolve to one lock. Arguments that do not parse are
+// locked as the default VM: the handler is about to reject them anyway, and
+// taking a lock it did not need costs nothing, where taking none could let a
+// command run unguarded.
+func locksFor(c command.Command, args []string) []utmvm.Lock {
+	var locks []utmvm.Lock
+	if c.Locks&command.LockMachine != 0 {
+		locks = append(locks, utmvm.MachineLock)
+	}
+	if c.Locks&command.LockStage != 0 {
+		locks = append(locks, utmvm.StageLock)
+	}
+	if c.Locks&command.LockVM != 0 {
+		locks = append(locks, utmvm.VMLockFor(vmArg(c.Name, args)))
+	}
+	return locks
+}
+
+// vmArg is the VM a command's arguments name, or the default.
+func vmArg(name string, args []string) string {
+	build, ok := flagSets[name]
+	if !ok {
+		return utmvm.DefaultVMName
+	}
+	fs := build()
+	fs.SetOutput(io.Discard)
+	_ = fs.Parse(args) // a parse error leaves -vm at its default; see locksFor
+	if f := fs.Lookup("vm"); f != nil && f.Value.String() != "" {
+		return f.Value.String()
+	}
+	return utmvm.DefaultVMName
 }
 
 // wantsHelp reports whether the arguments ask for help. Help is answered before

@@ -212,17 +212,127 @@ this may control UTM. `vm-create` checks that before doing anything expensive,
 because without it a boot cannot be driven and the failure arrives forty minutes
 into an install as a timeout that mentions nothing about permissions.
 
+## The commands
+
+| step | what it gets you | undo |
+|---|---|---|
+| **`iso-create`** | the Windows installer | `iso-delete` |
+| **`vm-create`** | a VM with Windows on it, answering | `vm-delete` |
+| **`app-create`** | your `.exe` running in that VM, output back | `app-delete` |
+
+They run in that order, and each is cheap to repeat: if it is already done, it
+says so and stops. The undo is what lets a step that failed be cleaned and
+re-run, rather than leaving the machine somewhere between two states.
+
+Three more change nothing: **`vm-screen`** photographs the VM, **`doctor`**
+reports what is here, and **`status`** lists long-running work — what is still
+going, what finished, and how long it has been. Whether a job is alive is
+answered by asking the operating system, not by reading a file that says so.
+
+The two calls that take a long time — `vm-create -install` and `iso-create
+-fetch` — start the work and hand back a job id rather than blocking for 45
+minutes on a connection that will time out. The work outlives the client that
+asked for it; `status` is how anyone finds out what happened.
+
+Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
+That is the whole contract.
+
+Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
+explains the sequence. No document here lists flags, so none can go stale about
+them: the [command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)
+is captured from the binary at build time.
+
+### For an agent: `mcp`
+
+**`irgo-winvm mcp`** serves the same commands over the Model Context Protocol,
+on stdin and stdout or over HTTP (`-http`, loopback by default). It is the point
+of the repository pointed at its most likely user: an agent writing a Go desktop
+app on a Mac cannot find out whether it works on Windows, and this lets it ask,
+get a real answer from real Windows, and see the screen when the answer is that
+it hung. The tools are generated from the command list, so they are the commands
+and nothing else.
+
+Over HTTP, an agent that has just cross-compiled a `.exe` and has no shared
+filesystem with the Mac can send it in chunks with **`app-upload`** — staged
+content-addressed under `bin/`, verified by SHA-256 before it is committed —
+then hand the staged path to `app-create`. A wider bind than loopback needs
+`-allow-remote` and `IRGO_WINVM_TOKEN`; read [the threat model](THREAT-MODEL.md)
+before opening one.
+
+## What it exits with
+
+`utmctl` exits 0 when it fails, which this repository has been bitten by more
+than once. So this tool is the only honest signal a caller gets, and it says
+something specific:
+
+| code | meaning |
+|---|---|
+| **0** | it worked — including `-h`, and an undo that found nothing to undo |
+| **1** | your program ran and failed |
+| **2** | the command was called wrongly |
+| **3** | that VM does not exist |
+| **4** | the VM is there, the guest agent is not answering |
+| **5** | refused — a destructive command without `-force` |
+| **6** | refused — another mutation is in progress |
+
+**1 is your program, not this tool.** The guest's own exit code is *not* passed
+through: a binary exiting 3 exits `app-create` **1**, and names its real code in
+the message. That is deliberate — a failing program and a missing VM must not
+look the same to a script.
+
+**4 and 6 are the ones worth retrying.** Windows Update takes the agent away
+for minutes at a time; the VM is fine and will answer again. `app-create`
+already waits and tries to recover before giving up, which is why it can take
+several minutes to reach that code. 6 means another mutation holds the lock —
+the holder finishes on its own schedule, and waiting changes the answer.
+
+`-detach` exits 0 once the program is running, since it is for windows nobody
+intends to close.
+
+`cmd/irgo-winvm/docs_test.go` reads this table, so a code declared in
+`command.Outcomes` and not explained here fails the build.
+
+## What it costs
+
+| step | time | |
+|---|---|---|
+| `iso-create -fetch` | minutes, and the 4.2 GB `.esd` below | downloaded once; a rebuild from the kept `.esd` needs no network ([measured](RESULTS.md#the-iso-scan-verdict-is-recorded-at-build-time--13-aug-2026)) |
+| `vm-create -install` | **about 45 minutes** | an estimate, not a measurement — unattended, you click nothing |
+| `app-create` | seconds | [measured](RESULTS.md#the-inner-loop-works), cross-compiled on the Mac with no toolchain |
+
+| on disk | size | |
+|---|---|---|
+| the `.esd` from Microsoft | **4.2 GB** | downloaded once, from a source that rate-limits |
+| scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
+| the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
+| the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
+
+About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
+`-all`, because rebuilding the ISO from it is local work, while losing it means
+downloading 4.2 GB again.
+
+## Linux is out of scope
+
+This repository is the Windows VM system: Windows is the platform whose
+behaviour cannot be checked by reading the code from a Mac, and everything in it
+— the answer file, the ISO mastering, the guest agent, the session model — is
+Windows-specific. Linux would need its own guest image and its own path, and it
+is not built here. The `linux` builds in CI exist only so the tool compiles for
+a developer on another OS, not because it can drive a Linux guest.
+
 ## What the VM is, and who you are inside it
 
 Fixed, and not settable by a flag. Changing one means editing `setDefaults` in
 `internal/utmvm/vm_create.go` — there is deliberately no way to ask for a different
 shape, because a VM that differs between two machines is a result that cannot
 be compared.
+Nothing in the tree records *why* these particular numbers, only that they are
+fixed.
 
 | | value | |
 |---|---|---|
 | name | `irgo-win11` | `utmvm.DefaultVMName`; `-vm` overrides, for a disposable VM |
-| disk | **64 GiB, sparse** | costs kilobytes until the guest writes; a finished install is ~30 GiB |
+| disk | **64 GiB, sparse** | costs kilobytes until the guest writes; see [what it costs](#what-it-costs) |
 | RAM | **8192 MiB** | |
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 

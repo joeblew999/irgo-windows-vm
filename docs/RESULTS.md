@@ -77,12 +77,12 @@ unattended. It settles every open question about replacing CrystalFetch:
 
 The last row matters beyond convenience. Booting currently depends on typing
 `\efi\boot\bootaa64.efi` at the UEFI shell and firing eight keypresses over six
-seconds — a hack this README documents as costing hours and as having once
+seconds — a hack DEVELOPMENT.md documents as costing hours and as having once
 destroyed an install when surplus presses reached Setup's UI. Media built with
 the no-prompt loader does not need it.
 
 Full detail, including the two failed attempts and why they failed, is in
-the trap table in [README.md](../README.md).
+the trap table in [DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
 
 ---
 
@@ -116,7 +116,7 @@ idempotent path is the fast one.
 version is not offered; `utmctl suspend --save-state` either refuses (naming GPU
 acceleration, then NVMe) or *reports success and power-cuts the guest* — exit 0,
 no state file, next boot through "Diagnosing your PC". See the trap table in
-[README.md](../README.md).
+[DEVELOPMENT.md](DEVELOPMENT.md#things-that-cost-hours).
 
 ## macOS — verified
 
@@ -187,7 +187,7 @@ A failing guest binary fails the command. The host does **not** exit with the
 guest's code — a binary exiting 3 exits `app-create` **1**, with "exited 3 in
 the guest" in the message. The two must not look alike, because a missing VM
 exits 3 and a busy guest agent exits 4; see the contract in
-[README.md](../README.md).
+[DEVELOPMENT.md](DEVELOPMENT.md#what-it-exits-with).
 
 ### Native capabilities — windows/arm64, native
 
@@ -294,6 +294,42 @@ layout, the display device and the boot path:
 | `virtio-ramfb-gl` display works | **yes** — Setup and desktop both render |
 | NVMe system disk is visible to Setup | **yes** |
 | glaze runs on Windows | **yes** — measured 12 Aug, above |
+
+### What it looked like
+
+Not mock-ups. A Mac built the installer, installed Windows on it unattended,
+and photographed the result — including the failure that put three Bing tabs on
+the desktop. Every one was taken by the tool itself, named for the stage that
+produced it; nothing was staged, cropped, or copied across by hand. Two more,
+`copying` (mid-install, nobody clicking) and `ready` (the guest agent answers),
+are on the [front page](../README.md).
+
+**`booting-1`** — UEFI firmware, before Windows has started
+
+![booting-1](screens/vm/booting-1.png)
+
+**`booting-2`** — Windows starting
+
+![booting-2](screens/vm/booting-2.png)
+
+**`finalising`** — the copy is done, first logon
+
+![finalising](screens/vm/finalising.png)
+
+**`stalled-1`** — an install that stopped moving, photographed so you can see why
+
+![stalled-1](screens/vm/stalled-1.png)
+
+**`running-no-agent`** — the failure it now refuses to cause: keystrokes meant
+for a boot prompt, landing in a logged-in desktop
+
+![running-no-agent](screens/vm/running-no-agent.png)
+
+`booting-N` repeats every few seconds until the agent answers, so a boot that
+hangs leaves a picture of exactly where it stopped. Every stage photographs
+itself as it runs, because from the host a stuck boot and a working one look
+identical. Those go to `shots/` outside the repository; the few kept as evidence
+are in `docs/screens/`, published by `mise run vm:shots`.
 
 ## Still to measure: x64 under emulation
 

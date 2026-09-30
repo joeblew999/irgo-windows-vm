@@ -133,6 +133,30 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 	}
 }
 
+// exitCodeDoc holds the exit-code table. README says what the project is for
+// and nothing technical, so the contract lives with the rest of the CLI detail.
+const exitCodeDoc = "docs/DEVELOPMENT.md"
+
+// exitCodeHeading opens the section the table is read from. Only that section
+// is read: the same file has other tables with bold numbers in them — the VM's
+// `| CPUs | **4** |` row matched exitRow and documented code 4 on its own, so
+// deleting the real **4** row left this test green.
+const exitCodeHeading = "## What it exits with"
+
+// exitCodeSection returns body from exitCodeHeading up to the next level-two
+// heading, or "" if the heading is missing.
+func exitCodeSection(body string) string {
+	i := strings.Index(body, exitCodeHeading+"\n")
+	if i < 0 {
+		return ""
+	}
+	rest := body[i+len(exitCodeHeading)+1:]
+	if j := strings.Index(rest, "\n## "); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
+
 // exitRow matches a row of the exit-code table in the markdown: | **4** | ... |
 var exitRow = regexp.MustCompile(`\|\s*\*\*(\d)\*\*\s*\|`)
 
@@ -140,7 +164,8 @@ var exitRow = regexp.MustCompile(`\|\s*\*\*(\d)\*\*\s*\|`)
 // the other contract this tool publishes.
 //
 // The codes are declared in package command, the CLI exits with them, the MCP
-// server reports them to an agent, and README explains them to a person. Three
+// server reports them to an agent, and docs/DEVELOPMENT.md explains them to a
+// person. Three
 // renderings of one list — and the markdown is the one that cannot be checked
 // by compiling, so it is the one that goes stale.
 //
@@ -149,31 +174,35 @@ var exitRow = regexp.MustCompile(`\|\s*\*\*(\d)\*\*\s*\|`)
 // and a build that stayed green.
 //
 // Negative control, run by hand: adding a seventh code to command.Outcomes
-// fails this until README documents it; deleting the **4** row fails it too.
+// fails this until the table documents it; deleting the **4** row fails it too.
 func TestDocsNameEveryExitCode(t *testing.T) {
-	readme, ok := markdownFiles(t)["README.md"]
+	body, ok := markdownFiles(t)[exitCodeDoc]
 	if !ok {
-		t.Fatal("README.md not found")
+		t.Fatalf("%s not found", exitCodeDoc)
+	}
+	section := exitCodeSection(body)
+	if section == "" {
+		t.Fatalf("%s has no %q section", exitCodeDoc, exitCodeHeading)
 	}
 	documented := map[string]bool{}
-	for _, m := range exitRow.FindAllStringSubmatch(readme, -1) {
+	for _, m := range exitRow.FindAllStringSubmatch(section, -1) {
 		documented[m[1]] = true
 	}
 	if len(documented) == 0 {
-		t.Fatal("README documents no exit codes; this test would pass vacuously")
+		t.Fatalf("%s documents no exit codes; this test would pass vacuously", exitCodeDoc)
 	}
 
 	declared := map[string]bool{}
 	for _, o := range command.Outcomes {
 		declared[strconv.Itoa(int(o.Code))] = true
 		if !documented[strconv.Itoa(int(o.Code))] {
-			t.Errorf("exit code %d (%s) is declared but README does not document it — "+
-				"a caller cannot act on a code nothing explains", o.Code, o.Name)
+			t.Errorf("exit code %d (%s) is declared but %s does not document it — "+
+				"a caller cannot act on a code nothing explains", o.Code, o.Name, exitCodeDoc)
 		}
 	}
 	for code := range documented {
 		if !declared[code] {
-			t.Errorf("README documents exit code %s, which package command does not declare", code)
+			t.Errorf("%s documents exit code %s, which package command does not declare", exitCodeDoc, code)
 		}
 	}
 }

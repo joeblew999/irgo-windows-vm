@@ -123,7 +123,9 @@ visible from looking at a page that renders.
 The site also publishes each page as plain markdown beside its HTML — the
 extension swapped, so `results.html` has `results.md` — and **`llms.txt`** and
 **`llms-full.txt`**, the whole documentation as one file, for anything that
-would rather make one request than six. They are not written by hand and they are not a second copy: the corpus
+would rather make one request than six (`llms-full.txt` is ~67 KB). Prefer
+them over fetching the `.md` files from the repository, which silently lack the
+command reference. They are not written by hand and they are not a second copy: the corpus
 entry is appended inside the same loop that renders each HTML page, from the
 same markdown, so both come from one pass over the one list in `site/main.go`.
 
@@ -156,7 +158,7 @@ its stage name. Do not copy them across yourself.
 
 **CI fails on a screenshot no page mentions.** `vm:shots` publishes whatever
 stages a run happened to produce, and a slow boot produces `booting-3`,
-`booting-4` and so on — the README captions two. So a new shot needs either a
+`booting-4` and so on, and a page captions only the ones it explains. So a new shot needs either a
 caption naming its file, or removing: an unexplained picture in documentation is
 not evidence, it is decoration that looks like evidence.
 

@@ -1,22 +1,38 @@
 # irgo-windows-vm
 
-<https://github.com/joeblew999/irgo-windows-vm> 
+<https://github.com/joeblew999/irgo-windows-vm>
 
 [Docs site](https://joeblew999.github.io/irgo-windows-vm/)
 
-A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.
+Build a Go desktop program on your Mac, and find out whether it really works on Windows.
 
-Build on the Mac, run on Windows, read the output back. No GUI, no manual
-install, nothing to click.
+One command, `irgo-winvm`, makes a real Windows 11 ARM64 virtual machine on
+Apple Silicon, runs your program inside it, and brings back what happened. No
+GUI to drive, no manual install, nothing to click. `irgo-winvm mcp` offers the
+same commands to an AI agent, so an agent writing a desktop app on a Mac can
+ask real Windows too.
+
+## What it is for
+
+This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)**, a
+framework for building apps in Go with Datastar that run on iOS, Android,
+**desktop** and the web.
+
+An app that runs on one desktop is not a desktop app. Irgo's desktop half rests
+on [glaze](https://github.com/crgimenes/glaze) (the webview) and
+[native](https://github.com/crgimenes/native) (the OS integration around it),
+and *"it works on my Mac"* says nothing about Windows, which cannot be checked
+by reading the code. So this installs a real Windows, runs the program there,
+and reads back what it actually did, to find what breaks in glaze and native on
+Windows.
+
+Once that is dependable it belongs inside Irgo, so that checking a desktop build
+on every platform is part of building one.
 
 ## Get it
 
-**[All releases →](https://github.com/joeblew999/irgo-windows-vm/releases)** —
-every version, with checksums.
-The [latest](https://github.com/joeblew999/irgo-windows-vm/releases/latest) is
-the one you want.
-
-Download the binary for your Mac — `arm64` for Apple Silicon — then:
+Download the [latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest)
+for your Mac (`arm64` for Apple Silicon), then:
 
 ```sh
 chmod +x irgo-winvm-darwin-arm64
@@ -24,267 +40,62 @@ xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
 ./irgo-winvm-darwin-arm64
 ```
 
-The second line is macOS refusing anything downloaded from the internet;
-without it Gatekeeper reports the binary as damaged.
-
-macOS on Apple Silicon. It installs UTM itself if you do not have it.
+The second line is needed because macOS refuses anything downloaded from the
+internet; without it Gatekeeper reports the binary as damaged. It needs macOS
+on Apple Silicon, and installs UTM itself if you do not have it.
+[All releases](https://github.com/joeblew999/irgo-windows-vm/releases) are
+listed with checksums.
 
 ## Try it
 
-Three commands, in this order. Each is cheap to repeat — if it is already done
+Three commands, in this order. Each is safe to repeat: if it is already done,
 it says so and stops.
 
 ```sh
-irgo-winvm iso-create -fetch    # the Windows installer
-irgo-winvm vm-create -install   # a VM, with Windows installed on it
-irgo-winvm app-create your.exe  # your binary, run in that VM, output back
+irgo-winvm iso-create -fetch    # get the Windows installer
+irgo-winvm vm-create -install   # make a VM and install Windows on it, unattended
+irgo-winvm app-create your.exe  # run your program in that VM, output back
 ```
 
-| | cost | |
-|---|---|---|
-| `iso-create -fetch` | **4.2 GB**, ~250 s | downloaded once; ~40 s to rebuild afterwards |
-| `vm-create -install` | **about 45 minutes** | an estimate, not a measurement — unattended, you click nothing |
-| `app-create` | **10.8 s** | measured 12 Aug 2026, cross-compiled on the Mac with no toolchain |
+The first two are slow, once: a large download, then an install you do not have
+to watch ([what each costs](docs/DEVELOPMENT.md#what-it-costs)). After that,
+running a program takes seconds.
 
-Flags for all of them are in the
-[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html),
-captured from the binary.
-
-## What it is for
-
-This is the VM system for **[Irgo](https://github.com/stukennedy/irgo)** — a
-hypermedia-driven framework for building apps in Go with Datastar that run on
-iOS, Android, **desktop** and the web, with no JavaScript framework involved.
-
-Desktop is the hard word in that sentence. An app that runs on one desktop is
-not a desktop app; it has to work on the platforms you did not write it on. The
-desktop half rests on
-[glaze](https://github.com/crgimenes/glaze) and
-[native](https://github.com/crgimenes/native) — cgo-free Go libraries for a
-webview and the OS integration around it — and *"it works on my Mac"* is not
-evidence about any of the others.
-
-Windows is the one that cannot be checked by reading the code. It is a
-different windowing system, a different webview, a different set of things that
-fail silently, and none of it is visible from macOS. So this exists to check it
-the only way that counts: install a real Windows on a real VM, run the binary
-there, and read back what it actually did.
-
-Everything else here is in service of that: getting the media, making the VM,
-and running a binary on it.
-
-Once that is dependable, it belongs to Irgo rather than to a repository beside
-it — the VM machinery is meant to be ported in, so that verifying a desktop
-build on every platform is part of building one.
-
-## Three steps
-
-| step | what it gets you |
-|---|---|
-| **`iso-create`** | the Windows installer |
-| **`vm-create`** | a VM with Windows on it, answering |
-| **`app-create`** | your `.exe` running in that VM, output back |
-
-They run in that order. Each one is cheap to repeat: if it is already done, it
-says so and stops. Each has an undo — `iso-delete`, `vm-delete`, `app-delete` —
-so a step that fails can be cleaned and re-run rather than leaving the machine
-somewhere between two states.
-
-Three more, none of which change anything: **`vm-screen`** photographs the VM,
-**`doctor`** reports what is here, and **`status`** lists long-running work —
-what is still going, what finished, and how long it has been. Whether a job is
-alive is answered by asking the operating system, not by reading a file that
-says so.
-
-And one for an agent rather than a person: **`irgo-winvm mcp`** serves these
-same commands over the Model Context Protocol, on stdin and stdout or over HTTP
-(`-http`, loopback by default). It is the
-point of the whole repository pointed at its most likely user — an agent writing
-a Go desktop app on a Mac cannot find out whether it works on Windows, and this
-lets it ask, get a real answer from real Windows, and see the screen when the
-answer is that it hung. The tools are generated from the command list, so they
-are the commands above and nothing else.
-
-Over HTTP, an agent that has just cross-compiled a `.exe` and has no shared
-filesystem with the Mac can send it in chunks with **`app-upload`** — staged
-content-addressed under `bin/`, verified by SHA-256 before it is committed —
-then hand the staged path to `app-create`. A wider bind than loopback needs
-`-allow-remote` and `IRGO_WINVM_TOKEN`; read
-[the threat model](docs/THREAT-MODEL.md) before opening one.
-
-The two calls that take a long time — `vm-create -install` and `iso-create
--fetch` — start the work and hand back a job id rather than blocking for
-45 minutes on a connection that will time out. The work outlives the client that
-asked for it; `status` is how anyone finds out what happened.
-
-Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
-That is the whole contract.
-
-The guest logs itself in as **`dev`**, password `dev`, and stays logged in. That
-is not an oversight: an unattended install needs a plaintext credential to
-create the account and log in with nobody typing, and it guards a throwaway
-local VM with no route in from anywhere but your Mac. It is also what makes
-`-gui` possible — anything that opens a window needs a desktop session to open
-it in. [DEVELOPMENT.md](docs/DEVELOPMENT.md) has the detail.
-
-Every command that takes flags explains itself with `-h`, and `irgo-winvm help`
-explains the sequence. This file lists no flags and so cannot go stale about
-them — the **[command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
-on the site is captured from the binary at build time.
-
-## What it exits with
-
-`utmctl` exits 0 when it fails, which this repository has been bitten by more
-than once. So this tool is the only honest signal a caller gets, and it says
-something specific:
-
-| code | meaning |
-|---|---|
-| **0** | it worked — including `-h`, and an undo that found nothing to undo |
-| **1** | your program ran and failed |
-| **2** | the command was called wrongly |
-| **3** | that VM does not exist |
-| **4** | the VM is there, the guest agent is not answering |
-| **5** | refused — a destructive command without `-force` |
-| **6** | refused — another mutation is in progress |
-
-**1 is your program, not this tool.** The guest's own exit code is *not* passed
-through: a binary exiting 3 exits `app-create` **1**, and names its real code in
-the message. That is deliberate — a failing program and a missing VM must not
-look the same to a script.
-
-**4 and 6 are the ones worth retrying.** Windows Update takes the agent away
-for minutes at a time; the VM is fine and will answer again. `app-create`
-already waits and tries to recover before giving up, which is why it can take
-several minutes to reach that code. 6 means another mutation holds the lock —
-the holder finishes on its own schedule, and waiting changes the answer.
-
-`-detach` exits 0 once the program is running, since it is for windows nobody
-intends to close.
-
-## What it costs
-
-| | size | |
-|---|---|---|
-| the `.esd` from Microsoft | **4.2 GB** | downloaded once, from a source that rate-limits |
-| scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
-| the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
-| the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
-
-The VM itself is **4 CPUs and 8192 MiB**, on that 64 GiB sparse disk. All three
-are fixed and none is settable by a flag — changing one means editing
-`setDefaults` in `internal/utmvm/vm_create.go`, deliberately, because a VM whose shape
-differs between two machines produces results that cannot be compared. Nothing
-in the tree records *why* those particular numbers, only that they are fixed.
-
-About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
-`-all`, because rebuilding the ISO from it takes ~40 seconds with no network,
-while losing it means downloading 4.2 GB again.
-
-## Linux
-
-Out of scope here. This repository is the Windows VM system: Windows is the
-platform whose behaviour cannot be checked by reading the code from a Mac, and
-everything in it — the answer file, the ISO mastering, the guest agent, the
-session model — is Windows-specific.
-
-Linux would need its own guest image and its own path, and it is not built
-here. The `linux` builds in CI exist only so the tool compiles for a developer
-on another OS, not because it can drive a Linux guest.
+`irgo-winvm doctor` tells you what is set up and what is missing.
 
 ## What it looks like
 
-Not mock-ups. A Mac built the installer, installed Windows on it unattended,
-and photographed the result — including the failure that put three Bing tabs on
-the desktop.
-
-Every one of these was taken by the tool itself, named for the stage that
-produced it. Nothing was staged, cropped, or copied across by hand —
-`mise run vm:shots` publishes the newest shot of each stage.
-
-**`booting-1`** — UEFI firmware, before Windows has started
-
-![booting-1](docs/screens/vm/booting-1.png)
-
-**`booting-2`** — Windows starting
-
-![booting-2](docs/screens/vm/booting-2.png)
-
-**`ready`** — the guest agent answers, and the VM is usable
-
-![ready](docs/screens/vm/ready.png)
-
-**`copying`** — an unattended install, mid-flight. Nobody clicked anything
+Taken by the tool itself, not mock-ups. Windows installing with nobody at the
+keyboard:
 
 ![copying](docs/screens/vm/copying.png)
 
-**`finalising`** — the copy is done, first logon
+And ready for your program:
 
-![finalising](docs/screens/vm/finalising.png)
+![ready](docs/screens/vm/ready.png)
 
-**`stalled-1`** — an install that stopped moving, photographed so you can see why
+## Does glaze work?
 
-![stalled-1](docs/screens/vm/stalled-1.png)
-
-**`running-no-agent`** — the failure it now refuses to cause: keystrokes meant
-for a boot prompt, landing in a logged-in desktop
-
-![running-no-agent](docs/screens/vm/running-no-agent.png)
-
-`booting-N` repeats every few seconds until the agent answers, so a boot that
-hangs leaves a picture of exactly where it stopped.
-
-Every stage photographs itself as it runs, because from the host a stuck boot
-and a working one look identical. Those go to `shots/` outside the repository;
-the few kept here as evidence are in `docs/screens/`.
-
-## A glaze or native bug is fixed at crgimenes, not here
-
-**Non-negotiable.** When a probe fails, the fix goes to
+`mise run glaze:mac` and `mise run glaze:windows` answer that with one YES or
+NO. When the answer is NO, the fix goes to
 [crgimenes/glaze](https://github.com/crgimenes/glaze) or
-[crgimenes/native](https://github.com/crgimenes/native) — never into a
-workaround in this repository.
+[crgimenes/native](https://github.com/crgimenes/native), never into a workaround
+here: finding those bugs is the point, and a workaround hides a bug that still
+ships to everyone using those libraries.
 
-That is the whole point. This repo exists to *find* what breaks in glaze and
-native on Windows, and a bug worked around in an example is a bug still shipped
-to everyone using those libraries. Worse, the workaround hides it: the probe
-goes green, the report says the capability works, and the next person to hit it
-starts from nothing.
+## More
 
-How a fix is made and proven, and how to check glaze works on the Mac and on
-Windows, is in [CONTRIBUTING.md](docs/CONTRIBUTING.md#does-glaze-work). What
-has been found is in [UPSTREAM.md](docs/UPSTREAM.md).
+- **[CONTRIBUTING](docs/CONTRIBUTING.md)**: how to set up, what to run, how to
+  land a change, how to check glaze.
+- **[DEVELOPMENT](docs/DEVELOPMENT.md)**: how it works, the commands, exit
+  codes and costs, and every trap that cost hours.
+- **[RESULTS](docs/RESULTS.md)**: what has been measured, dated, with
+  screenshots.
+- **[UPSTREAM](docs/UPSTREAM.md)**: what was found in glaze, native and UTM, and
+  where it was fixed.
+- **[ROADMAP](docs/ROADMAP.md)**: what is next.
+- **[THREAT-MODEL](docs/THREAT-MODEL.md)**: what serving it over HTTP exposes.
+- **[Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**:
+  every command and flag, captured from the binary.
 
-## The rest
-
-- **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** — how to set up, what to run, how to
-  land a change.
-- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** — read before changing any of this. How the code is
-  organised, and every trap that cost hours.
-- **[RESULTS.md](docs/RESULTS.md)** — what has been measured, dated.
-- **[UPSTREAM.md](docs/UPSTREAM.md)** — what was found and where it was fixed.
-- **[Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)**
-  — every command and every flag. It has no file in this repository: it is
-  captured from the compiled binary at build time, so no default is ever
-  transcribed.
-
-## Reading this with a machine
-
-The whole documentation is published as one file:
-
-- **[llms-full.txt](https://joeblew999.github.io/irgo-windows-vm/llms-full.txt)**
-  — every page, one request, ~67 KB of markdown.
-- **[llms.txt](https://joeblew999.github.io/irgo-windows-vm/llms.txt)** — the
-  index, if you would rather choose first.
-
-Every page is also served as plain markdown beside its HTML — swap the
-extension, so `results.html` has `results.md`. That includes `reference.md`,
-which exists nowhere else.
-
-Prefer any of those over fetching the `.md` files from this repository. Five of the six
-pages are here as markdown; the sixth, the command reference, **has no source
-file** — it is captured from the compiled binary at build time so that no flag
-or default is ever transcribed. Fetching the raw markdown gets you documentation
-that looks complete with no flag reference in it.
-
-MIT licensed — see [LICENSE](LICENSE).
+MIT licensed. See [LICENSE](LICENSE).

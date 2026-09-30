@@ -101,7 +101,12 @@ jobs:
             echo "run $run has no conformance artifacts left: publishing the committed record"
             exit 0
           fi
-          go run ./cmd/irgo-winvm glaze-check -import ci-conformance
+          # A run from before screenshots existed has artifacts without them;
+          # that is "nothing to import", not a failed deploy.
+          if ! go run ./cmd/irgo-winvm glaze-check -import ci-conformance; then
+            echo "run $run could not be imported: publishing the committed record"
+            git checkout -- docs && git clean -fdq docs
+          fi
 
       - name: build the site
         run: mise run site:build

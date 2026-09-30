@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,25 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
-
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// TestHelpIsNotAnError covers the whole point of swallowing flag.ErrHelp: -h
-// asks a question, and answering it is not a failure.
+// TestHelpIsNotAnError: -h asks a question, so it exits 0 on every command.
 //
-// Four commands used flag.ContinueOnError and returned ErrHelp straight out, so
-// `irgo-winvm vm-create -h` printed the flags and then `error: flag: help
-// requested` and exited 1. The other three used flag.ExitOnError and exited 0.
-// One question, two answers, decided by which command you happened to ask.
-//
-// Every command is covered by reading the table rather than a list written out
-// here, so a command added later cannot quietly skip this.
-//
-// Negative control, run by hand when this was written: dropping the
-// `!errors.Is(err, flag.ErrHelp)` guard in run() fails this for all seven
-// commands that parse flags.
+// Negative control: dropping the `!errors.Is(err, flag.ErrHelp)` guard in run
+// fails this for every command that parses flags.
 func TestHelpIsNotAnError(t *testing.T) {
 	for _, c := range commands {
 		t.Run(c.Name, func(t *testing.T) {
@@ -38,25 +26,13 @@ func TestHelpIsNotAnError(t *testing.T) {
 	}
 }
 
-// TestRealErrorsStillPropagate is the other half, and the reason the guard
-// tests errors.Is rather than "did anything come back".
+// TestRealErrorsStillPropagate is the other half: the help guard must not
+// swallow real errors. It uses app-create with no binary, which fails in its
+// own argument check before looking for a VM. An unknown subcommand would not
+// do: that returns before the guard is reached.
 //
-// Swallowing every error would make -h pass and make every genuine failure
-// exit 0 with it. A tool that reports success when the VM is missing is worse
-// than one that is rude about help.
-//
-// It goes through app-create with no binary named, NOT through an unknown
-// subcommand. The first version of this test used an unknown subcommand and
-// PASSED against a mutation that swallowed every real error — because that path
-// returns before the guard is ever reached, so the test never touched the code
-// it was written to protect. A test that cannot fail is not a test.
-//
-// app-create with no positional argument fails in its own flag handling, before
-// it looks for a VM, so this needs no UTM and no guest.
-//
-// Negative control, run by hand: inverting the guard to
-// `errors.Is(err, flag.ErrHelp)` — swallowing everything that is not a help
-// request — fails this.
+// Negative control: inverting the guard to swallow everything that is not a
+// help request fails this.
 func TestRealErrorsStillPropagate(t *testing.T) {
 	err := run([]string{"app-create"})
 	if err == nil {
@@ -65,13 +41,14 @@ func TestRealErrorsStillPropagate(t *testing.T) {
 	if errors.Is(err, flag.ErrHelp) {
 		t.Errorf("a usage error was reported as a help request: %v", err)
 	}
+	if !errors.Is(err, errUsage) {
+		t.Errorf("app-create with no binary is not classified as a usage error: %v", err)
+	}
 	if !strings.Contains(err.Error(), "app-create") {
 		t.Errorf("error does not name what was wrong: %v", err)
 	}
 }
 
-// TestUnknownSubcommandIsAnError covers the other rejection path, which returns
-// before dispatch and so is not covered by the test above.
 func TestUnknownSubcommandIsAnError(t *testing.T) {
 	err := run([]string{"no-such-command"})
 	if err == nil {
@@ -82,22 +59,19 @@ func TestUnknownSubcommandIsAnError(t *testing.T) {
 	}
 }
 
-// TestEveryCommandIsReachable asserts the table and the dispatcher agree.
-//
-// find() is what run() uses, so a table entry it cannot resolve is a command
-// that is listed in the usage and then reports "unknown subcommand".
+// TestEveryCommandIsReachable checks that find, which run uses, resolves every
+// command in the table, and that -h and --help mean help.
 func TestEveryCommandIsReachable(t *testing.T) {
+	if len(commands) != len(command.All) {
+		t.Fatalf("%d commands in the table, %d declared", len(commands), len(command.All))
+	}
 	for _, c := range commands {
 		got, ok := find(c.Name)
-		if !ok {
-			t.Errorf("%s is in the table but find() does not resolve it", c.Name)
-			continue
+		if !ok || got.Name != c.Name {
+			t.Errorf("find(%q) = %q, %v", c.Name, got.Name, ok)
 		}
-		if got.Name != c.Name {
-			t.Errorf("find(%q) resolved to %q", c.Name, got.Name)
-		}
-		if c.Run == nil {
-			t.Errorf("%s has no handler", c.Name)
+		if c.run == nil {
+			t.Errorf("%s has no run func", c.Name)
 		}
 		if c.Summary == "" {
 			t.Errorf("%s has no summary, so the usage would print a blank row", c.Name)
@@ -110,20 +84,32 @@ func TestEveryCommandIsReachable(t *testing.T) {
 	}
 }
 
-// TestUsageListsEveryCommand is what keeps the generated usage honest.
-//
-// The usage used to be a hand-typed const beside the dispatch switch, which is
-// how it came to promise "Each takes -h for its flags" while version and doctor
-// ignored flags entirely.
+// TestJoinRejectsMismatch checks both directions of the check init relies on
+// to pair package command's list with this package's implementations.
+func TestJoinRejectsMismatch(t *testing.T) {
+	noop := impl{run: func(values, []string) error { return nil }}
+	all := []command.Command{{Name: "iso-create"}, {Name: "vm-create"}}
+
+	if _, err := join(all, map[string]impl{"iso-create": noop, "vm-create": noop}); err != nil {
+		t.Fatalf("a matching table was rejected: %v", err)
+	}
+	if _, err := join(all, map[string]impl{"iso-create": noop}); err == nil {
+		t.Error("a declared command with no implementation was accepted")
+	}
+	if _, err := join(all, map[string]impl{"iso-create": noop, "vm-create": noop, "iso-crate": noop}); err == nil {
+		t.Error("an implementation for an undeclared command was accepted")
+	}
+	if _, err := join(all, map[string]impl{"iso-create": noop, "vm-create": {}}); err == nil {
+		t.Error("an implementation with no run func was accepted")
+	}
+}
+
 func TestUsageListsEveryCommand(t *testing.T) {
-	got := usageText()
+	got := command.UsageText()
 	for _, c := range commands {
 		if !strings.Contains(got, c.Name) {
 			t.Errorf("usage does not mention %q", c.Name)
 		}
-	}
-	// Each undo is printed beside the command it reverses, not on its own row.
-	for _, c := range commands {
 		if c.Undo == "" {
 			continue
 		}
@@ -133,20 +119,11 @@ func TestUsageListsEveryCommand(t *testing.T) {
 	}
 }
 
-// TestExitCode covers the classification, one case per code.
+// TestExitCode covers the classification, one case per code, with wrapped
+// errors because that is what call sites produce.
 //
-// Every failure used to exit 1, so a script could not tell "the program I asked
-// you to run failed" from "that VM does not exist" from "the agent is busy" —
-// and the last is the one worth retrying. It matters here more than in most
-// tools because utmctl itself exits 0 on failure, so this CLI is the only
-// honest signal a caller gets.
-//
-// Wrapped errors, not bare sentinels, because that is what the call sites
-// produce and errors.Is has to see through fmt.Errorf's %w.
-//
-// Negative control, run by hand: reordering the switch so the ErrNoVM case sits
-// after the default fails the no-VM case; deleting the ErrNoAgent case makes it
-// return 1 and fails that one.
+// Negative control: moving the ErrNoVM case after the default fails the no-VM
+// case; deleting the ErrNoAgent case fails that one.
 func TestExitCode(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -164,21 +141,19 @@ func TestExitCode(t *testing.T) {
 		{"another mutation holds the lock", fmt.Errorf("%w: someone else", utmvm.ErrMutationInProgress), command.CodeBusy},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := exitCode(tc.err); got != tc.want {
+			got := exitCode(tc.err)
+			if got != tc.want {
 				t.Errorf("exitCode(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+			// Every code returned must be declared, or an MCP client sees "unknown".
+			if _, ok := command.Classify(got); !ok {
+				t.Errorf("exitCode(%v) returned %d, which package command does not declare", tc.err, got)
 			}
 		})
 	}
 }
 
-// TestExitCodesAreDistinct is the property that makes the contract worth
-// having: two different failures must not share a code, or a caller still
-// cannot tell them apart.
-//
-// It walks command.Outcomes rather than listing the codes here. The list used
-// to be written out in this test, which meant a seventh code could be added and
-// this would go on checking the six it knew about — a test that cannot fail for
-// the case it was written to catch.
+// TestExitCodesAreDistinct: two failures sharing a code cannot be told apart.
 func TestExitCodesAreDistinct(t *testing.T) {
 	if len(command.Outcomes) == 0 {
 		t.Fatal("no outcomes declared; this test would pass vacuously")
@@ -190,153 +165,53 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		}
 		seen[o.Code] = o.Name
 	}
-	t.Logf("%d distinct outcomes", len(seen))
 }
 
-// TestEveryCodeExitCodeReturnsIsDeclared closes the gap the move opened.
-//
-// exitCode maps this program's errors to codes; command.Outcomes describes what
-// each code means to an agent. A code returned here but not declared there
-// reaches an MCP client as "unknown", which is worse than the old situation,
-// where at least the number was the whole contract.
-func TestEveryCodeExitCodeReturnsIsDeclared(t *testing.T) {
-	for _, err := range []error{
-		nil,
-		fmt.Errorf("parsing: %w", flag.ErrHelp),
-		errors.New("boom"),
-		fmt.Errorf("%w: needs a binary", errUsage),
-		fmt.Errorf("%w: %q", utmvm.ErrNoVM, "nope"),
-		fmt.Errorf("%w: busy", utmvm.ErrNoAgent),
-		fmt.Errorf("would delete things (%w)", errRefused),
-		fmt.Errorf("%w: someone else", utmvm.ErrMutationInProgress),
-	} {
-		code := exitCode(err)
-		if _, ok := command.Classify(code); !ok {
-			t.Errorf("exitCode(%v) returned %d, which package command does not declare", err, code)
-		}
-	}
-}
-
-// TestEveryHandlerIsADeclaredCommand is the direction the split created.
-//
-// The list of commands lives in package command so the MCP server can import
-// it; the functions that run them stay here. That is one list and one wiring
-// map, and the map is keyed by strings — so a typo, or a handler for a command
-// that was renamed, silently wires nothing.
-//
-// The other direction is already covered: a declared command with no handler
-// leaves Run nil, and TestTableIsWellFormed fails on that. This is the half
-// that would otherwise be invisible, because an unused map entry compiles,
-// vets, lints and does nothing.
-//
-// Negative control, run by hand: adding "iso-crate": runISOCreate to handlers
-// fails this and names iso-crate.
-func TestEveryHandlerIsADeclaredCommand(t *testing.T) {
-	if len(handlers) == 0 {
-		t.Fatal("no handlers; this test would pass vacuously")
-	}
-	for name := range handlers {
-		if _, ok := command.Find(name); !ok {
-			t.Errorf("handlers has %q, which package command does not declare — "+
-				"it is wired to nothing and can never run", name)
-		}
-	}
-	// Sizes agree, so neither list can carry an entry the loop above misses.
-	if len(handlers) != len(command.All) {
-		t.Errorf("%d handlers against %d declared commands", len(handlers), len(command.All))
-	}
-	t.Logf("%d handlers, all declared", len(handlers))
-}
-
-// TestEveryFlagSetIsADeclaredCommand — the same both-directions gate as
-// handlers, on the map the schema generation reads.
-//
-// A command with flags and no entry gets a tool with no flags in its schema,
-// which is a silent downgrade: an agent is told the command takes nothing but
-// positionals and calls it wrongly.
-//
-// Negative control, run by hand: add "iso-crate" to flagSets and this names it;
-// delete the "app-create" entry and the other half fails.
-func TestEveryFlagSetIsADeclaredCommand(t *testing.T) {
-	if len(flagSets) == 0 {
-		t.Fatal("no flag sets; this test would pass vacuously")
-	}
-	for name := range flagSets {
-		if _, ok := command.Find(name); !ok {
-			t.Errorf("flagSets has %q, which package command does not declare", name)
-		}
-	}
-	// The other direction, measured rather than listed: a command whose handler
-	// registers flags must have an entry here. Found by parsing -h, because
-	// that is what the flag package prints and what the reference page shows.
+// TestFlagDefaultsRoundTrip: the MCP schema advertises each flag's DefValue,
+// so passing every default back must parse and give the same value.
+func TestFlagDefaultsRoundTrip(t *testing.T) {
+	withFlags := 0
 	for _, c := range commands {
-		if c.Run == nil {
+		if c.flags == nil {
 			continue
 		}
-		var usage bytes.Buffer
-		fs, has := flagSets[c.Name]
-		if has {
-			f := fs()
-			f.SetOutput(&usage)
-			f.PrintDefaults()
-			if usage.Len() == 0 {
-				t.Errorf("%s has a flag set that declares no flags", c.Name)
-			}
-		}
-	}
-	t.Logf("%d commands take flags", len(flagSets))
-}
-
-// TestGeneratedSchemaMatchesTheFlagsTheCLIRegisters is the point of the whole
-// change.
-//
-// The schema is generated from the same FlagSet the command line parses, so
-// these cannot disagree — this asserts that the wiring actually does that,
-// rather than that two lists happen to match today.
-func TestGeneratedSchemaMatchesTheFlagsTheCLIRegisters(t *testing.T) {
-	for name, build := range flagSets {
-		fs := build()
-		declared := map[string]bool{}
-		fs.VisitAll(func(f *flag.Flag) { declared[f.Name] = true })
-		if len(declared) == 0 {
-			t.Errorf("%s registers no flags", name)
-			continue
-		}
-		// Round trip, using each flag's OWN default — which is exactly what the
-		// generated schema advertises to an agent. If a default cannot be
-		// passed back in, the schema is telling the agent something the command
-		// line will reject.
-		//
-		// The first version of this used empty values and failed on every bool
-		// with `invalid boolean value ""`, which was the test being wrong
-		// rather than the code — but it is the same shape as the real failure,
-		// so it is worth it being right.
+		withFlags++
 		var argv []string
-		fs.VisitAll(func(f *flag.Flag) {
+		c.flags().VisitAll(func(f *flag.Flag) {
 			argv = append(argv, fmt.Sprintf("-%s=%s", f.Name, f.DefValue))
 		})
-		fresh := build()
+		fresh := c.flags()
 		fresh.SetOutput(io.Discard)
 		if err := fresh.Parse(argv); err != nil {
-			t.Errorf("%s: the defaults the schema advertises do not parse back: %v", name, err)
+			t.Errorf("%s: the defaults the schema advertises do not parse back: %v", c.Name, err)
 			continue
 		}
 		fresh.VisitAll(func(f *flag.Flag) {
 			if got := f.Value.String(); got != f.DefValue {
-				t.Errorf("%s -%s: passing its own default %q back gave %q",
-					name, f.Name, f.DefValue, got)
+				t.Errorf("%s -%s: passing its own default %q back gave %q", c.Name, f.Name, f.DefValue, got)
 			}
 		})
 	}
+	if withFlags == 0 {
+		t.Fatal("no command declares flags; this test would pass vacuously")
+	}
 }
 
-// TestMCPHTTPRefusesANonLoopbackBind goes through runMCP, the real CLI path.
-// It reads the -allow-remote flag, so if mcpFlags stops declaring it the call
-// panics in values.Bool rather than returning an error — this test fails loudly
-// instead of the panic arriving in a running server. That is the exact failure
-// it was added after.
+// TestFlagSetsAreNamedForTheirCommand: "Usage of <name>:" in -h output, and the
+// site's reference page, read the set's name.
+func TestFlagSetsAreNamedForTheirCommand(t *testing.T) {
+	for _, c := range commands {
+		if c.flags != nil && c.flags().Name() != c.Name {
+			t.Errorf("%s declares a flag set named %q", c.Name, c.flags().Name())
+		}
+	}
+}
+
+// TestMCPHTTPRefusesANonLoopbackBind goes through the real CLI path. It reads
+// -allow-remote, so if mcpFlags stops declaring it, values.Bool panics here
+// rather than in a running server.
 func TestMCPHTTPRefusesANonLoopbackBind(t *testing.T) {
-	err := runMCP([]string{"-http", "0.0.0.0:8129"})
+	err := runTool("mcp", []string{"-http", "0.0.0.0:8129"})
 	if err == nil {
 		t.Fatal("mcp -http accepted a non-loopback address without -allow-remote")
 	}

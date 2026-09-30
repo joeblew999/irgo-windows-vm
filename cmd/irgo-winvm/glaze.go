@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -10,8 +11,8 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// repo finds the checkout, and classifies "not in one" as the command being
-// called wrongly: nothing is broken, it was run somewhere it cannot work.
+// repo finds the checkout. Not being in one is a usage error: nothing is
+// broken, the command was run somewhere it cannot work.
 func repo() (string, error) {
 	root, err := glazecheck.FindRepo()
 	if err != nil {
@@ -20,18 +21,17 @@ func repo() (string, error) {
 	return root, nil
 }
 
-// runGlazeCheck is `mise run glaze:mac` and `mise run glaze:windows`.
-//
-// It was two shell scripts in mise.toml that printed YES or NO and threw it
-// away. The logic — build, run all four even when one fails, record the
-// verdict, keep the full log — lives in internal/glazecheck; this wires the
-// Windows runner, which is app-create itself.
-func runGlazeCheck(args []string) error {
-	fs := glazeCheckFlags()
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	v := values{fs}
+func glazeCheckFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("glaze-check", flag.ContinueOnError)
+	fs.Bool("windows", false, "run the four on the VM, through app-create, instead of natively on this Mac")
+	fs.String("vm", utmvm.DefaultVMName, "VM name, with -windows")
+	return fs
+}
+
+// runGlazeCheck builds the four examples, runs them all on this Mac or with
+// -windows on the VM, and records the verdict. The logic is in
+// internal/glazecheck; this supplies the Windows runner, which is app-create.
+func runGlazeCheck(v values, _ []string) error {
 	windows, name := v.Bool("windows"), v.String("vm")
 	say := utmvm.Printer("glaze-check")
 
@@ -50,22 +50,21 @@ func runGlazeCheck(args []string) error {
 		Say:      say,
 	}
 	if windows {
-		// Resolved before anything is built, so a missing VM is exit 3 in a
-		// second rather than after a build, and is never recorded as a glaze
-		// verdict: it is not one.
-		e, fErr := utmvm.Find(name)
-		if fErr != nil {
-			return fErr
+		// Resolved before building, so a missing VM fails fast with exit 3
+		// and is never recorded as a glaze verdict.
+		e, err := utmvm.Find(name)
+		if err != nil {
+			return err
 		}
-		// Once, around all four. app-create is called directly below rather
-		// than through runTool, which would take the lock again and be refused
-		// by the holder — this process.
-		release, lErr := utmvm.AcquireMutation()
-		if lErr != nil {
-			return lErr
+		// Held once around all four runs, so app-create is run with exec, not
+		// runTool, which would try to take the lock again and be refused.
+		release, err := utmvm.AcquireMutation()
+		if err != nil {
+			return err
 		}
 		defer release()
 
+		appCreate, _ := find("app-create")
 		o.Target = glazecheck.TargetWindows
 		o.Platform = "windows/arm64, VM " + e.Name + " (through app-create)"
 		o.Run = func(p glazecheck.Program, exe string) error {
@@ -74,10 +73,10 @@ func runGlazeCheck(args []string) error {
 				a = append(a, "-gui")
 			}
 			a = append(a, exe)
-			return runAppCreate(append(a, p.Args...))
+			return appCreate.exec(append(a, p.Args...))
 		}
-		// These mean the program never ran. Anything else — including the
-		// program's own non-zero exit — is a result.
+		// These mean the program never ran. Anything else, including its own
+		// non-zero exit, is a result.
 		o.NotRun = func(err error) bool {
 			return errors.Is(err, utmvm.ErrNoAgent) || errors.Is(err, utmvm.ErrNoVM) ||
 				errors.Is(err, utmvm.ErrMutationInProgress)
@@ -87,11 +86,9 @@ func runGlazeCheck(args []string) error {
 	return err
 }
 
-// runGlazeStatus prints the recorded verdict, then whether it still holds.
-//
-// The whole file, not a summary of it: it is short, it is what is committed,
-// and an agent asking over MCP should get the same text the owner reads.
-func runGlazeStatus([]string) error {
+// runGlazeStatus prints the recorded verdict file whole, then whether it still
+// holds against the tree now.
+func runGlazeStatus(values, []string) error {
 	root, err := repo()
 	if err != nil {
 		return err

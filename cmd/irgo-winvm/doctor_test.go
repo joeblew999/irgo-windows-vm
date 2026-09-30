@@ -26,7 +26,7 @@ import (
 // absolute-path check; hard-coding present to true fails the agreement check.
 func TestDoctorJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	out, err := utmvm.Capture(func() error { return runDoctor([]string{"-json"}) })
+	out, err := utmvm.Capture(func() error { return runTool("doctor", []string{"-json"}) })
 	if err != nil {
 		t.Fatalf("doctor -json: %v", err)
 	}

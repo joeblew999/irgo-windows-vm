@@ -152,7 +152,13 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// phantom prints "couldn't be removed" and exits 0 — so the bundle is
 	// checked afterwards rather than the error being trusted.
 	step("… asking UTM to delete it, so no phantom entry is left")
-	_ = exec.Command("utmctl", "delete", r.UUID).Run()
+	//
+	// utmctlPath, not "utmctl": it lives inside UTM.app and is not on PATH
+	// unless something linked it there (Homebrew's cask does, which is why
+	// this worked on the machine that wrote it). Found by name, a missing
+	// utmctl failed here in silence and the RemoveAll below made exactly the
+	// phantom this comment is about.
+	_ = exec.Command(utmctlPath(), "delete", r.UUID).Run()
 	if _, err := os.Stat(r.Path); err == nil {
 		step("… UTM left the bundle behind; removing it")
 		if rmErr := os.RemoveAll(r.Path); rmErr != nil {

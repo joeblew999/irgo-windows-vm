@@ -113,3 +113,37 @@ idempotent and safe to run on a healthy VM.
   sets *account* expiry, not password expiry — not a substitute.) Fallback: `wmic useraccount where
   name='dev' set PasswordExpires=false`, if `wmic` is still present on this build.
 - `explorer.exe` as the session signal: fine for the stock shell; revisit if the shell is ever replaced.
+
+## Update 2026-09-30 (later): existing VM repaired, second failure found, all GUI probes green
+
+**Password (change 2, done by hand on `irgo-win11`).** A batch file pushed with `utmctl file push`
+and run with `utmctl exec` (SYSTEM, so no UAC prompt) ran `net accounts /maxpwage:unlimited`;
+`net user dev` then showed `Password expires  Never`. A reboot (`shutdown /r` from the same path)
+let `AutoLogon` reach the desktop. Running `net accounts` from the user's own non-elevated Command
+Prompt fails with "Access is denied" — do it through the agent, not by hand.
+
+**Second failure: stale WebView2 registration.** With the desktop back, `verify` failed with
+`webview2: Edge WebView2 Runtime not found (install it)` — on glaze v0.0.61 **and** v0.0.47 (A/B,
+same VM), so not a glaze regression. Cause: the Evergreen runtime had self-updated to
+`154.0.4258.37` (files present, including `EBWebView\arm64\EmbeddedBrowserWebView.dll`) and removed
+the `151.0.4129.86` folder, but
+`HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\EBWebView`
+still pointed at `…\Application\151.0.4129.86` (and `Clients\{…}\pv` said 151). glaze's
+`findEmbeddedBrowserDLL` trusts that one value, so it found nothing. Likely an update interrupted by
+a VM shutdown (inferred). Repair: run the present version's own installer as SYSTEM:
+`"…\EdgeWebView\Application\154.0.4258.37\Installer\setup.exe" --msedgewebview --system-level`
+→ exit 0, `EBWebView` and `pv` now 154.0.4258.37.
+
+Follow-ups this adds:
+- **glaze PR (upstream, crgimenes/glaze):** if the `EBWebView` path is missing, fall back to the
+  newest `EdgeWebView\Application\<ver>` that contains `EBWebView\<arch>\EmbeddedBrowserWebView.dll`;
+  make the error name the stale registration. Unknown: whether Microsoft's own loader already does
+  this (if yes, glaze apps break where other WebView2 apps do not).
+- **`vm-repair`** (change 2) should also re-register WebView2 when `EBWebView` points at a missing folder.
+- **`doctor`**: add a "WebView2 registration matches files on disk" row.
+
+**Results on glaze v0.0.61 / native v0.1.15, Windows 11 ARM64 (after both repairs):**
+`probe` OK (clipboard, power, single-instance, mmap); `verify` PASS (scheme handler, JS↔Go,
+secure origin; absolute `app://` sub-resources still fail — the known, documented limitation);
+`verify-events` PASS (JS→Go, 3 Go→JS pushes, round trip); `glaze-all` all OK or cleanly
+unsupported (`SetAppIcon` unsupported on this platform).

@@ -483,6 +483,20 @@ func shutdownGuest(vmRef string, say func(string, ...any)) error {
 	return fmt.Errorf("%s did not stop within 5m after Windows was asked to shut down (UTM says %q)", vmRef, st)
 }
 
+// stopAndWait stops a VM from outside and waits for UTM to say stopped.
+func stopAndWait(vm VM, limit time.Duration) error {
+	_ = vm.Stop() // its own error is not trusted either way; the status below is
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if st, err := vm.Status(); err == nil && strings.EqualFold(strings.TrimSpace(st), "stopped") {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	st, _ := vm.Status()
+	return fmt.Errorf("%s did not stop within %s (UTM says %q)", vm.Ref, limit, st)
+}
+
 // releaseLegacyMedia clears the immutable flag on a bundle's install.iso, if
 // it has one, and returns what puts it back.
 //

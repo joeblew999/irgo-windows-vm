@@ -55,3 +55,8 @@ func statfsAvailable(_ string) (int64, error) {
 func sameDevice(_, _ string) bool { return false }
 
 const immutableSupported = false
+
+// cloneFile is APFS-only; the caller copies instead.
+func cloneFile(_, _ string) error {
+	return errors.New("utmvm: file clones are macOS-only (host is " + runtime.GOOS + ")")
+}

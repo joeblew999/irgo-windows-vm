@@ -2,6 +2,7 @@ package utmvm
 
 import (
 	"bytes"
+	_ "embed"
 	"context"
 	"errors"
 	"fmt"
@@ -62,7 +63,6 @@ const (
 	utmContainer = "com.utmapp.UTM"
 	utmBinDir    = "Contents/MacOS"
 	utmDocuments = "Documents"
-	utmToolsDir  = "GuestSupportTools"
 	utmToolsISO  = "utm-guest-tools-latest.iso"
 
 	// utmctlTimeout bounds every utmctl call. Guest-side commands wait forever
@@ -360,7 +360,7 @@ func Find(ref string) (Entry, error) {
 			return e, nil
 		}
 	}
-	return Entry{}, fmt.Errorf("%w: %q (restart UTM if it was just generated)", ErrNoVM, ref)
+	return Entry{}, fmt.Errorf("%w: %q", ErrNoVM, ref)
 }
 
 // firstLine keeps error messages to one line; utmctl can be verbose.
@@ -371,61 +371,94 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// RestartUTM quits and relaunches UTM.
+// vmDataDir is the vm stage's own directory under the application root: the
+// guest tools, and bundles waiting for UTM to import them.
+func vmDataDir() string { return filepath.Join(appRoot(), "vm") }
+
+// stagingDir is where vm-create writes a new bundle before UTM imports it.
+func stagingDir() string { return filepath.Join(vmDataDir(), "staging") }
+
+//go:embed assets/utm-import.applescript
+var importScript string
+
+//go:embed assets/utm-eject.applescript
+var ejectScript string
+
+// registerBundle has UTM import a bundle this process wrote to stagingDir,
+// checks it registered under the expected name, and removes the staged copy.
 //
-// Necessary because UTM enumerates its bundle directory only at launch: a VM
-// written to disk while UTM is running simply does not exist as far as utmctl
-// or the UI are concerned, with no error to suggest why.
-//
-// Quitting UTM stops every VM it is running, so this refuses when any VM
-// other than except is started or paused, and when UTM cannot be asked —
-// "cannot tell" is not "safe". It had no guard at all: only the vm:test task
-// checked, in shell, and that check could not fire (it grepped doctor, which
-// never prints a VM's status). With several agents each on its own VM, an
-// unguarded restart is one agent's vm-create stopping everybody else's.
-// Cloning from the golden image needs no restart, which is the way round it.
-func RestartUTM(except string) error {
-	if err := canRestartUTM(except); err != nil {
+// This replaced writing the bundle into UTM's folder and restarting UTM so it
+// rescanned: the write is refused by macOS App Data protection for a process
+// that has not been granted access to other apps' data, and the restart
+// stopped every running VM. RestartUTM, and its guard, went with it — there
+// is nothing left that restarts UTM. See assets/utm-import.applescript.
+func registerBundle(staged, name string) error {
+	// The staged bundle goes whatever happens: it is a clone of UTM's copy on
+	// success, and a half-registered nothing on failure. Removed through
+	// removeStaged, which clears the immutable flag first.
+	defer removeStaged(staged)
+	out, err := utmScript(fmt.Sprintf(importScript, staged), 10*time.Minute)
+	if err != nil {
+		return fmt.Errorf("having UTM import %s: %w", staged, err)
+	}
+	if got := strings.TrimSpace(out); got != name {
+		return fmt.Errorf("UTM imported %s as %q, not %q", staged, got, name)
+	}
+	e, err := Find(name)
+	if err != nil {
+		return fmt.Errorf("UTM reported %s imported, and does not list it: %w", name, err)
+	}
+	// Imported under another file name — UTM picks "<name>-2.utm" when
+	// "<name>.utm" is already in its folder unregistered — would put the disk
+	// somewhere BundlePath does not look, and every install check would read a
+	// file that is not there. Checked by stat, which is allowed.
+	b, err := BundlePath(e.Name)
+	if err != nil {
 		return err
 	}
-	return restartUTM()
+	if _, err := os.Stat(DiskPath(b)); err != nil {
+		return fmt.Errorf("UTM registered %s, but not at %s (an unregistered bundle of that name "+
+			"is probably in UTM's folder; remove it in Finder): %w", name, Home(b), err)
+	}
+	return nil
 }
 
-// canRestartUTM is RestartUTM's guard alone, for a caller that must know
-// before it writes anything — vm-create asks before it makes a bundle it
-// could not then register.
-func canRestartUTM(except string) error {
-	list, err := List()
+// removeStaged deletes a staged bundle. Best effort: it is scratch under the
+// application root, and the next vm-create of that name clears it first.
+func removeStaged(staged string) {
+	_ = filepath.Walk(staged, func(p string, fi os.FileInfo, err error) error {
+		if err == nil && !fi.IsDir() {
+			if flags, ok := fileFlags(p); ok && flags&uchgFlag != 0 {
+				_ = setFileFlags(p, flags&^uchgFlag)
+			}
+		}
+		return nil
+	})
+	_ = os.RemoveAll(staged)
+}
+
+// ejectInstallMedia takes the install CD out of a stopped VM, through UTM.
+//
+// A human takes the disc out when Setup finishes copying. Nothing here did, and
+// the consequence is exact: media mastered with efisys_noprompt.bin boots
+// itself, so after the reboot the firmware picks the CD again, sits at "Start
+// boot option", and never reaches the shell where a boot could be redirected.
+// The VM looks hung and the install looks failed, with Windows sitting
+// complete on the disk.
+//
+// It edited config.plist in place and restarted UTM to re-read it. Reading
+// the plist is refused by App Data protection, so from an unprivileged
+// process the edit failed, the error was dropped at the call site, and the
+// install went on typing at a medium that would not let go. UTM's own
+// `update configuration` needs neither the file nor a restart. The VM must be
+// stopped. It reports whether it removed anything; already out is not an
+// error.
+func ejectInstallMedia(vmName string) (bool, error) {
+	out, err := utmScript(fmt.Sprintf(ejectScript, vmName), 2*time.Minute)
 	if err != nil {
-		return fmt.Errorf("restarting UTM stops every VM it runs, and UTM could not be asked which are running (%w); refusing", err)
+		return false, fmt.Errorf("taking the install medium out of %s: %w", vmName, err)
 	}
-	for _, e := range list {
-		if strings.EqualFold(e.Name, except) || strings.EqualFold(e.UUID, except) {
-			continue
-		}
-		if st := strings.TrimSpace(e.Status); strings.EqualFold(st, statusStarted) || strings.EqualFold(st, "paused") {
-			return fmt.Errorf("this needs UTM restarted, which would stop %s (%s); refusing.\n"+
-				"  Stop it first, or make VMs by cloning a golden image (vm-golden-create), which needs no restart", e.Name, st)
-		}
-	}
-	return nil
-}
-
-// restartUTM is the restart itself, unguarded. Only RestartUTM calls it.
-func restartUTM() error {
-	_ = exec.Command("osascript", "-e", `tell application "UTM" to quit`).Run()
-	for i := 0; i < 15; i++ {
-		if err := exec.Command("pgrep", "-f", filepath.Join(AppPath, utmBinDir, "UTM")).Run(); err != nil {
-			break // gone
-		}
-		time.Sleep(time.Second)
-	}
-	if err := exec.Command("open", "-a", "UTM").Run(); err != nil {
-		return fmt.Errorf("relaunching UTM: %w", err)
-	}
-	// Give it time to enumerate before anything asks for the new VM.
-	time.Sleep(8 * time.Second)
-	return nil
+	return strings.TrimSpace(out) == "1", nil
 }
 
 func (p Progress) String() string {

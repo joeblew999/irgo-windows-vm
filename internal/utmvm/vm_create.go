@@ -212,28 +212,36 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	if findErr == nil {
 		_ = stage("VM bundle", true, opts.VMName+" ("+existing.Status+")", nil)
 	} else {
-		// Asked before the bundle is written: a bundle UTM cannot be made to
-		// see is one this process then cannot remove either (it has no access
-		// to UTM's container), so refusing afterwards would leave it behind.
-		if gErr := canRestartUTM(opts.VMName); gErr != nil {
-			return res, stage("VM bundle", false, "", gErr)
+		// Written outside UTM's folder and imported by UTM, under the machine
+		// lock: the media is read while the bundle is made, and iso-delete
+		// must not take it away underneath. Seconds, so no other VM's work
+		// waits on it for long.
+		//
+		// This step used to write into UTM's folder and then restart UTM so it
+		// rescanned — the step nobody discovers alone. The write is refused to
+		// a process without access to other apps' data, and the restart
+		// stopped every running VM.
+		release, lErr := Acquire(MachineLock)
+		if lErr != nil {
+			return res, stage("VM bundle", false, "", lErr)
 		}
-		if _, cErr := Create(Options{
+		staged := filepath.Join(stagingDir(), opts.VMName+bundleExt)
+		removeStaged(staged) // left by a run that died between writing and importing
+		say("… writing it to %s", Home(staged))
+		_, cErr := Create(Options{
 			Name:       opts.VMName,
 			InstallISO: iso,
-		}); cErr != nil {
+			OutDir:     stagingDir(),
+		})
+		if cErr == nil {
+			say("… having UTM import it")
+			cErr = registerBundle(staged, opts.VMName)
+		}
+		release()
+		if cErr != nil {
 			return res, stage("VM bundle", false, "", cErr)
 		}
-		_ = stage("VM bundle", false, "created "+opts.VMName, nil)
-
-		// UTM enumerates its bundle directory only at launch, so a VM written
-		// while it is running does not exist as far as utmctl is concerned —
-		// with no error saying so. This is the step nobody discovers alone.
-		say("… restarting UTM so it sees the new VM")
-		if rErr := RestartUTM(opts.VMName); rErr != nil {
-			return res, stage("restart UTM", false, "", rErr)
-		}
-		_ = stage("restart UTM", false, "rescanned", nil)
+		_ = stage("VM bundle", false, "created and registered "+opts.VMName+", no UTM restart", nil)
 	}
 
 	// 6. Is it already installed and answering?
@@ -321,6 +329,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	if iErr := RunInstall(InstallOptions{
 		VMRef:      e.UUID,
 		BundlePath: bundle,
+		Media:      iso,
 		Timeout:    opts.Timeout,
 		Log:        Out,
 	}); iErr != nil {
@@ -412,7 +421,7 @@ func Create(opts Options) (string, error) {
 	if err := createSparse(filepath.Join(data, diskImage), int64(opts.DiskGiB)<<30); err != nil {
 		return "", fmt.Errorf("system disk: %w", err)
 	}
-	if err := linkOrCopy(opts.InstallISO, filepath.Join(data, installISO)); err != nil {
+	if err := cloneOrCopy(opts.InstallISO, filepath.Join(data, installISO)); err != nil {
 		return "", fmt.Errorf("install ISO: %w", err)
 	}
 
@@ -438,7 +447,7 @@ func Create(opts Options) (string, error) {
 	// what carries autounattend.xml, startup.nsh and the probe binaries.
 	unattendImg := filepath.Join(data, unattendISO)
 	if opts.UnattendISO != "" {
-		if err := linkOrCopy(opts.UnattendISO, unattendImg); err != nil {
+		if err := cloneOrCopy(opts.UnattendISO, unattendImg); err != nil {
 			return "", fmt.Errorf("unattend medium: %w", err)
 		}
 	} else {
@@ -461,7 +470,7 @@ func Create(opts Options) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := linkOrCopy(gt, filepath.Join(data, guestISO)); err != nil {
+		if err := cloneOrCopy(gt, filepath.Join(data, guestISO)); err != nil {
 			return "", fmt.Errorf("guest tools: %w", err)
 		}
 		cfg.Drives = append(cfg.Drives,
@@ -496,27 +505,27 @@ func createSparse(path string, size int64) error {
 	}
 	return f.Close()
 }
-func linkOrCopy(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		return nil
-	}
 
-	// An immutable source cannot be hardlinked: ln returns EPERM, and the copy
-	// below then silently spends 5.27 GB per VM on a file that was meant to be
-	// shared. Measured, not assumed — a bundle built from the protected ISO came
-	// out at 5.1 GB with install.iso showing one link instead of two.
-	//
-	// So the flag is lifted just long enough to make the link, and restored
-	// whatever happens. uchg is per-inode, so this briefly unprotects the
-	// original too; that window is one syscall wide.
-	if flags, ok := fileFlags(src); ok && flags&uchgFlag != 0 {
-		if uErr := ISOUnprotect(src); uErr == nil {
-			linkErr := os.Link(src, dst)
-			_ = isoProtect(src)
-			if linkErr == nil {
-				return nil
-			}
+// cloneOrCopy puts a copy of src at dst: an APFS clone where it can be, which
+// shares every block and costs nothing, and a real copy where it cannot. The
+// copy never carries the immutable flag.
+//
+// It was linkOrCopy, a hardlink. Two findings made that wrong:
+//
+//   - The media is protected, and `ln` to an immutable file is EPERM, so the
+//     flag had to be lifted for the link; and a link shares the inode, flag
+//     included. UTM now imports the staged bundle by cloning it (copyfile
+//     copies BSD flags — measured), and later deletes the ISO when the medium
+//     is ejected, which an immutable file refuses. A clone is its own inode,
+//     and its flag is cleared here.
+//   - The link never survived anyway: irgo-win11's install.iso has one link,
+//     a separate 5.26 GB copy (the .plans golden-image measurements).
+func cloneOrCopy(src, dst string) error {
+	if err := cloneFile(src, dst); err == nil {
+		if flags, ok := fileFlags(dst); ok && flags&uchgFlag != 0 {
+			return setFileFlags(dst, flags&^uchgFlag)
 		}
+		return nil
 	}
 	in, err := os.Open(src)
 	if err != nil {
@@ -864,6 +873,7 @@ func Inspect(vmRef, bundlePath string) Progress {
 type InstallOptions struct {
 	VMRef      string
 	BundlePath string
+	Media      string // the ISO the bundle was made from; decides whether the first boot needs typing
 	Timeout    time.Duration
 	Log        io.Writer
 }
@@ -902,10 +912,16 @@ func RunInstall(opts InstallOptions) error {
 	// unattended install into an interactive one.
 	//
 	// So the media is asked whether it needs driving, rather than assumed to.
-	// Asked by inode, not by path. The bundle's install.iso is a hardlink to
-	// the media, so it shares the media's identity but not its scan sidecar —
-	// inspecting the bundle copy would re-read 5 GB and still not know.
-	selfBooting := isoIsSelfBooting(filepath.Join(opts.BundlePath, bundleData, installISO))
+	// Asked of the media the bundle was made from, by inode. It was asked of
+	// the bundle's install.iso, a hardlink to the media — except that it had
+	// not been one on irgo-win11 (links=1, a separate 5 GB copy), and is not
+	// one now that UTM imports the bundle as a clone. A different inode made
+	// this answer "not self-booting", which is the answer that types at Setup.
+	media := opts.Media
+	if media == "" {
+		media = filepath.Join(opts.BundlePath, bundleData, installISO)
+	}
+	selfBooting := isoIsSelfBooting(media)
 
 	// Always with a display, even for self-booting media. The FIRST boot needs
 	// no keystrokes, but the second does — Setup reboots and must be pointed at
@@ -974,25 +990,27 @@ func RunInstall(opts InstallOptions) error {
 				// shell to redirect from, so no amount of typing helps until
 				// it is gone.
 				if !ejected {
-					if done, eErr := ejectInstallMedia(opts.BundlePath); eErr == nil && done {
-						ejected = true
-						logf("Windows is on the disk — removing the install medium so the firmware boots it")
-						_ = vm.Stop()
-						time.Sleep(5 * time.Second)
-						// Not ignored any more. A refused or failed restart left the
-						// VM stopped, and this loop went on typing boot paths at a
-						// machine that was off until the timeout.
-						if rErr := RestartUTM(opts.VMRef); rErr != nil {
-							return fmt.Errorf("Windows is on the disk and the install medium is out of the config, "+ //nolint:staticcheck // ST1005: names what to run next
-								"but UTM must be restarted to read that: %w\n"+
-								"  Re-run vm-create -install once it can be; it boots the Windows already on the disk", rErr)
-						}
-						if sErr := Named(opts.VMRef).StartWithDisplay(); sErr != nil {
-							return sErr
-						}
-						stalls = 0
-						continue
+					// Stopped first: UTM changes the configuration of a stopped
+					// VM only. The error is returned, not dropped — it was
+					// dropped, and the loop went on typing at a medium that would
+					// not let go.
+					logf("Windows is on the disk — stopping it to take the install medium out")
+					if sErr := stopAndWait(vm, 2*time.Minute); sErr != nil {
+						return sErr
 					}
+					done, eErr := ejectInstallMedia(opts.VMRef)
+					if eErr != nil {
+						return eErr
+					}
+					ejected = true
+					if done {
+						logf("install medium out; starting it again so the firmware boots Windows")
+					}
+					if sErr := vm.StartWithDisplay(); sErr != nil {
+						return sErr
+					}
+					stalls = 0
+					continue
 				}
 				target, what = BootInstalled, "installed Windows off the ESP"
 			}
@@ -1208,51 +1226,6 @@ func fileSize(p string) (int64, error) {
 		return 0, err
 	}
 	return fi.Size(), nil
-}
-
-// ejectInstallMedia removes the install CD from a bundle's config.
-//
-// A human takes the disc out when Setup finishes copying. Nothing here did, and
-// the consequence is exact: media mastered with efisys_noprompt.bin boots
-// itself, so after the reboot the firmware picks the CD again, sits at "Start
-// boot option", and never reaches the shell where a boot could be redirected.
-// The VM looks hung and the install looks failed, with Windows sitting
-// complete on the disk.
-//
-// Editing the plist means UTM must rescan, which is why this is paired with a
-// restart at the call site.
-func ejectInstallMedia(bundlePath string) (bool, error) {
-	plist := filepath.Join(bundlePath, "config.plist")
-	b, err := os.ReadFile(plist)
-	if err != nil {
-		return false, err
-	}
-	text := string(b)
-
-	// The drive is one <dict> in the Drives array. Find the entry naming
-	// install.iso and remove that dict, rather than rewriting the document —
-	// UTM rejects a malformed plist with one generic error that names no field.
-	marker := "<key>ImageName</key><string>" + installISO + "</string>"
-	i := strings.Index(text, marker)
-	if i < 0 {
-		return false, nil // already ejected
-	}
-	start := strings.LastIndex(text[:i], "<dict>")
-	end := strings.Index(text[i:], "</dict>")
-	if start < 0 || end < 0 {
-		return false, fmt.Errorf("utmvm: could not find the drive entry for %s in %s", installISO, plist)
-	}
-	end += i + len("</dict>")
-	for end < len(text) && (text[end] == '\n' || text[end] == '\t' || text[end] == ' ') {
-		end++
-	}
-	out := text[:start] + text[end:]
-	if err := os.WriteFile(plist, []byte(out), 0o644); err != nil {
-		return false, err
-	}
-	// The file itself stays: it is a hardlink to the media, and removing it
-	// would be iso-delete's business, not this.
-	return true, nil
 }
 
 // ---- the assets vm-create renders, in the file that renders them ----

@@ -100,6 +100,10 @@ func waitForGuest(vmRef, rcFile string, timeout time.Duration, say func(string, 
 	// Only every few polls: a line every 3 seconds is its own kind of noise.
 	const announceEvery = 15 * time.Second
 	nextSay := start.Add(announceEvery)
+	// Starts fast and backs off to 3 s. A flat 3 s meant every guest command,
+	// however quick, cost at least 3 s — and a push now runs one (the expand)
+	// before the program's own run. A pull is ~0.2 s, so early polls are cheap.
+	interval := 250 * time.Millisecond
 	for {
 		raw, perr := Pull(vmRef, rcFile)
 		if perr == nil && len(bytes.TrimSpace(raw)) > 0 {
@@ -113,7 +117,10 @@ func waitForGuest(vmRef, rcFile string, timeout time.Duration, say func(string, 
 			say("still running (%s of %s)", now.Sub(start).Round(time.Second), timeout)
 			nextSay = now.Add(announceEvery)
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(interval)
+		if interval *= 2; interval > 3*time.Second { // the package has its own int min
+			interval = 3 * time.Second
+		}
 	}
 }
 

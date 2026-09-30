@@ -35,7 +35,7 @@ depends = ["go:tool"]
 # that: a window nobody closes never exits, so waiting for it can only end in
 # the timeout. Without it this sat silent for ten minutes and read as a hang.
 run = [
-  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
+  "GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags='-s -w' -o {{config_root}}/.bin/win/glaze-all.exe ./glaze-all",
   "irgo-winvm app-create -gui -detach {{config_root}}/.bin/win/glaze-all.exe",
 ]
 
@@ -45,7 +45,7 @@ depends = ["go:tool"]
 run = '''
 set -e
 exe="{{config_root}}/.bin/win/probe.exe"
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -o "$exe" ./probe
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples build -trimpath -ldflags="-s -w" -o "$exe" ./probe
 # No precondition check here any more. It shelled out to `utmctl ip-address` to
 # decide whether the guest agent was up, which meant this file held both the
 # VM's name and a second opinion about what "ready" means -- and app-create
@@ -145,6 +145,9 @@ if [ -z "$fail" ]; then echo "YES: all four passed on $(go env GOOS)/$(go env GO
 '''
 
 [tasks."glaze:windows"]
+# Built stripped (-s -w): utmctl file push moves ~0.4 MB/s, so size is time.
+# Stripped and zipped (Push zips anything large), verify.exe is 2.0 MB, not 6.9.
+#
 # The gate. The same four programs, built for Windows ARM64, run on the VM
 # through app-create. -gui for the three that open a window; probe is headless
 # and runs as SYSTEM. All four run even if one fails.
@@ -154,7 +157,7 @@ run = '''
 set -e
 out="{{config_root}}/.bin/win"; mkdir -p "$out"
 [ -f "{{config_root}}/go.work" ] && echo "LINKED: building against $UPSTREAM_DIR" || echo "released glaze/native (the go.mod versions)"
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C "{{config_root}}/examples" build -o "$out/" ./...
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C "{{config_root}}/examples" build -trimpath -ldflags="-s -w" -o "$out/" ./...
 fail=""
 run() { name=$1; shift; echo; echo "=== $name"; irgo-winvm app-create "$@" || fail="$fail $name"; }
 run probe                "$out/probe.exe"
@@ -434,7 +437,7 @@ for repo in glaze native; do
     name="$repo-$(echo "${pkg#github.com/crgimenes/$repo}" | tr '/' '-' | sed 's/^-//')"
     name="${name%-}"
     GOOS=windows GOARCH=${ARCH:-arm64} CGO_ENABLED=0 \
-      go -C "$UPSTREAM_DIR/$repo" test -c -o "$out/$name.test.exe" "$pkg"
+      go -C "$UPSTREAM_DIR/$repo" test -c -ldflags="-s -w" -o "$out/$name.test.exe" "$pkg"
   done
 done
 fail=0

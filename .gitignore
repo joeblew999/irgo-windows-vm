@@ -70,3 +70,6 @@ go.work.sum
 # than relying on a global gitignore, because a contributor's machine is not
 # this one.
 .DS_Store
+
+# Agent worktrees (Claude Code isolation), never part of the repo.
+/.claude/worktrees/

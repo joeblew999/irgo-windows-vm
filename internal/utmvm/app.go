@@ -1,10 +1,13 @@
 package utmvm
 
 import (
+	"archive/zip"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +94,88 @@ func batchFile(argv []string, outFile, rcFile string) string {
 		"echo %ERRORLEVEL% > \"" + rcFile + "\"\r\n"
 }
 
+// Anything over pushZipMin goes compressed. utmctl file push moves about
+// 0.4 MB/s — measured 30 Sep 2026: a 3-byte file in 0.19 s, a 6.9 MB Go binary
+// in 17.8 s — so the time is the bytes, not the call. Zipped, that binary is
+// about 2.9 MB (stripped, 2.0 MB) and the push takes a third of the time; bsdtar,
+// which ships with Windows 11, expands it in the guest in well under a second.
 func Push(vmRef, localPath, guestPath string) error {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return err
+	}
+	if info.Size() < pushZipMin {
+		return pushRaw(vmRef, localPath, guestPath)
+	}
+	return pushZipped(vmRef, localPath, guestPath)
+}
+
+// pushZipMin is the size above which Push compresses. Batch files and scripts
+// stay raw: they are tiny, and zipping them would add an expand step for nothing.
+const pushZipMin = 256 << 10
+
+// pushZipped zips localPath on the host as one entry named after guestPath,
+// pushes the zip beside guestPath, and expands it there. tar checks every
+// entry's CRC, so a zero exit means the bytes arrived intact.
+func pushZipped(vmRef, localPath, guestPath string) error {
+	dir, name := guestPath[:strings.LastIndex(guestPath, `\`)], path.Base(strings.ReplaceAll(guestPath, `\`, "/"))
+	zipLocal, err := zipOne(localPath, name)
+	if err != nil {
+		return fmt.Errorf("compressing %s: %w", localPath, err)
+	}
+	defer func() { _ = os.Remove(zipLocal) }() // scratch
+	zipGuest := dir + `\` + scratchPrefix + name + ".zip"
+	if err := pushRaw(vmRef, zipLocal, zipGuest); err != nil {
+		return err
+	}
+	res, err := appExec(vmRef, []string{"tar", "-xf", zipGuest, "-C", dir}, time.Minute, func(string, ...any) {})
+	_, _ = Named(vmRef).Exec("cmd.exe", "/c", "del /q "+zipGuest)
+	if err != nil {
+		return fmt.Errorf("expanding %s in the guest: %w", zipGuest, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("expanding %s in the guest: tar exited %d: %s", zipGuest, res.ExitCode, res.Stdout)
+	}
+	return nil
+}
+
+// zipOne writes a temporary zip holding localPath as entry name, and returns
+// its path. Close on the writers is checked: that is where a full disk shows up.
+func zipOne(localPath, name string) (string, error) {
+	src, err := os.Open(localPath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = src.Close() }() // read-only
+	tmp, err := os.CreateTemp("", "irgo-push-*.zip")
+	if err != nil {
+		return "", err
+	}
+	fail := func(e error) (string, error) {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", e
+	}
+	zw := zip.NewWriter(tmp)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
+	if err != nil {
+		return fail(err)
+	}
+	if _, err := io.Copy(w, src); err != nil {
+		return fail(err)
+	}
+	if err := zw.Close(); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+// pushRaw streams localPath into the guest as it is.
+func pushRaw(vmRef, localPath, guestPath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
 		return err

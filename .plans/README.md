@@ -5,7 +5,11 @@ A plan must stand on its own: symptom, evidence, cause, the exact change, and ho
 
 ## Work order
 
-Nothing open. Done: [`done/`](done/) — upstream workflow restored (`upstream:*`), glaze#34 reported,
+| # | Plan | State |
+|---|---|---|
+| 1 | [`2026-09-30_1500_fast-dev-cycle.md`](2026-09-30_1500_fast-dev-cycle.md) — macOS-first loop, batched Windows gate, build tool once, poll not sleep, full logs, `vm:repair:test` | next |
+
+Earlier work is in Done: [`done/`](done/) — upstream workflow restored (`upstream:*`), glaze#34 reported,
 VM hardened (`vm-repair`, never-expiring password, fail-fast `-gui`).
 
 ## Working on glaze or native

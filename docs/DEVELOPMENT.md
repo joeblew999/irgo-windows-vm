@@ -335,7 +335,7 @@ user of those libraries and hides it. Example: `examples/conformance` (and
 `glaze-all`) carry one marked stand-in for the `ErrUnsupported` fix, to be
 deleted when a release contains it. A test for an upstream bug is never
 skipped to make a run green: it fails, and `glazecheck.KnownUpstream` names it
-as already reported (see [the conformance suite](#the-conformance-suite)). [UPSTREAM.md](UPSTREAM.md) is the ledger.
+as a known upstream bug (see [the conformance suite](#the-conformance-suite)). [UPSTREAM.md](UPSTREAM.md) is the ledger.
 
 ### Do not
 

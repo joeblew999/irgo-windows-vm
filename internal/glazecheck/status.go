@@ -106,7 +106,7 @@ func (s Section) Verdict() string {
 		return "UNEXPECTED PASS: known upstream failure now passes: " + strings.Join(xpass, " ") +
 			" — if the fix is released, remove it from glazecheck.KnownUpstream and update docs/UPSTREAM.md"
 	case len(known) > 0:
-		return "KNOWN BUGS ONLY: " + strings.Join(known, " ") + " fail, as already reported upstream; nothing else did"
+		return "KNOWN BUGS ONLY: " + strings.Join(known, " ") + " fail, known upstream bugs listed in docs/UPSTREAM.md; nothing else did"
 	case len(s.Results) == 0:
 		return "CANNOT TELL: nothing ran"
 	default:

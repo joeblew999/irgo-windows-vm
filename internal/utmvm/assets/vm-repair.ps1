@@ -9,12 +9,21 @@
 #  2. A WebView2 self-update interrupted by a shutdown leaves EBWebView naming a
 #     deleted version folder; glaze then reports the runtime "not found"
 #     (crgimenes/glaze#34) while a working runtime sits beside it.
+#  3. Windows Update scheduled a forced restart nine minutes out in the middle
+#     of a test run. No auto-restart with a user logged on; notify, never
+#     install on its own. autounattend.xml sets the same on new VMs.
 param([string]$User = 'dev')
 $ErrorActionPreference = 'Stop'
 
 net accounts /maxpwage:unlimited | Out-Null
 Set-LocalUser -Name $User -PasswordNeverExpires $true
 "password: ok ($User never expires)"
+
+$au = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+New-Item -Path $au -Force | Out-Null
+Set-ItemProperty -Path $au -Name NoAutoRebootWithLoggedOnUsers -Value 1 -Type DWord
+Set-ItemProperty -Path $au -Name AUOptions -Value 2 -Type DWord
+'windows update: ok (no auto-restart, notify only)'
 
 $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 $reg = (Get-ItemProperty -Path $key -Name EBWebView -ErrorAction SilentlyContinue).EBWebView

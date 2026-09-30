@@ -16,9 +16,10 @@ import (
 //go:embed assets/vm-repair.ps1
 var vmRepairScript string
 
-// VMRepair fixes the two things that silently break -gui runs on a VM that has
-// lived a while: an expired password (AutoLogon stops, no desktop session) and
-// a stale WebView2 registration (every webview reports the runtime missing).
+// VMRepair fixes what silently breaks -gui runs on a VM that has
+// lived a while: an expired password (AutoLogon stops, no desktop session), a
+// stale WebView2 registration (every webview reports the runtime missing), and
+// Windows Update restarting the VM on its own in the middle of a run.
 //
 // It runs as SYSTEM through the guest agent, so it works exactly when it is
 // needed: nobody can log in, but the agent still answers. With reboot, the VM

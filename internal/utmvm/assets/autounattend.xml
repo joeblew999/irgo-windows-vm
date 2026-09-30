@@ -235,6 +235,22 @@
           <CommandLine>powershell -NoProfile -Command Set-LocalUser -Name dev -PasswordNeverExpires 1</CommandLine>
           <Description>dev: password never expires</Description>
         </SynchronousCommand>
+        <!-- Windows Update must never restart the VM on its own. Seen 30 Sep
+             2026: "We'll restart and install this update at 7:04 AM", nine
+             minutes out, in the middle of a test run. No auto-restart while
+             dev is logged on (always, with AutoLogon), and download/install
+             only when asked (AUOptions 2 = notify). vm-repair applies the same
+             to an existing VM. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>8</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v NoAutoRebootWithLoggedOnUsers /t REG_DWORD /d 1 /f</CommandLine>
+          <Description>Windows Update: never restart with dev logged on</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>9</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v AUOptions /t REG_DWORD /d 2 /f</CommandLine>
+          <Description>Windows Update: notify, do not install on its own</Description>
+        </SynchronousCommand>
         <!-- Marker the host can look for to know the install finished. -->
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
@@ -247,13 +263,13 @@
              simply never runs. `for` expands the version-stamped filename to a
              literal path first. -->
         <SynchronousCommand wcm:action="add">
-          <Order>8</Order>
+          <Order>10</Order>
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->
         <SynchronousCommand wcm:action="add">
-          <Order>9</Order>
+          <Order>11</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

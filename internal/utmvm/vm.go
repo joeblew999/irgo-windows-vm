@@ -401,6 +401,16 @@ func registerBundle(staged, name string) error {
 	// success, and a half-registered nothing on failure. Removed through
 	// removeStaged, which clears the immutable flag first.
 	defer removeStaged(staged)
+	// Every file UTM is about to copy, and its length, so the copy can be
+	// checked file by file afterwards (stat works in UTM's folder).
+	want := map[string]int64{}
+	if entries, err := os.ReadDir(filepath.Join(staged, bundleData)); err == nil {
+		for _, e := range entries {
+			if fi, iErr := e.Info(); iErr == nil && !fi.IsDir() {
+				want[e.Name()] = fi.Size()
+			}
+		}
+	}
 	out, err := utmScript(fmt.Sprintf(importScript, staged), 10*time.Minute)
 	if err != nil {
 		return fmt.Errorf("having UTM import %s: %w", staged, err)
@@ -423,6 +433,13 @@ func registerBundle(staged, name string) error {
 	if _, err := os.Stat(DiskPath(b)); err != nil {
 		return fmt.Errorf("UTM registered %s, but not at %s (an unregistered bundle of that name "+
 			"is probably in UTM's folder; remove it in Finder): %w", name, Home(b), err)
+	}
+	for f, n := range want {
+		p := filepath.Join(b, bundleData, f)
+		fi, err := os.Stat(p)
+		if err != nil || fi.Size() != n {
+			return fmt.Errorf("UTM imported %s, but %s is not the %d bytes staged (%v)", name, Home(p), n, err)
+		}
 	}
 	return nil
 }

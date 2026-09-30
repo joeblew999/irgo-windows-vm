@@ -184,7 +184,10 @@ The document therefore loads from `https://app.localhost/`, and an absolute
 `app://home/app.js` inside it names a scheme WebView2 has never heard of.
 
 **Reproduction.** Windows 11 ARM64, `examples/verify` loading the same asset
-twice, once absolutely and once relatively:
+twice, once absolutely and once relatively (the output below is that program's;
+it is now `TestAppScheme` in `examples/conformance`, where
+`TestAppScheme/absolute_subresources` fails on Windows and is listed in
+`glazecheck.KnownUpstream`):
 
 ```
 scheme handler served: app://home/index.html -> text/html
@@ -221,8 +224,8 @@ one browser process. Design, checks and the upstream text:
 `.plans/2026-09-30_1745_glaze-1b-upstream.md`.
 
 **Workaround for glaze users today:** reference assets **relatively**. It works
-on both platforms. `examples/verify-events` does exactly that, and with it the
-Events bridge passes completely on Windows.
+on both platforms. `TestEvents` in `examples/conformance` does exactly that,
+and with it the Events bridge passes completely on Windows.
 
 **Status.** `PATCHED LOCALLY` — branch `fix/windows-custom-scheme` (`75f3ea1`,
 on `origin/trunk` = v0.0.61) in `$UPSTREAM_DIR/glaze`, not pushed. Checked on
@@ -342,7 +345,8 @@ regression. The likely trigger — inferred, not proven — is an update interru
 by a shutdown, which end users can hit after a power cut.
 
 **Reproduction** (in the VM, as SYSTEM): point the registration at a folder that
-does not exist, then run `examples/verify` against released glaze.
+does not exist, then run `examples/verify` (now `TestAppScheme` in
+`examples/conformance`) against released glaze.
 
 ```
 reg add "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v EBWebView /t REG_SZ /d "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\1.0.0.0" /f

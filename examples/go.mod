@@ -9,6 +9,5 @@ go 1.27.1
 require (
 	github.com/crgimenes/glaze v0.0.61
 	github.com/crgimenes/native v0.1.15
+	github.com/ebitengine/purego v0.11.1
 )
-
-require github.com/ebitengine/purego v0.11.1 // indirect

@@ -184,8 +184,13 @@ func probeOpenURL() {
 	// A file:// URL is what makes calling it honest: it goes through the real
 	// backend — NSWorkspace on macOS, ShellExecuteW on Windows — without
 	// launching a browser or touching the network. A directory is used rather
-	// than a file so the handler is the file manager on both platforms and
-	// nothing is left open that a user has to dismiss.
+	// than a file so the handler is the file manager on both platforms.
+	//
+	// Each window it opens is closed again before the next step, and checked
+	// gone (cleanup.go): this runs unattended on the owner's own Mac, and
+	// every run used to leave windows there. The directory is removed only
+	// after that — removing it while Explorer was still navigating to it is
+	// what put a "Location is not available" box on the VM's desktop.
 	dir, err := os.MkdirTemp("", "irgo-openurl-*")
 	if err != nil {
 		record("openurl.Open", err, "")
@@ -194,7 +199,8 @@ func probeOpenURL() {
 	}
 	defer os.RemoveAll(dir)
 
-	record("openurl.Open", openurl.Open(fileURL(dir)), "opened a file:// URL in the default handler")
+	recordOpened("openurl.Open", "opened a file:// URL in the file manager",
+		func() error { return openurl.Open(fileURL(dir)) }, dir, dir)
 
 	// The package's stated safety boundary: Open hands only http, https, mailto
 	// and file URLs to the OS, so a hostile string cannot reach an arbitrary
@@ -210,7 +216,27 @@ func probeOpenURL() {
 		record("openurl.Open/refused", fmt.Errorf("refused, but not with ErrScheme: %w", err), "")
 	}
 
-	record("openurl.Reveal", openurl.Reveal(dir), "revealed a directory in the file manager")
+	// Reveal shows the directory selected in its parent folder, so that is
+	// the window it opens.
+	recordOpened("openurl.Reveal", "revealed a directory in the file manager",
+		func() error { return openurl.Reveal(dir) }, dir, filepath.Dir(dir), dir)
+}
+
+// recordOpened runs a call that opens a file-manager window, closes what it
+// opened, and records one row for both: the capability is only OK if the call
+// worked AND nothing was left on the screen.
+func recordOpened(name, detail string, open func() error, target string, places ...string) {
+	openErr, did, cleanErr := openAndClose(open, target, places...)
+	switch {
+	case openErr != nil:
+		record(name, openErr, "")
+	case cleanErr != nil:
+		record(name, fmt.Errorf("window left behind: %w", cleanErr), "")
+	case did.reused:
+		record(name, nil, detail+"; shown in a window already open, so none to close")
+	default:
+		record(name, nil, fmt.Sprintf("%s; its window closed again (%d)", detail, did.closed))
+	}
 }
 
 // --- windowed capabilities: need a desktop session -------------------------
@@ -298,24 +324,42 @@ func probeAppIcon(w glaze.WebView) {
 	record("glaze.SetAppIcon", err, "")
 }
 
+// fileDialogTitle is also how the dialog is found again on Windows to close it.
+const fileDialogTitle = "irgo probe (will close itself)"
+
 func probeFileDialog(w glaze.WebView) {
 	// Dialogs are modal and block until dismissed, so this cannot wait for a
 	// result without a human. What is worth testing is whether presenting one
 	// crashes or errors — the COM and WinRT plumbing behind it is the fragile
 	// part, not the user's eventual click.
+	//
+	// Then it is dismissed, the way a user cancelling it would, and OpenFile
+	// must return. It used to be "left open, process exits": the process took
+	// the dialog with it, but it was a window on the owner's screen until
+	// then, and whether the panel really went away was never checked.
 	done := make(chan error, 1)
 	go func() {
-		_, err := w.OpenFile(glaze.FileDialogOptions{Title: "irgo probe (will close itself)"})
+		_, err := w.OpenFile(glaze.FileDialogOptions{Title: fileDialogTitle})
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		// Dismissed or refused straight away; a cancelled dialog is not an error.
 		record("glaze.OpenFile", err, "dialog presented and returned")
-	case <-time.After(4 * time.Second):
+		return
+	case <-time.After(3 * time.Second):
 		// Still open means it was presented successfully, which is the result
-		// we are after.
-		record("glaze.OpenFile", nil, "dialog presented (left open, process exits)")
+		// we are after. Now close it.
+	}
+	if err := dismissFileDialog(w, fileDialogTitle); err != nil {
+		record("glaze.OpenFile", fmt.Errorf("presented, then could not be dismissed: %w", err), "")
+		return
+	}
+	select {
+	case err := <-done:
+		record("glaze.OpenFile", err, "dialog presented, then dismissed as cancelled")
+	case <-time.After(5 * time.Second):
+		record("glaze.OpenFile", errors.New("presented and asked to close, but OpenFile had not returned 5s later: the dialog is still up"), "")
 	}
 }
 
@@ -367,16 +411,22 @@ func main() {
 }
 
 func runReport() {
-	// openurl does not need the window, so run it first: if the windowed half
-	// dies, there is still a partial report.
-	probeOpenURL()
-
+	// glaze.New first, before anything else on the main goroutine. openurl
+	// used to run here ahead of it, so that a windowed half that died still
+	// left a partial report; now that it waits for the file manager's windows
+	// and closes them (seconds, and several osascript runs), the main
+	// goroutine was moved to another OS thread in the meantime, and New then
+	// ran AppKit off the main thread: SIGTRAP inside [NSApp run], twice in
+	// fourteen runs on 30 Sep 2026, the stack showing goroutine 1 on m=4.
+	// glaze pins the thread when New is called rather than in an init, so
+	// whatever runs first decides. That is glaze's to fix (docs/UPSTREAM.md
+	// §4); this order is what a released glaze requires.
 	w, err := glaze.New(false)
 	if err != nil {
 		record("glaze.New", err, "no window: the rest cannot be tested")
+		probeOpenURL()
 		os.Exit(report())
 	}
-	defer w.Destroy()
 	w.SetTitle("irgo windowed probe")
 	w.SetSize(520, 320, glaze.HintNone)
 	w.SetHtml(`<!doctype html><meta charset="utf-8">
@@ -384,21 +434,40 @@ func runReport() {
 <h2>irgo windowed probe</h2><p>Exercising every capability that needs a window, then exiting.</p>
 <p style="color:#666">Run with no flags to try them by hand instead.</p></body>`)
 
+	code := make(chan int, 1)
 	go func() {
 		// Give the window a moment to exist before touching anything that needs
 		// a handle.
 		time.Sleep(2 * time.Second)
+		// openurl needs no window, only the desktop session; it is here
+		// because of the ordering above, not because it touches w.
+		probeOpenURL()
 		probeAppIcon(w)
 		probeNoCapture(w)
 		probeMenu(w)
 		probeTray(w)
 		probeFileDialog(w)
-		code := report()
+		code <- report()
 		w.Terminate()
-		// Terminate unwinds the run loop; exit once it has.
-		time.Sleep(500 * time.Millisecond)
-		os.Exit(code)
 	}()
 
 	w.Run()
+	// The exit code is taken from the report here, on the main goroutine,
+	// after Run has returned. It used to be os.Exit(code) in the goroutine
+	// above, half a second after Terminate — but Terminate makes Run return,
+	// runReport returned, main returned, and the process exited 0 before that
+	// half second was up. Measured 30 Sep 2026: "1 capability/capabilities
+	// FAILED", exit status 0. glaze-check reads the exit status, so a FAILED
+	// row on the Mac was recorded as PASS.
+	var c int
+	select {
+	case c = <-code:
+	case <-time.After(30 * time.Second):
+		// Run returned without being asked to (the window was closed), and the
+		// probes, which need the loop, cannot finish.
+		fmt.Println("the run loop ended before the probes finished")
+		c = 1
+	}
+	w.Destroy()
+	os.Exit(c)
 }

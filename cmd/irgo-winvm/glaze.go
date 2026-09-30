@@ -64,7 +64,10 @@ func runGlazeCheck(v values, _ []string) error {
 		}
 		defer release()
 
-		appCreate, _ := find("app-create")
+		appCreate, ok := find("app-create")
+		if !ok {
+			return errors.New("glaze-check: no app-create command to run the examples with")
+		}
 		o.Target = glazecheck.TargetWindows
 		o.Platform = "windows/arm64, VM " + e.Name + " (through app-create)"
 		o.Run = func(p glazecheck.Program, exe string) error {

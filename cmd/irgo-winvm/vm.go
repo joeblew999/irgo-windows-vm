@@ -22,7 +22,10 @@ func runVMCreate(v values, _ []string) error {
 	name, install, timeout := v.String("vm"), v.Bool("install"), v.Duration("timeout")
 	say := utmvm.Printer("vm-create")
 
-	bundle, _ := utmvm.BundlePath(name)
+	bundle, err := utmvm.BundlePath(name)
+	if err != nil {
+		return err
+	}
 	say("vm:     %s", name)
 	say("bundle: %s", utmvm.Home(bundle))
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
@@ -56,7 +59,10 @@ func runVMDelete(v values, _ []string) error {
 	name, force := v.String("vm"), v.Bool("force")
 	say := utmvm.Printer("vm-delete")
 
-	bundle, _ := utmvm.BundlePath(name)
+	bundle, err := utmvm.BundlePath(name)
+	if err != nil {
+		return err
+	}
 	say("STEP 1/2  the VM")
 	say("          %s", utmvm.Home(bundle))
 
@@ -124,7 +130,10 @@ func ensureAgent(e utmvm.Entry, say func(string, ...any)) error {
 		return nil
 	}
 	say("VM not answering; recovering")
-	bundle, _ := utmvm.BundlePath(e.Name)
+	bundle, err := utmvm.BundlePath(e.Name)
+	if err != nil {
+		return err
+	}
 	return utmvm.EnsureReady(e.UUID, bundle, 10*time.Minute, say)
 }
 

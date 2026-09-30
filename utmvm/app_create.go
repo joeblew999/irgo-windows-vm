@@ -62,12 +62,19 @@ func (o AppOptions) says() func(string, ...any) {
 // there. GUI routes through a scheduled task in the logged-in user's session
 // instead, which has a desktop.
 func AppCreate(vmRef, localPath string, o AppOptions) (AppResult, error) {
+	say := o.says()
+	if o.GUI {
+		// Before pushing: a -gui launch with nobody logged in never runs and
+		// would wait the whole timeout.
+		if err := requireDesktopSession(vmRef, o.User, say); err != nil {
+			return AppResult{}, err
+		}
+	}
 	dir := guestTemp
 	if o.GUI {
 		// Public, not Windows\Temp: the interactive user must be able to execute it.
 		dir = guestPublic
 	}
-	say := o.says()
 	guestPath := dir + `\` + path.Base(strings.ReplaceAll(localPath, `\`, "/"))
 	say("pushing %s to %s", path.Base(strings.ReplaceAll(localPath, `\`, "/")), guestPath)
 	if err := Push(vmRef, localPath, guestPath); err != nil {

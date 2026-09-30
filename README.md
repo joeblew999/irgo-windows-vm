@@ -251,6 +251,13 @@ to everyone using those libraries. Worse, the workaround hides it: the probe
 goes green, the report says the capability works, and the next person to hit it
 starts from nothing.
 
+If `-gui` runs fail on a VM that has been around a while, run
+`irgo-winvm vm-repair -reboot`: Windows expires local passwords after 42 days
+(AutoLogon then stops, so there is no desktop session), and an interrupted
+WebView2 update can leave its registration naming a deleted folder. `vm-repair`
+fixes both as SYSTEM, and `app-create -gui` now refuses up front, naming the
+problem, when nobody is logged in instead of waiting out its timeout.
+
 How a fix is made and proven, from this repo:
 
 ```sh

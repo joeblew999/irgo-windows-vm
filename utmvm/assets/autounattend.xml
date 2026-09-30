@@ -220,6 +220,21 @@
           <CommandLine>powercfg /change monitor-timeout-ac 0</CommandLine>
           <Description>Disable display timeout</Description>
         </SynchronousCommand>
+        <!-- Never let dev's password expire. Local passwords expire after 42
+             days by default; AutoLogon then stops at "Your password has
+             expired", no desktop session exists, and every -gui run hangs
+             (.plans/2026-09-30_1215_gui-probes-blocked-by-password-expiry.md).
+             net accounts covers every local account; Set-LocalUser pins dev. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <CommandLine>net accounts /maxpwage:unlimited</CommandLine>
+          <Description>Local passwords never expire</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <CommandLine>powershell -NoProfile -Command Set-LocalUser -Name dev -PasswordNeverExpires 1</CommandLine>
+          <Description>dev: password never expires</Description>
+        </SynchronousCommand>
         <!-- Marker the host can look for to know the install finished. -->
         <!-- Guest tools give the QEMU guest agent, and with it utmctl exec and
              utmctl ip-address. Without this the VM boots but cannot be driven
@@ -232,13 +247,13 @@
              simply never runs. `for` expands the version-stamped filename to a
              literal path first. -->
         <SynchronousCommand wcm:action="add">
-          <Order>6</Order>
+          <Order>8</Order>
           <CommandLine>cmd /c for %i in (D E F G H) do @for %f in (%i:\utm-guest-tools-*.exe) do @start /wait "" "%f" /S</CommandLine>
           <Description>Install UTM guest tools (QEMU guest agent + SPICE)</Description>
         </SynchronousCommand>
         <!-- Written last, so its presence means every step above succeeded. -->
         <SynchronousCommand wcm:action="add">
-          <Order>7</Order>
+          <Order>9</Order>
           <CommandLine>cmd /c echo unattend-complete &gt; C:\unattend-complete.txt</CommandLine>
           <Description>Signal completion</Description>
         </SynchronousCommand>

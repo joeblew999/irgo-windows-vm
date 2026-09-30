@@ -105,6 +105,7 @@ var All = []Command{
 	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
+	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Mutates: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},

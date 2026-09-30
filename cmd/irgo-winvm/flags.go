@@ -62,6 +62,15 @@ func (v values) Duration(name string) time.Duration {
 	return d
 }
 
+// vmRepairFlags declares what vm-repair accepts.
+func vmRepairFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-repair", flag.ContinueOnError)
+	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	fs.String("user", "dev", "the AutoLogon user whose password must never expire")
+	fs.Bool("reboot", false, "restart the VM afterwards so AutoLogon runs again")
+	return fs
+}
+
 // vmScreenFlags declares what vm-screen accepts.
 func vmScreenFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
@@ -141,6 +150,7 @@ func mcpFlags() *flag.FlagSet {
 // here, and an entry naming nothing declared.
 var flagSets = map[string]func() *flag.FlagSet{
 	"vm-screen":  vmScreenFlags,
+	"vm-repair":  vmRepairFlags,
 	"vm-create":  vmCreateFlags,
 	"vm-delete":  vmDeleteFlags,
 	"app-create": appCreateFlags,

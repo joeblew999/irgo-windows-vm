@@ -121,6 +121,7 @@ var handlers = map[string]func([]string) error{
 	"app-delete": runAppDelete,
 
 	"vm-screen": runVMScreen,
+	"vm-repair": runVMRepair,
 	"doctor":    runDoctor,
 	"help":      runHelp,
 	"version":   runVersion,
@@ -413,6 +414,9 @@ When something is wrong:
 
      vm-screen    save a PNG of the VM's screen — the only way to see a
                   boot that is stuck, since it looks identical from here
+     vm-repair    fix what stops -gui runs on a VM that has lived a while:
+                  an expired password (no desktop session) and a stale
+                  WebView2 registration; -reboot restarts it afterwards
      doctor       what is installed, what is missing, and where this run
                   wrote its log and screenshots
 
@@ -998,6 +1002,33 @@ func runISODelete(args []string) error {
 // The only thing that answers "what is it actually doing" when a VM is stuck:
 // a failed boot leaves a UEFI prompt nobody sees, and a stalled install looks
 // exactly like a working one from the host.
+// runVMRepair fixes an expired password and a stale WebView2 registration.
+//
+// Both leave the VM answering the agent while every -gui run fails, so it runs
+// through the agent as SYSTEM, which is exactly the access that still works.
+func runVMRepair(args []string) error {
+	fs := vmRepairFlags()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	v := values{fs}
+	name, user, reboot := v.String("vm"), v.String("user"), v.Bool("reboot")
+	say := utmvm.Printer("vm-repair")
+	e, err := utmvm.Find(name)
+	if err != nil {
+		return err
+	}
+	vm := utmvm.Named(e.UUID)
+	if !vm.AgentReady() {
+		say("VM not answering; recovering")
+		if err := utmvm.EnsureReady(e.UUID, bundleOf(e), 10*time.Minute, say); err != nil {
+			return err
+		}
+	}
+	say("vm:     %s", e.Name)
+	return utmvm.VMRepair(e.UUID, user, reboot, say)
+}
+
 func runVMScreen(args []string) error {
 	fs := vmScreenFlags()
 	if err := fs.Parse(args); err != nil {

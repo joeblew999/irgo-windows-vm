@@ -59,6 +59,18 @@ Use the batch-file route (`utmctl file push` + `utmctl exec`), as in the passwor
    (exit 0 re-registers). Re-run `verify` with the patch → PASS (registry path, unchanged behaviour).
 5. Glaze's own checks: `CGO_ENABLED=0 go build` for every GOOS/GOARCH they list, `go vet`, their tests.
 
+## Setup (glaze side — verified 2026-09-30)
+
+- Local clone: `~/workspace/go/src/github.com/crgimenes/glaze`. Upstream's default branch is now
+  **`trunk`**; the clone was left on the old `master` (last commit 2026-08-03). First:
+  `git fetch && git switch trunk && git pull` (`git remote set-head origin -a` already done).
+- No fork exists yet: `gh repo fork crgimenes/glaze --remote --remote-name fork` → `joeblew999/glaze`.
+- Branch from `trunk`: `git switch -c fix/webview2-stale-registration`.
+- glaze has no mise (a `Makefile`); do not add one — their repo, their conventions. `trunk`'s go.mod
+  says `go 1.27.1`, which the global mise Go (1.27.1) satisfies.
+- Their gates (CONTRIBUTING + Makefile): `make all` (build, vet, test), `make lint`, `CGO_ENABLED=0`
+  cross-build for every GOOS/GOARCH, no new dependency (purego is the only one), one runnable test.
+
 ## Upstream steps
 
 1. Open an issue on crgimenes/glaze: symptom, the two registry values, the A/B (v0.0.47 and v0.0.61),

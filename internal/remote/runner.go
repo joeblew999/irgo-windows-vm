@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 )
 
 // Executor runs one job on this Mac. The serve command's executor clones a
@@ -127,14 +128,29 @@ func (l *logBuf) changed() ([]byte, bool) {
 	return append([]byte(nil), l.b.Bytes()...), true
 }
 
+// Owner is whose a job's work on this Mac is, in its clone's owner record
+// and in the ledger: remote:<caller>/<the job id's first 12 digits>.
+func Owner(j Job) string { return "remote:" + j.Owner + "/" + j.ID[:min(12, len(j.ID))] }
+
+// Record tells the ledger about a job's work on this Mac: e under the job's
+// id as its op, its Owner, client "remote" and command "serve". serve calls
+// the clone and run code directly, not through the command path that records
+// every command, so this is what names a remote job in the ledger.
+func Record(j Job, e ledger.Event) {
+	e.Op, e.Owner, e.Client, e.Command = j.ID, Owner(j), "remote", "serve"
+	ledger.Emit(e)
+}
+
 // RunJob runs one claimed job and reports it: the binary down, the executor
 // under a heartbeat, the log up as it grows, the files, then the result.
 // Whatever happens, the job ends reported or with its lease left to run out,
-// which the Worker turns into "lost".
+// which the Worker turns into "lost". The ledger hears its start and its end,
+// with the exit code and how long it took.
 func RunJob(ctx context.Context, c *Client, ex Executor, j Job, o ServeOptions) {
 	o.defaults()
 	say := o.Say
 	start := time.Now()
+	Record(j, ledger.Event{Type: ledger.Start, Detail: j.Spec.Kind + " " + j.Spec.Name})
 	say("job %s from %s: %s %s (gui=%v, %d args, timeout %ds)", j.ID, j.Owner, j.Spec.Kind, j.Spec.Name, j.Spec.GUI, len(j.Spec.Args), j.Spec.TimeoutS)
 	log := &logBuf{}
 	logf := func(format string, a ...any) {
@@ -188,6 +204,8 @@ func RunJob(ctx context.Context, c *Client, ex Executor, j Job, o ServeOptions) 
 	wg.Wait()
 
 	res := report(ctx, c, j, out, logf)
+	code, took := int64(res.ExitCode), time.Since(start).Milliseconds()
+	Record(j, ledger.Event{Type: ledger.End, Exit: &code, DurationMS: &took, Detail: res.Message})
 	logf("finished: exit %d (%s) in %s", res.ExitCode, res.Outcome, time.Since(start).Round(time.Second))
 	if b, ok := log.changed(); ok {
 		if err := c.PutLog(ctx, j.ID, b); err != nil {

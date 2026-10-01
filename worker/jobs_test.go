@@ -118,6 +118,67 @@ func TestJobsAuth(t *testing.T) {
 	}
 }
 
+// The admin token reads any caller's result files through its own route,
+// and only there: a caller's token is refused on it, so a caller still
+// cannot read another's files, and the admin token is refused on the
+// caller's route. A job that does not exist, or a name that is not a result
+// file, is 404 to the admin too.
+//
+// Negative control (by hand, 1 Oct 2026): making jobAdminFile pass
+// ownedBy(env.jobOwner(r)), as jobFile does, fails "the admin reads alice's
+// file" and "bob's" with 404; making jobFile pass anyOwner fails "bob cannot
+// read alice's file on his" here and "another caller's file" in
+// TestJobLifecycle. Restored.
+func TestJobAdminFile(t *testing.T) {
+	// No caller is not every caller (dropping `caller != ""` fails this).
+	if ownedBy("")(&Job{}) {
+		t.Fatal("an empty caller name owns a job with no owner")
+	}
+	h, _, _ := jobsEnv(jobVars)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), "pic"...)
+	files := map[string]string{}
+	for _, tok := range []string{"tok-alice", "tok-bob"} {
+		id := submit(t, h, tok)
+		if w := jdo(h, "POST", "/api/runner/claim", "tok-runner", nil); w.Code != 200 || decodeJob(t, w).ID != id {
+			t.Fatalf("claim: %d %s", w.Code, w.Body)
+		}
+		r := "/api/runner/jobs/" + id
+		body := append(append([]byte(nil), png...), tok...)
+		if w := jdo(h, "PUT", r+"/files/desktop.png", "tok-runner", body, wire.HeaderJobSHA256, sum(body)); w.Code != 201 {
+			t.Fatalf("file: %d %s", w.Code, w.Body)
+		}
+		if w := jdo(h, "POST", r+"/finish", "tok-runner", []byte(`{"exit_code":0,"outcome":"ok","files":["desktop.png"]}`)); w.Code != 200 {
+			t.Fatalf("finish: %d %s", w.Code, w.Body)
+		}
+		files[tok] = id
+	}
+	admin := func(id, name string) string { return wire.MustFind(wire.RouteJobAdminFile).URL("", id, name) }
+	for _, c := range []struct {
+		name, path, token string
+		want              int
+		body              string
+	}{
+		{"the admin reads alice's file", admin(files["tok-alice"], "desktop.png"), "tok-admin", 200, string(png) + "tok-alice"},
+		{"and bob's", admin(files["tok-bob"], "desktop.png"), "tok-admin", 200, string(png) + "tok-bob"},
+		{"a job that does not exist", admin("0123456789abcdef0123456789abcdef", "desktop.png"), "tok-admin", 404, ""},
+		{"a file the job does not have", admin(files["tok-alice"], "stdout.txt"), "tok-admin", 404, ""},
+		{"a name that is not a result file", admin(files["tok-alice"], "input"), "tok-admin", 404, ""},
+		{"bob cannot read alice's file on the admin route", admin(files["tok-alice"], "desktop.png"), "tok-bob", 401, ""},
+		{"nor alice her own", admin(files["tok-alice"], "desktop.png"), "tok-alice", 401, ""},
+		{"nor the runner", admin(files["tok-alice"], "desktop.png"), "tok-runner", 401, ""},
+		{"bob cannot read alice's file on his", "/api/jobs/" + files["tok-alice"] + "/files/desktop.png", "tok-bob", 404, ""},
+		{"the admin token is not a caller's", "/api/jobs/" + files["tok-alice"] + "/files/desktop.png", "tok-admin", 401, ""},
+	} {
+		w := jdo(h, "GET", c.path, c.token, nil)
+		if w.Code != c.want || c.body != "" && w.Body.String() != c.body {
+			t.Errorf("%s: %d %q, want %d %q", c.name, w.Code, w.Body, c.want, c.body)
+		}
+		if c.want == 200 && (w.Header().Get("Content-Type") != "image/png" || w.Header().Get(wire.HeaderJobSHA256) != sum([]byte(c.body))) {
+			t.Errorf("%s: headers %v", c.name, w.Header())
+		}
+	}
+}
+
 func TestJobsUnconfiguredRefuses(t *testing.T) {
 	h, b, _ := jobsEnv(nil)
 	for _, p := range []string{"/api/jobs", "/api/runner/claim", "/api/mcp"} {

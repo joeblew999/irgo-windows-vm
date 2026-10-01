@@ -129,7 +129,7 @@ func mcpDeps() mcpserver.Deps {
 				return "", err
 			}
 			release()
-			s, err := job.Start(name, jobArgs(v, args))
+			s, err := job.Start(name, jobArgs(v, args), mcpserver.ClientName(ctx))
 			if err != nil {
 				return "", err
 			}

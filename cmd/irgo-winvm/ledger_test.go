@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joeblew999/irgo-windows-vm/internal/job"
 	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 )
 
@@ -64,6 +65,37 @@ func TestCommandsAreRecorded(t *testing.T) {
 	}
 	if st := byType["status/end"]; st.Client != "claude-code" || st.VM != "" || st.Exit == nil || *st.Exit != 0 {
 		t.Errorf("status over MCP: %+v", st)
+	}
+}
+
+// A detached job started over MCP is a new process with no MCP connection:
+// it records the client the server handed it in job.ClientEnv, not "cli".
+// The command line, with nothing handed over, is still "cli".
+//
+// Negative control (by hand, 1 Oct 2026): making runTool pass "" again fails
+// this with client "cli" for the job child; restored.
+func TestAJobChildRecordsItsMCPClient(t *testing.T) {
+	rc := &recorder{}
+	srv := httptest.NewServer(rc)
+	defer srv.Close()
+	useLedger(t, srv.URL)
+
+	t.Setenv(job.ClientEnv, "claude-code")
+	_ = runTool("status", nil) // as the job child runs its command
+	t.Setenv(job.ClientEnv, "")
+	_ = run([]string{"status"})
+	ledger.DrainDefault(2 * time.Second)
+
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	var clients []string
+	for _, e := range rc.events {
+		if e.Type == ledger.End {
+			clients = append(clients, e.Client)
+		}
+	}
+	if len(clients) != 2 || clients[0] != "claude-code" || clients[1] != "cli" {
+		t.Fatalf("clients of the two ends: %q, want the job child's claude-code then the command line's cli", clients)
 	}
 }
 

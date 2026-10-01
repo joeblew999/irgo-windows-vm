@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 	"github.com/joeblew999/irgo-windows-vm/wire"
@@ -105,7 +106,7 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	// The shared Mac's admission, as vm-create's: refused with no-room when
 	// another VM would leave too little memory or disk, and the clone
 	// recorded as the job's caller's, so status and vm-reap see whose it is.
-	owner := utmvm.Caller{ID: "remote:" + j.Owner + "/" + j.ID[:12], Source: "remote job"}
+	owner := utmvm.Caller{ID: remote.Owner(j), Source: "remote job"}
 	finish, err := utmvm.BeginCreate(vm, owner, false, e.overcommit, say)
 	if err != nil {
 		return fail(err, "admitting a VM for the job")
@@ -115,13 +116,14 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	ok, err := utmvm.CloneFromGolden(vm, say)
 	// Deleted whatever happened from here on, cancellation included: a
 	// clone that failed to boot is still a clone.
-	defer e.deleteVM(vm, say)
+	defer e.deleteVM(j, vm, say)
 	switch {
 	case err != nil:
 		return fail(err, "cloning the golden image")
 	case !ok:
 		return remote.Outcome{Code: command.CodeNotRun, Message: "this Mac has no golden image; serve never installs Windows for a job"}
 	}
+	remote.Record(j, ledger.Event{Type: ledger.VMCreate, VM: vm})
 	say("clone ready in %s", time.Since(t0).Round(time.Second))
 	if ctx.Err() != nil {
 		return remote.Outcome{Code: command.CodeNotRun, Message: "stopped before it ran: " + context.Cause(ctx).Error()}
@@ -286,9 +288,10 @@ func test2json(raw []byte) ([]byte, error) {
 	return b, nil
 }
 
-// deleteVM removes the job's clone and checks it is gone. A clone that
-// survives is said loudly: it holds disk and, if running, 8 GiB of RAM.
-func (e macExecutor) deleteVM(vm string, say func(string, ...any)) {
+// deleteVM removes the job's clone and checks it is gone, and only then
+// tells the ledger. A clone that survives is said loudly: it holds disk and,
+// if running, 8 GiB of RAM.
+func (e macExecutor) deleteVM(j remote.Job, vm string, say func(string, ...any)) {
 	say("deleting %s", vm)
 	if _, err := utmvm.Find(vm); errors.Is(err, utmvm.ErrNoVM) {
 		say("%s was never registered; nothing to delete", vm)
@@ -304,6 +307,7 @@ func (e macExecutor) deleteVM(vm string, say func(string, ...any)) {
 		e.say("job VM %s is still there after vm-delete", vm)
 		return
 	}
+	remote.Record(j, ledger.Event{Type: ledger.VMDelete, VM: vm})
 	if err := utmvm.ForgetVM(vm); err != nil {
 		say("forgetting %s's owner record: %v", vm, err)
 	}

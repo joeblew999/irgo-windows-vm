@@ -15,7 +15,7 @@ import (
 )
 
 // The remote job queue's routes (wire/jobs.go): a caller's (ScopeJobs), the
-// admin's list, and the Mac's (ScopeJobsRunner). internal/remote waits,
+// admin's list and file, and the Mac's (ScopeJobsRunner). internal/remote waits,
 // prints and maps outcomes on top of these.
 
 func jsonBody(v any) ([]byte, http.Header, error) {
@@ -89,10 +89,15 @@ func (c *Client) JobLog(ctx context.Context, id string, offset int64) ([]byte, i
 	return b, next, nil
 }
 
-// JobFile opens one result file and returns its SHA-256 as stored ("" when
-// the Worker did not say). The caller closes it.
-func (c *Client) JobFile(ctx context.Context, id, name string) (io.ReadCloser, string, error) {
-	resp, err := c.Do(ctx, wire.RouteJobFile, []string{id, name}, nil, nil, nil)
+// JobFile opens one result file of the caller's own job and returns its
+// SHA-256 as stored ("" when the Worker did not say). With admin it is any
+// caller's job, through the admin token's route. The caller closes it.
+func (c *Client) JobFile(ctx context.Context, id, name string, admin bool) (io.ReadCloser, string, error) {
+	route := wire.RouteJobFile
+	if admin {
+		route = wire.RouteJobAdminFile
+	}
+	resp, err := c.Do(ctx, route, []string{id, name}, nil, nil, nil)
 	if err != nil {
 		return nil, "", err
 	}

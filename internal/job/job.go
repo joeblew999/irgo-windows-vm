@@ -52,6 +52,16 @@ type State struct {
 // path is the record for an id.
 func path(id string) string { return filepath.Join(Dir(), id+".json") }
 
+// ClientEnv carries the MCP client's name from the server to the job child it
+// starts, which is a new process with no MCP connection: without it the
+// child's ledger events would name the command line ("cli") as the client of
+// work an agent asked for. Empty on the command line.
+const ClientEnv = "IRGO_WINVM_JOB_CLIENT"
+
+// Client is the MCP client this process runs a job for, from ClientEnv; empty
+// when it is not a job child started over MCP.
+func Client() string { return os.Getenv(ClientEnv) }
+
 // executable is which binary Start re-runs.
 //
 // A seam, so tests can start a real long-lived process instead of the test
@@ -59,7 +69,8 @@ func path(id string) string { return filepath.Join(Dir(), id+".json") }
 // would make every liveness assertion pass or fail for the wrong reason.
 var executable = os.Executable
 
-// Start launches a command detached and returns its id.
+// Start launches a command detached and returns its id. client is the MCP
+// client it runs for, handed to the child in ClientEnv.
 //
 // It re-executes this tool's own binary rather than running the work in a
 // goroutine. The work has to outlive the process that started it: an MCP client
@@ -70,7 +81,7 @@ var executable = os.Executable
 // it is, rather than started twice. Two concurrent installs of one VM is the
 // failure this prevents, and it is cheap to hit — a client that timed out will
 // simply ask again.
-func Start(command string, args []string) (State, error) {
+func Start(command string, args []string, client string) (State, error) {
 	if existing, ok := findRunning(command, args); ok {
 		return existing, nil
 	}
@@ -98,6 +109,9 @@ func Start(command string, args []string) (State, error) {
 
 	cmd := exec.Command(self, append([]string{command}, args...)...)
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	// Always set, empty included, so a value this process inherited is not
+	// passed on as if it were the caller's.
+	cmd.Env = append(os.Environ(), ClientEnv+"="+client)
 	// Its own process group, so it is not killed when the shell or the client
 	// that spawned the server goes away. Platform-specific — see detach_unix.go.
 	detach(cmd)

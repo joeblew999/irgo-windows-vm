@@ -85,7 +85,7 @@ from `-http`, and narrower.
 | someone holding | can | cannot |
 |---|---|---|
 | a caller token (`JOBS_TOKENS`) | run a binary of their choice in a **fresh clone** of the golden image, with `-gui` and up to an hour; read back its output, a picture of that clone's desktop, and its own jobs' files; cancel its own jobs | see another caller's jobs (404, as one that does not exist), list jobs, touch `irgo-win11`, the golden image or any other VM, choose the VM, run anything on the Mac itself |
-| the admin token | list every job: owner, state, spec, exit code | read a job's files or log, submit, cancel, or anything the runner does |
+| the admin token | list every job (owner, state, spec, exit code), and read any job's result files (its output, test2json events, pictures of its clone's desktop) | read a job's log or binary, submit, cancel, or anything the runner does |
 | the runner token | take jobs and report results, so forge a result or read any queued binary | submit or read jobs as a caller |
 | nothing | 401 on every queue path; 503 if the queue is not configured | learn which job ids exist |
 

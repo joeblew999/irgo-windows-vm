@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/job"
 	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 	"github.com/joeblew999/irgo-windows-vm/wire"
@@ -77,9 +78,10 @@ func run(args []string) error {
 	return nil
 }
 
-// runTool is runToolFor with no MCP client: the command line, and the
-// detached job child, which re-runs this binary.
-func runTool(name string, args []string) error { return runToolFor("", name, args) }
+// runTool is the command line, and the detached job child, which re-runs
+// this binary: with no MCP client, except in a job child started over MCP,
+// which is told its client's name (job.ClientEnv) so the ledger records it.
+func runTool(name string, args []string) error { return runToolFor(job.Client(), name, args) }
 
 // runToolFor is the one path every command takes: the CLI, an MCP tool call
 // (mcpClient is the client's name from its initialize request), and the job

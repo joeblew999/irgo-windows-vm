@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
@@ -53,11 +54,11 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	if tok != "sub" && tok != "run" {
+	if tok != "sub" && tok != "run" && tok != "adm" {
 		send(401, map[string]string{"error": "refused: no valid bearer token"})
 		return
 	}
-	if (p[0] == "runner") != (tok == "run") {
+	if (p[0] == "runner") != (tok == "run") || (p[0] == "admin") != (tok == "adm") {
 		send(401, map[string]string{"error": "refused: no valid bearer token"})
 		return
 	}
@@ -101,6 +102,15 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Job-Sha256", hex.EncodeToString(s[:]))
 			_, _ = w.Write(b)
 		}
+	case p[0] == "admin" && len(p) == 5 && p[1] == "jobs" && p[3] == "files":
+		b, ok := f.files[p[2]+"/"+p[4]]
+		if !ok {
+			send(404, map[string]string{"error": "no such file"})
+			return
+		}
+		s := sha256.Sum256(b)
+		w.Header().Set("X-Job-Sha256", hex.EncodeToString(s[:]))
+		_, _ = w.Write(b)
 	case p[0] == "runner" && p[1] == "claim":
 		for _, j := range f.jobs {
 			if j.State == wire.JobQueued {
@@ -289,7 +299,7 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 		t.Fatalf("Wait did not print the Mac's log:\n%s", out.String())
 	}
 	dir := t.TempDir()
-	paths, err := Fetch(context.Background(), c, final, dir)
+	paths, err := Fetch(context.Background(), c, final, dir, false)
 	if err != nil || len(paths) != 3 {
 		t.Fatalf("fetch: %v %v (want stdout.txt, desktop.png, result.json)", err, paths)
 	}
@@ -298,6 +308,41 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 	}
 	if !strings.Contains(string(f.files[j.ID+"/result.json"]), `"outcome": "failed"`) {
 		t.Fatalf("result.json: %s", f.files[j.ID+"/result.json"])
+	}
+}
+
+// The admin token fetches a caller's job's files through the admin route,
+// and the two tokens do not stand in for each other: the caller's on the
+// admin route, and the admin's on the caller's, are refused.
+//
+// Negative control (by hand, 1 Oct 2026): making Fetch ignore admin (always
+// the caller's route) fails "the admin" with ErrAuth; restored.
+func TestAdminFetchesAnotherCallersFiles(t *testing.T) {
+	_, s := newFake(t)
+	c, j, _ := submitted(t, s, false)
+	ex := &fakeExec{out: Outcome{Code: command.CodeOK, Files: map[string][]byte{"stdout.txt": []byte("hi\n")}}}
+	if err := Serve(context.Background(), runner(s.URL, "run", ""), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	final, err := c.Status(ctx, j.ID)
+	if err != nil || len(final.Files) != 2 {
+		t.Fatalf("final: %v %+v (want stdout.txt and result.json)", err, final)
+	}
+	adm := NewClient(s.URL, map[wire.Scope]string{wire.ScopeJobsAdmin: "adm"})
+	dir := t.TempDir()
+	paths, err := Fetch(ctx, adm, final, dir, true)
+	if err != nil || len(paths) != 2 {
+		t.Fatalf("the admin: %v %v", err, paths)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "stdout.txt")); string(got) != "hi\n" {
+		t.Fatalf("stdout.txt: %q", got)
+	}
+	if _, err := Fetch(ctx, c, final, t.TempDir(), true); !errors.Is(err, ErrAuth) {
+		t.Errorf("a caller's token on the admin route: %v, want ErrAuth", err)
+	}
+	if _, err := Fetch(ctx, adm, final, t.TempDir(), false); !errors.Is(err, ErrAuth) {
+		t.Errorf("the admin token on the caller's route: %v, want ErrAuth", err)
 	}
 }
 
@@ -365,6 +410,81 @@ func TestSpecForRefusesWhatIsNotAWindowsBinary(t *testing.T) {
 	_ = os.WriteFile(noExt, []byte("MZ"), 0o644)
 	if _, err := SpecFor(noExt, KindApp, false, nil, time.Minute); err == nil {
 		t.Error("a binary without .exe was accepted")
+	}
+}
+
+// ledgerSink is the Worker's ledger ingest, keeping what it was sent.
+type ledgerSink struct {
+	mu     sync.Mutex
+	events []ledger.Event
+}
+
+func (l *ledgerSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var in wire.LedgerBatch
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	l.mu.Lock()
+	l.events = append(l.events, in.Events...)
+	l.mu.Unlock()
+	_, _ = w.Write([]byte(`{}`))
+}
+
+// A job serve runs is in the ledger as its own work: a start and an end
+// under the job's id, owned by remote:<caller>/<job>, the end with the exit
+// code and the duration. A job that never ran (its binary arrived damaged)
+// is closed too, with not-run, so it never reads as work left open.
+//
+// Negative control (by hand, 1 Oct 2026): deleting the End Record from
+// RunJob fails both jobs with "no end"; giving Record j.Owner as the owner
+// fails the owner check. Restored.
+func TestServeRecordsEachJobInTheLedger(t *testing.T) {
+	sink := &ledgerSink{}
+	ls := httptest.NewServer(sink)
+	defer ls.Close()
+	ledger.Configure(ledger.New(ledger.Config{URL: ls.URL, Token: "t", Dir: t.TempDir(), Version: "test"}))
+	t.Cleanup(func() { ledger.Configure(nil) })
+
+	f, s := newFake(t)
+	_, ran, _ := submitted(t, s, false)
+	ex := &fakeExec{out: Outcome{Code: command.CodeFailed, Message: "hello.exe exited 3 in the guest"}}
+	if err := Serve(context.Background(), runner(s.URL, "run", "mac-test"), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, broken, _ := submitted(t, s, false)
+	f.corrupt = true
+	if err := Serve(context.Background(), runner(s.URL, "run", "mac-test"), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	ledger.DrainDefault(2 * time.Second)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, c := range []struct {
+		j    Job
+		want command.Code
+	}{{ran, command.CodeFailed}, {broken, command.CodeNotRun}} {
+		var start, end *ledger.Event
+		for i, e := range sink.events {
+			if e.Op != c.j.ID {
+				continue
+			}
+			switch e.Type {
+			case ledger.Start:
+				start = &sink.events[i]
+			case ledger.End:
+				end = &sink.events[i]
+			}
+		}
+		owner := "remote:me/" + c.j.ID[:12]
+		switch {
+		case start == nil:
+			t.Errorf("job %s: no start in %+v", c.j.ID, sink.events)
+		case end == nil:
+			t.Errorf("job %s: no end in %+v", c.j.ID, sink.events)
+		case start.Owner != owner || end.Owner != owner || end.Client != "remote" || end.Command != "serve":
+			t.Errorf("job %s: start %+v end %+v, want owner %s, client remote, command serve", c.j.ID, *start, *end, owner)
+		case end.Exit == nil || *end.Exit != int64(c.want) || end.DurationMS == nil:
+			t.Errorf("job %s: end %+v, want exit %d and a duration", c.j.ID, *end, c.want)
+		}
 	}
 }
 

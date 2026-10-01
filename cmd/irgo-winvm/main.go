@@ -119,6 +119,9 @@ func init() {
 		"app-create": {flags: appCreateFlags, run: runAppCreate},
 		"app-upload": {flags: appUploadFlags, run: runAppUpload},
 
+		"vm-golden-push": {flags: vmGoldenPushFlags, run: runVMGoldenPush},
+		"vm-golden-pull": {flags: vmGoldenPullFlags, run: runVMGoldenPull},
+
 		"iso-delete": {flags: isoDeleteFlags, run: runISODelete},
 		"vm-delete":  {flags: vmDeleteFlags, run: runVMDelete},
 		"app-delete": {flags: appDeleteFlags, run: runAppDelete},

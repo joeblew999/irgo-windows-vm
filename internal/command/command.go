@@ -36,17 +36,21 @@ type Command struct {
 	// mutation lock. Not simply !ReadOnly: `mcp` changes nothing itself.
 	Mutates bool
 
-	// Detach names the flag that makes this command long-running. With it,
-	// an MCP call starts a job and returns a handle instead of blocking past
-	// every client's timeout. A flag rather than a property of the command,
-	// because `iso-create` takes about 40 s (docs/RESULTS.md) and `-fetch` downloads
-	// 4.2 GB first.
+	// Detach names the flag that makes this command long-running, or is
+	// DetachAlways. With it, an MCP call starts a job and returns a handle
+	// instead of blocking past every client's timeout. A flag rather than a
+	// property of the command, because `iso-create` takes about 40 s
+	// (docs/RESULTS.md) and `-fetch` downloads 4.2 GB first.
 	Detach string
 
 	// OverMCP is false for commands a connected client has no use for:
 	// `commands`, `version` and `help` answer what the protocol already does.
 	OverMCP bool
 }
+
+// DetachAlways is Detach for a command with no quick form. It is not a flag
+// and cannot be passed as one.
+const DetachAlways = "(always)"
 
 // All is every command, in the order the usage prints them. A command that is
 // not here does not exist.
@@ -55,6 +59,10 @@ var All = []Command{
 	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Mutates: true, Detach: "-install", OverMCP: true},
 	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Mutates: true, OverMCP: true},
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Mutates: true, OverMCP: true},
+	// The golden image's private R2 cache. Gigabytes either way, so always a
+	// job over MCP. An Undo with a flag names the command and the flag.
+	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Mutates: true, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Mutates: true, Detach: DetachAlways, OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
 	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
@@ -77,10 +85,13 @@ var All = []Command{
 }
 
 // DetachedBy reports whether args include c's Detach flag, in any of the forms
-// the flag package accepts (-install, -install=true).
+// the flag package accepts (-install, -install=true), or c is DetachAlways.
 func (c Command) DetachedBy(args []string) bool {
-	if c.Detach == "" {
+	switch c.Detach {
+	case "":
 		return false
+	case DetachAlways:
+		return true
 	}
 	for _, a := range args {
 		if a == c.Detach || strings.HasPrefix(a, c.Detach+"=") {
@@ -102,23 +113,31 @@ func Find(name string) (Command, bool) {
 }
 
 // UsageText is the list of commands a bare `irgo-winvm` prints, generated from
-// All.
+// All. The columns are sized from the list, so a long name does not push its
+// own row out of line.
 func UsageText() string {
+	name, summary := 0, 0
+	for _, c := range All {
+		name = max(name, len(c.Name))
+		if c.Undo != "" {
+			summary = max(summary, len(c.Summary))
+		}
+	}
 	var b strings.Builder
 	b.WriteString("irgo-winvm — build a Go program on your Mac, run it on real Windows.\n\n")
-	b.WriteString("  MAKE                                                 UNDO\n")
+	fmt.Fprintf(&b, "  %-*s %-*s %s\n", name, "MAKE", summary, "", "UNDO")
 	for _, c := range All {
 		if c.Undo == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-12s %-39s %s\n", c.Name, c.Summary, c.Undo)
+		fmt.Fprintf(&b, "  %-*s %-*s %s\n", name, c.Name, summary, c.Summary, c.Undo)
 	}
 	b.WriteString("\n")
 	for _, c := range All {
 		if c.Undo != "" || c.IsUndo {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-12s %s\n", c.Name, c.Summary)
+		fmt.Fprintf(&b, "  %-*s %s\n", name, c.Name, c.Summary)
 	}
 	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
 	return b.String()

@@ -118,7 +118,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		if c.Undo == "" {
 			continue
 		}
-		if _, ok := find(c.Undo); !ok {
+		if _, ok := find(strings.Fields(c.Undo)[0]); !ok {
 			t.Errorf("%s names %q as its undo, which is not a command", c.Name, c.Undo)
 		}
 	}

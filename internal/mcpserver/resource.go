@@ -106,7 +106,10 @@ func reference(d Deps) string {
 		case c.ReadOnly:
 			b.WriteString("Reports only; changes nothing.\n\n")
 		}
-		if c.Detach != "" {
+		if c.Detach == command.DetachAlways {
+			b.WriteString("This always runs as a background job and returns a handle immediately, " +
+				"because it takes far longer than any client will wait. Ask `status` about the id it gives you.\n\n")
+		} else if c.Detach != "" {
 			fmt.Fprintf(&b, "With `%s` this runs as a background job and returns a handle "+
 				"immediately, because it takes far longer than any client will wait. Ask `status` "+
 				"about the id it gives you.\n\n", c.Detach)

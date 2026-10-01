@@ -56,9 +56,9 @@ const (
 	// mostly holes. APFS allocates in 4 KiB blocks; 64 KiB keeps the loop cheap.
 	goldenHoleBlock = 64 << 10
 
-	// goldenParallel is how many chunks move at once by default. Each holds a
+	// GoldenParallel is how many chunks move at once by default. Each holds a
 	// region and its compressed copy in memory, about 100 MB.
-	goldenParallel = 4
+	GoldenParallel = 4
 
 	goldenCacheFormat = 1
 	goldenPrefix      = "golden/"

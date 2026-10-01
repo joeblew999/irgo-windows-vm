@@ -6,12 +6,9 @@ package main
 // is transcribed. The generator builds the CLI, runs `irgo-winvm mcp -list`, and
 // renders what a connected client would actually be told.
 //
-// Captured rather than imported. Importing mcpserver would give the same data
-// with less machinery — and would drag the protocol SDK and its eight
-// dependencies into a module whose go.mod requires one kind of thing: a
-// markdown parser, and the goldmark extensions and syntax highlighter that
-// render it (render.go). The boundary is worth more than the machinery it
-// saves.
+// Captured rather than imported: importing mcpserver would give the same data,
+// but this page shows what a client connected to the shipped binary is told,
+// and only running that binary says so.
 
 import (
 	"encoding/json"
@@ -174,7 +171,7 @@ can't offer anything the CLI can't do, and can't drift from it.
 		case t.Annotations.ReadOnlyHint:
 			safety = "reports only"
 		}
-		b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", t.Name, t.Description, safety))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", t.Name, t.Description, safety)
 	}
 
 	b.WriteString(`
@@ -193,10 +190,10 @@ positional, such as the path to a ` + "`" + `.exe` + "`" + ` or a directory, goe
 		}
 		sort.Strings(names)
 		if len(names) == 0 {
-			b.WriteString(fmt.Sprintf("- `%s` — no flags\n", t.Name))
+			fmt.Fprintf(&b, "- `%s` — no flags\n", t.Name)
 			continue
 		}
-		b.WriteString(fmt.Sprintf("- `%s` — %s\n", t.Name, strings.Join(names, ", ")))
+		fmt.Fprintf(&b, "- `%s` — %s\n", t.Name, strings.Join(names, ", "))
 	}
 
 	b.WriteString(`

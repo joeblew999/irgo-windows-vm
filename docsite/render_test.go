@@ -1,17 +1,9 @@
-package main
+package docsite
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
-
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
 )
 
 func renderString(t *testing.T, src string) renderedPage {
@@ -21,67 +13,6 @@ func renderString(t *testing.T, src string) renderedPage {
 		t.Fatalf("renderMarkdown: %v", err)
 	}
 	return out
-}
-
-// TestHeadingIDsAreWhatPlainGoldmarkWouldGive is the guarantee the extensions
-// were added under: nothing they do may change a heading's ID.
-//
-// Other pages link to these IDs, and so does anything outside the site that
-// linked to a section before the redesign. TestEveryAnchorResolves checks the
-// links the site itself contains; this checks the IDs did not move at all, by
-// rendering every source page twice — once with the site's full pipeline, once
-// with the bare GFM + auto-ID configuration the site used before — and
-// requiring the same heading IDs in the same order.
-//
-// Negative control, run by hand: making splitDatedHeading overwrite every h2
-// and h3's id attribute fails this on every source page, naming the first ID
-// that moved.
-func TestHeadingIDsAreWhatPlainGoldmarkWouldGive(t *testing.T) {
-	plain := goldmark.New(
-		goldmark.WithExtensions(extension.GFM),
-		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
-	)
-	headingID := regexp.MustCompile(`<h[1-6] id="([^"]+)"`)
-
-	checked := 0
-	for _, p := range pages {
-		if p.Src == "" {
-			continue // generated pages need the binary; their IDs come from the same parser
-		}
-		raw, err := os.ReadFile(filepath.Join("..", p.Src))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := rewriteLinks(raw, repo, p.Src)
-
-		var before bytes.Buffer
-		if err := plain.Convert(body, &before); err != nil {
-			t.Fatal(err)
-		}
-		after, err := renderMarkdown(newMarkdown(), body)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		want := headingID.FindAllStringSubmatch(before.String(), -1)
-		got := headingID.FindAllStringSubmatch(string(after.Body), -1)
-		if len(want) == 0 {
-			t.Errorf("%s: no headings found; this comparison would pass vacuously", p.Src)
-		}
-		if len(got) != len(want) {
-			t.Errorf("%s: %d headings with ids, was %d", p.Src, len(got), len(want))
-			continue
-		}
-		for i := range want {
-			checked++
-			if got[i][1] != want[i][1] {
-				t.Errorf("%s: heading %d's id moved from %q to %q — every link to it is now broken",
-					p.Src, i, want[i][1], got[i][1])
-				break
-			}
-		}
-	}
-	t.Logf("%d heading ids compared", checked)
 }
 
 // TestDatedHeadingSplit covers what headingMetaTransformer does and, as much,
@@ -181,9 +112,9 @@ func TestTOCOnlyWhenWorthIt(t *testing.T) {
 // colours; an unnamed block stays plain text in a <pre>; both are wrapped so
 // the page script can give them a copy button.
 //
-// Negative control, run by hand: removing codeWrapper's "<pre><code>" write
-// fails the plain case; dropping chromahtml.WithClasses fails the "no inline
-// style" check.
+// Negative control, run by hand: removing renderCodeBlock's "<pre><code>"
+// write fails the plain case; dropping chromahtml.WithClasses fails the "no
+// inline style" check.
 func TestCodeBlocks(t *testing.T) {
 	body := string(renderString(t, "```sh\nmise run go:check  # a comment\n```\n\n```\nPASS: JS -> Go\n```\n").Body)
 
@@ -198,10 +129,22 @@ func TestCodeBlocks(t *testing.T) {
 	}
 }
 
+// TestCodeBlockUnknownLanguage: a language chroma does not know keeps its
+// label, escaped, and its text plain.
+//
+// Negative control, run by hand: writing lang without util.EscapeHTML fails
+// the escaping check.
+func TestCodeBlockUnknownLanguage(t *testing.T) {
+	body := string(renderString(t, "```no-such-lang\"x\n<b>\n```\n").Body)
+	want := `<div class="codeblock" data-lang="no-such-lang&quot;x"><pre><code>&lt;b&gt;` + "\n" + `</code></pre></div>`
+	if !strings.Contains(body, want) {
+		t.Errorf("got:\n%s\nwant it to contain:\n%s", body, want)
+	}
+}
+
 // TestGitHubAlerts: a callout written for GitHub gets the classes the
 // stylesheet colours, rather than rendering as a quote that opens with a
-// literal "[!WARNING]". No page uses one yet, which is exactly when a broken
-// one would go unnoticed.
+// literal "[!WARNING]".
 //
 // Negative control, run by hand: removing &alerts.GhAlerts{} from newMarkdown
 // fails this.
@@ -258,62 +201,21 @@ func TestSyntaxCSSFollowsTheColourScheme(t *testing.T) {
 	}
 }
 
-var (
-	anyTable     = regexp.MustCompile(`<table>`)
-	wrappedTable = regexp.MustCompile(`<div class="table-scroll"[^>]*>\s*<table>`)
-)
-
-// TestEveryTableScrollsInItsOwnBox: on a phone a five-column table must
-// scroll inside the article, never widen the page, and that needs the wrapper
-// on every table rather than most.
+// TestAnchorAttributesInAFixedOrder: the anchor extension sets the "#" link's
+// attributes from a map, so without anchorAttributeOrder two builds of the
+// same page differed in every heading.
 //
-// Negative control, run by hand: removing tableScroller from decorations fails
-// this on every page with a table.
-func TestEveryTableScrollsInItsOwnBox(t *testing.T) {
-	out := buildToTemp(t)
-	total := 0
-	for _, p := range pages {
-		body := read(t, filepath.Join(out, p.Out))
-		n, w := len(anyTable.FindAllString(body, -1)), len(wrappedTable.FindAllString(body, -1))
-		total += n
-		if n != w {
-			t.Errorf("%s: %d tables, %d of them in a scroll box", p.Out, n, w)
-		}
+// Negative control, run by hand: removing anchorAttributeOrder from
+// decorations fails this (with 30 headings, a random order is all but certain
+// to show).
+func TestAnchorAttributesInAFixedOrder(t *testing.T) {
+	var src strings.Builder
+	for i := 0; i < 30; i++ {
+		src.WriteString("## Heading\n\n")
 	}
-	if total == 0 {
-		t.Fatal("no tables on any page; this test would pass vacuously")
-	}
-	t.Logf("%d tables, all wrapped", total)
-}
-
-// TestNoDuplicateIDs: an id that appears twice on a page makes every link to
-// it land on whichever comes first. The template now adds a sidebar, a folded
-// contents box and heading anchors, so it is the first time the page has had
-// ids of its own that could collide with a heading's.
-//
-// Negative control, run by hand: adding id="status" to the template's <main>
-// fails this on upstream.html and reference.html, which both have a "Status"
-// heading. (id="results" did not: no page has a heading with that id, so the
-// first attempt at this control stayed green.)
-func TestNoDuplicateIDs(t *testing.T) {
-	out := buildToTemp(t)
-	for _, p := range pages {
-		seen := map[string]int{}
-		for _, m := range htmlID.FindAllStringSubmatch(read(t, filepath.Join(out, p.Out)), -1) {
-			seen[m[1]]++
-		}
-		if len(seen) == 0 {
-			t.Errorf("%s has no ids at all; this test is not looking at what it thinks", p.Out)
-		}
-		var dups []string
-		for id, n := range seen {
-			if n > 1 {
-				dups = append(dups, id)
-			}
-		}
-		sort.Strings(dups)
-		for _, id := range dups {
-			t.Errorf("%s: id %q appears %d times", p.Out, id, seen[id])
-		}
+	body := string(renderString(t, src.String()).Body)
+	want := `<a aria-hidden="true" class="anchor" tabindex="-1" href=`
+	if n := strings.Count(body, want); n != 30 {
+		t.Errorf("%d of 30 anchors have their attributes in order:\n%s", n, body)
 	}
 }

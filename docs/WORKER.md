@@ -50,13 +50,13 @@ serves or calls it is derived from that table:
 | `worker/` | `Handler` matches each request with `wire.Match` and calls the handler registered under the route's name in `handlers` (`worker/api.go`); before it, the dispatcher checks the route's token scope (401, or 503 when its secret is unset; a `Page` route also takes the token as a Basic password), `NeedLength` (411) and `MaxBody` (413). It panics at start if `handlers` and the table disagree |
 | `internal/workerclient` | the one client. A call names a route; the URL is `wire.Route.URL`, the token is the one for the route's scope, success is the route's status, and anything else is a `*workerclient.Error` with the Worker's `wire.Code`. `vm-golden-push`/`-pull` (`internal/utmvm/vm_golden_worker.go`), the ledger (`internal/ledger`, which keeps its spool and sends each batch once through it) and CI's glaze post (`glaze-check -post`) all go through it |
 | `/api/openapi.json` | the OpenAPI 3.1 document, from `wire/openapi` (reflection over the request and response types, so not in the TinyGo build), written to `worker/openapi.json` by `mise run worker:wasm` and embedded |
-| the site | the [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page (`site/api.go`), and the path the Glaze status page fetches |
+| the site | the [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page (`site/api.go`), and the path the Glaze status page fetches (`site/main.go`) |
 | MCP | a tool whose command calls a route (`Route.Commands`) names it in its description |
 
 `wire` is a package of the root module, not a module of its own: a replace
 directive in the root `go.mod` would break `go install …/cmd/irgo-winvm@latest`,
-which refuses a module that has one. `worker/` and `site/` require the root
-module with `replace … => ../`; module graph pruning keeps their `go.sum`
+which refuses a module that has one. `worker/` requires the root module with
+`replace … => ../`; module graph pruning keeps its `go.sum`
 free of the tool's dependencies, and only `wire`'s standard-library imports
 are built. `wire`'s `TestStandardLibraryOnly` keeps it that way (no
 third-party module, no `regexp`), and `mise run worker:wasm` is what proves

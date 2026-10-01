@@ -15,8 +15,8 @@
 // It is a package of the root module rather than a module of its own: a
 // replace directive in the root go.mod would break the documented
 // `go install …/cmd/irgo-winvm@latest`, which refuses a module with one.
-// worker/ and site/ reach it through a replace in their own go.mod, which
-// nothing installs.
+// worker/ reaches it through a replace in its own go.mod, which nothing
+// installs.
 package wire
 
 import (

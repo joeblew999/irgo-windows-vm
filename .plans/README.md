@@ -11,7 +11,7 @@ Every workstream has a plan here — running, queued, or waiting on the owner. F
 | # | Plan | Owner | State |
 |---|---|---|---|
 | 1 | [`2026-10-01_1200_follow-ups.md`](2026-10-01_1200_follow-ups.md) — small items left by the 1 Oct round | main session / agents | open |
-| 2a | [`2026-10-01_1300_reusable-docsite.md`](2026-10-01_1300_reusable-docsite.md) — the docs generator as a standalone, config-driven tool for any project | agent GG | starting |
+| 2a | [`2026-10-01_1300_reusable-docsite.md`](2026-10-01_1300_reusable-docsite.md) — the docs generator as a standalone, config-driven tool for any project | — | **merged 1 Oct**; next: its own repo |
 | 3 | [`2026-10-01_1110_utmvm-professional-pass.md`](2026-10-01_1110_utmvm-professional-pass.md) — utmvm cleanup | agent | queued |
 | 4 | [`2026-09-30_2000_utm-5.md`](2026-09-30_2000_utm-5.md) — stay on UTM 4.7.5; trial 5.x on a disposable VM | agent | queued |
 | 5 | [`2026-09-30_1745_glaze-1b-upstream.md`](2026-09-30_1745_glaze-1b-upstream.md) — glaze §1b fix on a branch; Windows run, then file | owner + VM | waiting: Windows run, owner's "send" |

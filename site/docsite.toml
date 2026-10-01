@@ -1,0 +1,206 @@
+# The docs site: https://joeblew999.github.io/irgo-windows-vm/
+#
+# Built by docsite (../docsite, its README has every key): `mise run
+# site:build`, `site:serve`, and `site:check` in go:check. Paths are from the
+# repository root.
+#
+# The pages, in navigation order. Nothing is discovered by scanning a
+# directory, so nothing is published by accident: a page not listed here is
+# not on the site. A page with `nav` is in the header; one with `parent` is
+# listed in the footer and lights up its parent's entry, which keeps the header
+# to one line at 1280 px. Three pages have no markdown file: a hook in this
+# directory generates each (`go run ./site <name>`, see main.go).
+
+name = "irgo-windows-vm"
+root = ".."
+out = "site/dist"
+repo = "https://github.com/joeblew999/irgo-windows-vm"
+base = "https://joeblew999.github.io/irgo-windows-vm/"
+license = "MIT"
+screens = "docs/screens"
+
+[check]
+# Links into the site from outside it: messages the binary prints (which link
+# the site, never a docs/ path), the issue forms, and absolute URLs in the
+# markdown. utmvm.SiteURL + "page.html#frag" counts as one.
+sources = ["{cmd,internal,.github,docs}/**/*.{go,md,yml,yaml}", "README.md", "AGENTS.md"]
+prefixes = ['SiteURL\s*\+\s*"']
+
+[llms]
+about = """
+Documentation for a tool that installs Windows 11 ARM64 on Apple Silicon
+unattended and runs Go binaries inside it. Generated from the repository's
+own markdown, so it cannot disagree with the source.
+"""
+full_note = """
+Generated from the same source as the site. Every page but two comes from
+markdown in the repository; the command reference and the MCP page have no
+source file and are captured from the compiled binary, so a wrong flag there
+is a bug in Go, not in any markdown.
+"""
+index_note = """
+Every page here is generated from markdown in the repository, so the source
+is authoritative and this is never edited by hand.
+
+One page is different, and it is the reason to prefer these files over
+fetching the raw markdown from GitHub: the command reference has **no source
+file**. It is captured from the compiled binary at build time — `irgo-winvm
+help` and `-h` for every command — so that no flag, default or usage string
+is ever transcribed. Fetching the repository's .md files gets you every other
+page and silently omits it, and the MCP page with it.
+"""
+robots_note = """
+Prefer those over fetching the markdown from the repository: the command
+reference is captured from the binary at build time and has no source file,
+so the raw-markdown route silently omits it.
+"""
+
+[[page]]
+src = "README.md"
+title = "irgo-windows-vm"
+blurb = "What it does, and how to get started"
+
+[[page]]
+src = "docs/GETTING-STARTED.md"
+out = "getting-started.html"
+title = "Getting started"
+nav = "Get started"
+blurb = "Install it, make your first VM, run your first program"
+
+[[page]]
+src = "docs/USING.md"
+out = "using.html"
+title = "Using it"
+nav = "Using it"
+blurb = "Each command, exit codes, costs, the golden image and the private cache"
+
+[[page]]
+src = "docs/FOR-AGENTS.md"
+out = "agents.html"
+title = "For agents"
+nav = "Agents"
+blurb = "Drive it from an AI agent, over MCP or HTTP, and file issues"
+
+# Built by listing a live MCP server, so the page cannot describe a tool the
+# server does not offer.
+[[page]]
+out = "mcp.html"
+title = "MCP"
+parent = "agents.html"
+blurb = "The MCP server's tools, arguments and instructions, captured from a live server"
+footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
+generate = { run = ["go", "run", "./site", "mcp"] }
+
+# Intent: it names commands in the context of what an attacker could call,
+# which is not telling a reader to run them, so cmd/irgo-winvm/docs_test.go
+# does not require every command it names to exist.
+[[page]]
+src = "docs/THREAT-MODEL.md"
+out = "threat-model.html"
+title = "Threat model"
+parent = "agents.html"
+blurb = "What anyone who reaches the HTTP port can do"
+intent = true
+
+# Captured from the binary: `irgo-winvm help`, and `-h` for every command.
+[[page]]
+out = "reference.html"
+title = "Commands"
+nav = "Commands"
+blurb = "Every command and flag, captured from the binary"
+footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
+generate = { run = ["go", "run", "./site", "reference"] }
+
+[[page]]
+src = "docs/TESTING.md"
+out = "testing.html"
+title = "Testing"
+nav = "Testing"
+blurb = "Does glaze work? The conformance suite, driving an app, the cycle tests"
+
+# Ends with a script that shows the Worker's latest glaze runs, when the site
+# is served from the Worker.
+[[page]]
+src = "docs/GLAZE-STATUS.md"
+out = "glaze-status.html"
+title = "Glaze status"
+parent = "testing.html"
+blurb = "Does glaze work on the Mac and on Windows? The last recorded run of each"
+foot = { run = ["go", "run", "./site", "glaze-live"], format = "html" }
+
+[[page]]
+src = "docs/VM-STATUS.md"
+out = "vm-status.html"
+title = "VM status"
+parent = "testing.html"
+blurb = "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"
+
+[[page]]
+src = "docs/ARCHITECTURE.md"
+out = "architecture.html"
+title = "Architecture"
+nav = "Architecture"
+blurb = "How the code is built: stages, packages, locks, jobs, data, the golden image"
+
+[[page]]
+src = "docs/WORKER.md"
+out = "worker.html"
+title = "The Cloudflare Worker"
+parent = "architecture.html"
+blurb = "The Worker: the site, live glaze status and the golden image's private API"
+
+# From the Worker's route table in package wire, the table the Worker routes
+# by and the tool's client builds requests from. To render the OpenAPI
+# document instead: generate = { file = "worker/openapi.json", format = "openapi" }.
+[[page]]
+out = "api.html"
+title = "Worker API"
+parent = "architecture.html"
+blurb = "Every endpoint of the Cloudflare Worker, generated from its route table"
+footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
+generate = { run = ["go", "run", "./site", "api"] }
+
+[[page]]
+src = "docs/TRAPS.md"
+out = "traps.html"
+title = "Known traps"
+parent = "architecture.html"
+blurb = "What fails silently or misleadingly, one line each"
+
+[[page]]
+src = "docs/CONTRIBUTING.md"
+out = "contributing.html"
+title = "Contributing"
+nav = "Contributing"
+blurb = "Set up, run the checks, land a change, cut a release"
+
+[[page]]
+src = "docs/CONVENTIONS.md"
+out = "conventions.html"
+title = "Conventions"
+parent = "contributing.html"
+blurb = "How code here is written, and the defect behind each rule"
+
+# Intent: the one page that states what is next rather than what is true, and
+# says so in its first line.
+[[page]]
+src = "docs/ROADMAP.md"
+out = "roadmap.html"
+title = "Roadmap"
+parent = "contributing.html"
+blurb = "What is next, and the one claim not yet verified"
+intent = true
+
+[[page]]
+src = "docs/RESULTS.md"
+out = "results.html"
+title = "Results"
+nav = "Results"
+blurb = "What has been measured, and when"
+
+[[page]]
+src = "docs/UPSTREAM.md"
+out = "upstream.html"
+title = "Upstream"
+nav = "Upstream"
+blurb = "Bugs found in glaze, native and UTM, and their status"

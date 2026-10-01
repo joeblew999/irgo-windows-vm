@@ -1,6 +1,6 @@
 # A reusable docs site generator for any project with a docs/ folder
 
-Status: proposed → agent GG · 2026-10-01
+Status: implemented by agent GG on branch worktree-agent-a414363253bdf9d18, not merged · 2026-10-01
 
 ## Symptom
 site/ renders this repo's docs well (goldmark + anchor + toc + chroma highlighting + GitHub alerts,
@@ -34,3 +34,29 @@ all latest. goldmark-highlighting/v2 is yuin's official extension but its last c
 This repo's site builds byte-for-byte equivalent content (diff the rendered pages) with all tests
 green; a second, minimal project (a temp dir with README + docs/a.md, b.md) builds with no config;
 docsite check catches a broken link and a broken anchor (negative controls).
+
+## Delivered (on the branch, 1 Oct 2026)
+
+- `docsite/`: module github.com/joeblew999/irgo-windows-vm/docsite, `cmd/docsite`
+  build|serve|check|pages, optional docsite.toml (keys in docsite/README.md), discovery
+  without one, hooks (command or file; markdown, openapi, or html for a page's foot).
+  Imports nothing from this repository.
+- Highlighting: goldmark-highlighting dropped; docsite/highlight.go calls chroma directly.
+  The anchor extension's attributes are now sorted (they came from a map: every build differed).
+- This repo: site/docsite.toml + `go run ./site reference|mcp|api|glaze-live`; site/ is a
+  package of the root module, not a module. mise site:build/serve/check call docsite;
+  go:check tests the docsite module and runs `docsite check` on this site; pages.yml still
+  calls site:build. docs_test.go reads intent pages from the config.
+- Equivalence: before/after builds, normalising build time and anchor attribute order: every
+  .md, llms.txt, llms-full.txt, sitemap.xml, robots.txt identical; HTML differs only in blank
+  lines (stripped template comments); syntax.css only in its header comment.
+- Reuse: README + docs/a.md + docs/b.md, no config, no checkout: builds and passes check; a
+  broken link and a broken anchor each fail it (exit 1, the file and target named).
+
+Left for the owner:
+- Move docsite to joeblew999/docsite: copy docsite/, change the module path, tag it, and point
+  mise site:* at `go run github.com/joeblew999/docsite/cmd/docsite@vX` (or a mise tool pin).
+- goldmark-gh-alerts is an untagged pseudo-version (last commit Mar 2025); small enough to own
+  if it goes stale.
+- The anchor attribute order could be fixed upstream in go.abhg.dev/goldmark/anchor (sort the
+  map's keys); docsite's anchorAttributeOrder can then go.

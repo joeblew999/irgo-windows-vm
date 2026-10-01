@@ -1,20 +1,19 @@
-package main
+package docsite
 
-// Markdown to HTML: which goldmark extensions this site uses, and the three
-// small AST changes it makes on top of them.
+// Markdown to HTML: which goldmark extensions the site uses, and the small
+// AST changes it makes on top of them.
 //
 // Everything here changes how a page LOOKS, never what it says. The corpus
 // (llms.txt, llms-full.txt, the per-page .md files) is built from the same
 // rewritten markdown before any of this runs, so nothing added here can make
 // the HTML and the plain text disagree about content.
 //
-// Heading IDs are the one thing on a page other pages depend on —
-// UPSTREAM.md#utm, USING.md#what-it-exits-with — and nothing here
-// computes them. goldmark's parser.WithAutoHeadingID still does, from the raw
+// Heading IDs are the one thing on a page other pages depend on, and nothing
+// here computes them. goldmark's parser.WithAutoHeadingID still does, from the raw
 // heading line, before any transformer below runs. The anchor links, the table
 // of contents and the heading dates all READ the ID the parser assigned; none
-// of them writes one. TestEveryAnchorResolves is what notices if that stops
-// being true.
+// of them writes one. The check "heading ids are what plain goldmark gives"
+// is what notices if that stops being true.
 
 import (
 	"bytes"
@@ -22,12 +21,10 @@ import (
 	"html"
 	"html/template"
 	"regexp"
+	"sort"
 
-	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
-	"github.com/alecthomas/chroma/v2/styles"
 	alerts "github.com/thiagokokada/goldmark-gh-alerts"
 	"github.com/yuin/goldmark"
-	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	east "github.com/yuin/goldmark/extension/ast"
@@ -39,19 +36,6 @@ import (
 	"go.abhg.dev/goldmark/anchor"
 	"go.abhg.dev/goldmark/toc"
 )
-
-// Chroma's two GitHub styles, one per colour scheme. Written out as CSS
-// classes by syntaxCSS rather than inlined into every <span>, because inline
-// colours cannot follow prefers-color-scheme: a light theme's dark-blue
-// keyword is unreadable on a dark background, and the page has no way to
-// change an inline style.
-const (
-	lightStyle = "github"
-	darkStyle  = "github-dark"
-)
-
-// syntaxFile is the highlighting stylesheet the build writes beside style.css.
-const syntaxFile = "syntax.css"
 
 // newMarkdown is the one place the parser is configured.
 func newMarkdown() goldmark.Markdown {
@@ -82,16 +66,9 @@ func newMarkdown() goldmark.Markdown {
 				Attributer: anchor.Attributes{"class": "anchor", "aria-hidden": "true", "tabindex": "-1"},
 			},
 
-			// Only blocks that name a language are highlighted — sh, go and
-			// json today. Unlabelled blocks are command output and stay plain: guessing a
-			// lexer for "PASS: JS -> Go" colours it as whatever chroma thinks
-			// it resembles, which is noise pretending to be meaning.
-			highlighting.NewHighlighting(
-				highlighting.WithStyle(lightStyle),
-				highlighting.WithGuessLanguage(false),
-				highlighting.WithFormatOptions(chromahtml.WithClasses(true)),
-				highlighting.WithWrapperRenderer(codeWrapper),
-			),
+			// Fenced code, highlighted by chroma with CSS classes: see
+			// highlight.go.
+			codeBlocks{},
 
 			// > [!NOTE] and friends, rendered the way GitHub renders them, so
 			// a callout written for the repository reads the same here.
@@ -221,68 +198,7 @@ func writePlain(dst *bytes.Buffer, src []byte, n ast.Node) {
 	}
 }
 
-// codeWrapper puts every fenced block in a <div> that names its language, so
-// the stylesheet can label it and the page script can give it a copy button
-// that does not scroll away with a long line.
-//
-// goldmark-highlighting hands an unhighlighted block to the wrapper instead of
-// writing its own <pre><code>, so the wrapper has to write them — otherwise
-// every plain block on the site would lose its <pre> and collapse onto one
-// line.
-func codeWrapper(w util.BufWriter, ctx highlighting.CodeBlockContext, entering bool) {
-	lang, hasLang := ctx.Language()
-	if entering {
-		_, _ = w.WriteString(`<div class="codeblock"`)
-		if hasLang && len(lang) > 0 {
-			_, _ = w.WriteString(` data-lang="`)
-			_, _ = w.Write(util.EscapeHTML(lang))
-			_ = w.WriteByte('"')
-		}
-		_ = w.WriteByte('>')
-		if !ctx.Highlighted() {
-			_, _ = w.WriteString("<pre><code>")
-		}
-		return
-	}
-	if !ctx.Highlighted() {
-		_, _ = w.WriteString("</code></pre>")
-	}
-	_, _ = w.WriteString("</div>\n")
-}
-
-// syntaxCSS is the highlighting stylesheet: the light style, then the dark one
-// inside a prefers-color-scheme query. Generated from chroma at build time
-// rather than pasted into style.css, so a chroma upgrade that renames a token
-// class cannot leave the stylesheet colouring classes that no longer exist.
-func syntaxCSS() ([]byte, error) {
-	f := chromahtml.New(chromahtml.WithClasses(true))
-	var b bytes.Buffer
-	b.WriteString("/* Generated by site/render.go from chroma's " + lightStyle + " and " + darkStyle + " styles. Do not edit. */\n")
-	light, dark := styles.Get(lightStyle), styles.Get(darkStyle)
-	// styles.Get returns the fallback rather than nil for an unknown name, so
-	// a renamed style would silently produce a stylesheet in the wrong theme.
-	if light.Name != lightStyle || dark.Name != darkStyle {
-		return nil, fmt.Errorf("chroma has no %q or %q style (got %q, %q)", lightStyle, darkStyle, light.Name, dark.Name)
-	}
-	// Both scoped, not light as the default with dark overriding it. The two
-	// styles do not colour the same token types: github colours punctuation
-	// #1f2328 and github-dark leaves it to inherit, so with the light rules
-	// unscoped every brace and colon in a dark-mode JSON block was near-black
-	// on near-black. Seen in a screenshot of mcp.html, not by any test.
-	b.WriteString("@media not all and (prefers-color-scheme: dark) {\n")
-	if err := f.WriteCSS(&b, light); err != nil {
-		return nil, err
-	}
-	b.WriteString("}\n")
-	b.WriteString("@media (prefers-color-scheme: dark) {\n")
-	if err := f.WriteCSS(&b, dark); err != nil {
-		return nil, err
-	}
-	b.WriteString("}\n")
-	return b.Bytes(), nil
-}
-
-// --- the site's own AST changes ----------------------------------------------
+// --- the site's own AST changes ---------------------------------------------
 
 // decorations registers the two transformers below and their renderers.
 type decorations struct{}
@@ -296,10 +212,32 @@ func (decorations) Extend(m goldmark.Markdown) {
 	m.Parser().AddOptions(parser.WithASTTransformers(
 		util.Prioritized(tableScroller{}, 50),
 		util.Prioritized(headingMetaTransformer{}, 50),
+		util.Prioritized(anchorAttributeOrder{}, 200),
 	))
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
 		util.Prioritized(decorationRenderer{}, 500),
 	))
+}
+
+// anchorAttributeOrder sorts the attributes of every heading's "#" link by
+// name. The anchor extension sets them from a map, so their order changed on
+// every build and two builds of the same markdown differed in every heading;
+// it runs after that extension (100).
+type anchorAttributeOrder struct{}
+
+func (anchorAttributeOrder) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering || n.Kind() != anchor.Kind {
+			return ast.WalkContinue, nil
+		}
+		attrs := append([]ast.Attribute(nil), n.Attributes()...)
+		sort.Slice(attrs, func(i, j int) bool { return string(attrs[i].Name) < string(attrs[j].Name) })
+		n.RemoveAttributes()
+		for _, a := range attrs {
+			n.SetAttribute(a.Name, a.Value)
+		}
+		return ast.WalkSkipChildren, nil
+	})
 }
 
 var (
@@ -311,11 +249,9 @@ var (
 // tableScroll wraps a table so it scrolls sideways inside its own box.
 //
 // A table cannot be made to scroll by styling the <table> alone without giving
-// up table layout — `display: block` on it, which the old stylesheet used,
-// makes the columns size to their content instead of the page and loses the
-// full-width rule lines. The trap tables and the measurement tables here have
-// five columns of prose; on a phone they must scroll inside the article, never
-// widen the page.
+// up table layout: `display: block` makes the columns size to their content
+// instead of the page and loses the full-width rule lines. On a phone a wide
+// table must scroll inside the article, never widen the page.
 type tableScroll struct{ ast.BaseBlock }
 
 func (*tableScroll) Kind() ast.NodeKind { return kindTableScroll }
@@ -347,10 +283,9 @@ func (tableScroller) Transform(doc *ast.Document, _ text.Reader, _ parser.Contex
 // "A self-built ISO installs Windows — verified 12 Aug 2026" — set apart so it
 // reads as a label rather than as part of the title.
 //
-// RESULTS.md is a list of measurements, and every one of its sections says
-// when it was measured in the heading. The date is the most important thing
-// about a measurement after the number, and in a 1.35rem heading it was
-// indistinguishable from the title.
+// A page of measurements dates each one in its heading. The date is the most
+// important thing about a measurement after the number, and in a 1.35rem
+// heading it was indistinguishable from the title.
 type headingMeta struct{ ast.BaseInline }
 
 func (*headingMeta) Kind() ast.NodeKind { return kindHeadingMeta }

@@ -206,11 +206,18 @@ func TestFinishedJobsArePruned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Well past the limit, all finished: pid 1 is init, which this process
-	// cannot signal, so alive() reports false without inventing a fake.
+	// Well past the limit, all finished: the pid of a process that has exited
+	// and been reaped, so alive() reports false. It used pid 1, which only a
+	// non-root process cannot signal: run as root (a Linux container) every
+	// job looked alive and nothing was pruned.
+	dead := exec.Command(os.Args[0], "-test.run=^$")
+	if err := dead.Run(); err != nil {
+		t.Fatal(err)
+	}
+	deadPID := dead.Process.Pid
 	for i := 0; i < keepFinished+5; i++ {
 		id := "old-" + string(rune('a'+i))
-		if err := write(State{ID: id, Command: "vm-create", PID: 1,
+		if err := write(State{ID: id, Command: "vm-create", PID: deadPID,
 			Started: time.Now().Add(-time.Duration(i) * time.Hour)}); err != nil {
 			t.Fatal(err)
 		}

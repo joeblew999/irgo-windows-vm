@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,6 +24,11 @@ import (
 // Negative control, run by hand: remove the admit call from runToolFor and
 // the refused cases reach errUsage instead.
 func TestNonOwnersAreRefusedTheDefaultVM(t *testing.T) {
+	// The rule guards the Mac's VMs. Elsewhere app-create and vm-screen are
+	// refused before it, as macOS-only (pointing at remote-submit).
+	if runtime.GOOS != "darwin" {
+		t.Skip("app-create and vm-screen are macOS-only; on " + runtime.GOOS + " they are refused before the sharing rule")
+	}
 	t.Setenv("HOME", t.TempDir())
 
 	t.Setenv(utmvm.OwnerEnv, "")

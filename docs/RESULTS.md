@@ -15,6 +15,8 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
+| 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
 | 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
 | 1 Oct 2026 | [a VM of your own in 23 s: install 12 min 24 s once, seal 2 min 49 s, then `vm-create` clones and boots](#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
 | 1 Oct 2026 | [a glaze app driven by real OS input in the background: type, click, click-at, scroll, all `isTrusted`, frontmost app unchanged](#a-glaze-app-driven-by-real-os-input--measured-1-oct-2026) |
@@ -29,6 +31,61 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## Several callers on one Mac — measured 1 Oct 2026
+
+**Result:** the guards in [Sharing one Mac](DEVELOPMENT.md#sharing-one-mac)
+behave on the real machine. M2 Pro, 16 GiB, UTM 4.7.5, with `irgo-win11`
+running throughout and never touched; one disposable clone, `z1`.
+
+| step | command | measured |
+|---|---|---|
+| what a running VM holds | `footprint` on its QEMULauncher, `sysctl vm.swapusage` | `irgo-win11` (8192 MiB configured): **8327 MB footprint, 8051 MB dirty**; swap 6.3 of 7 GB in use |
+| UTM's memory per VM | AppleScript `memory of configuration` | 8192 for both VMs, in 0.6 s, no Full Disk Access |
+| a clone while `irgo-win11` runs | `vm-create -vm z1` | **exit 7** in 0.7 s: 16 GiB, 8 running, 8 for z1, 0 left, want 4; nothing made, no record |
+| the same, deliberately | `vm-create -vm z1 -overcommit` | made and answering in **26 s**; disk read through `statfs` on UTM's volume: 41.9 GiB free, want 20 |
+| a second clone | `vm-create -vm z2` (another owner) | **exit 7**, naming `irgo-win11` and `z1` as the 16 GiB already running |
+| an agent without `-vm` | `IRGO_WINVM_OWNER=… app-create x.exe` | **exit 2**, told to `vm-create -vm <name>` |
+| an MCP client without `-vm` | stdio, client `agent-x`, `app-create` | `code 2, status usage`, the caller named as `agent-x/apple@…:repo-b (from MCP client)` |
+| staging | `app-upload` from clients `agent-y` and `agent-x`, then `app-delete` from `agent-x` | each staged under its own `bin/agent-…-<hash>/`; agent-x's delete left agent-y's file |
+| a run on the clone | `app-create -vm z1 zhello.exe` | output back in 4.1 s (SMB, 1.9 s); the record's last use moved |
+| reaping, in lease | `vm-reap -stale 1h` | `keep z1 — in lease`, exit 0 |
+| reaping, while `vm-repair -vm z1` ran | `vm-reap -stale 1s -force` | `keep z1 — in use: a command holds its lock`; nothing deleted |
+| reaping, idle | `vm-reap -stale 1s -force` | `z1` stopped and deleted through UTM in 4.9 s, record removed; `irgo-win11` and `irgo-golden` untouched |
+| a left-over record | a record for a VM UTM does not have, and one for `irgo-win11` | `forget` and `keep — protected`; `-force` removed only the first |
+
+Not measured: how much a clone grows over a working day. `df` fell by about
+1.1 GiB across z1's clone, boot, one run and a `vm-repair`, with the rest of the
+Mac writing too, so `cloneHeadroomBytes` stays an estimate.
+
+## The drive tests on GitHub's Windows ARM64 runner — measured 1 Oct 2026
+
+**Result:** `TestDriveType`, `TestDriveClick`, `TestDriveClickAt` and
+`TestDriveScroll` pass on the `windows-11-arm` job three runs in a row, with no
+retry, no foreground change and every OS step `isTrusted`:
+[36810013494](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810013494),
+[36810234766](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810234766),
+[36810464096](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810464096)
+(branch `drive-windows-reliable`; macOS green in each). Image
+`windows-11-vs2026-arm64`, native at fork PR #2 (`2fbbf2d`), glaze v0.0.61.
+
+Before: run 36804946289 failed `TestDriveClick` ("no matching event (9 so
+far)", then "the frontmost app was window 0x40270 (pid 6808) before this test
+and window 0x30284 (pid 11052) after it, which this test does not own"). Two
+causes, each found by tracing the foreground at every step:
+
+| cause | how it showed | fix |
+|---|---|---|
+| glaze created the app's window, and on Windows glaze's window activates itself | with the old window and the new trace (branch `drive-windows-diag`, run 36808088081) every drive test failed the same way: the app's window was the foreground window from "window up", +0.5 s, to the close. Closing it handed the foreground to some other window, which is why the old check blamed a stranger. The `TestDriveClick` screenshot of run 36804946289 shows its title bar drawn active | `drive` makes the window itself with `WS_EX_NOACTIVATE` and `SW_SHOWNOACTIVATE`, as native's testwin does; the tests now fail if the app's window is ever in front |
+| WSL's updater, relaunched for the whole job | `WindowsTerminal.exe "C:\Windows\system32\wsl.exe"` became the foreground in the middle of `TestDriveScroll` (run 36808085142). A process-start trace (run 36809190167) showed `provjobd.exe`, a child of the runner's `hosted-compute-agent`, running `wsl.exe` every 30 s; WSL is not installed, so the inbox stub starts `wsl.exe --update --confirm --prompt-before-exit` in a new Windows Terminal window whenever none is running, and that waits about 60 s. Stopping it brought it back within 30 s; `wsl --update` exits 1 ("not installed") | `runner-desktop.ps1` makes `wsl.exe` run `cmd /c exit 1` (Image File Execution Options) for the job; the trace then showed `provjobd` starting `cmd.exe` every 30 s and no window (run 36809643314). Upstream: [actions/runner-images#14264](https://github.com/actions/runner-images/issues/14264) |
+
+Also on that desktop at job start, every run: the full-screen "Microsoft
+account" prompt (`WWAHost.exe`), Start and Search open under it (on one runner
+both reopened 3 s after their hosts were stopped, so they are now closed until
+they stay closed), a "System Properties" dialog, Widgets, and OneDrive's
+first-run setup starting OneDrive a minute in. The keyboard retries in
+`TestDriveType` never fired in these runs: with focus moved into the page on
+load, the field took focus on the first click every time.
 
 ## The real golden image through the private R2 cache — measured 1 Oct 2026
 

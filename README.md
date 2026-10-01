@@ -28,41 +28,53 @@ every platform.
 ## Install
 
 You need a Mac with Apple Silicon. UTM, the hypervisor, is installed for you if
-it is missing.
-
-Download `irgo-winvm-darwin-arm64` from the
-[latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest), then:
+it is missing. The release binary is all you need: no checkout, Go or mise.
 
 ```sh
-chmod +x irgo-winvm-darwin-arm64
-xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
-./irgo-winvm-darwin-arm64
+curl -fsSL https://raw.githubusercontent.com/joeblew999/irgo-windows-vm/main/install.sh | sh
 ```
 
-The `xattr` line clears macOS's quarantine flag on downloaded files. Without
-it, Gatekeeper reports the binary as damaged.
+It downloads the binary for your Mac from the
+[latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest),
+checks it against the release's `SHA256SUMS`, and installs it as
+`~/.local/bin/irgo-winvm`. Or:
 
-Checksums are published with [every release](https://github.com/joeblew999/irgo-windows-vm/releases).
+- **Homebrew:** `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm`
+- **Go:** `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest`
+- **By hand:** download `irgo-winvm-darwin-arm64` from the release, then
+  `chmod +x` it, `xattr -d com.apple.quarantine` it, and put it on your PATH as
+  `irgo-winvm`. The binary is not signed with an Apple Developer ID, so a copy
+  downloaded with a browser is refused by Gatekeeper until that flag is cleared.
 
 ## Quick start
 
-Run these three commands in order:
-
 ```sh
-irgo-winvm iso-create -fetch    # download the Windows installer
-irgo-winvm vm-create -install   # create a VM and install Windows, unattended
-irgo-winvm app-create your.exe  # run your program in the VM and print its output
+irgo-winvm doctor               # what is set up, and the next steps in order
+irgo-winvm vm-create -install   # a Windows VM, installed unattended
+irgo-winvm app-create your.exe  # run your program in it and print its output
 ```
 
-- The first two are slow, but only once: a 4.2 GB download, then about 45
-  minutes of install you don't need to watch. See
-  [what each step costs](docs/DEVELOPMENT.md#what-it-costs).
-- After that, `app-create` takes seconds.
+- `doctor` lists every step left, with the command for each. Before the first
+  VM that includes `irgo-winvm iso-create -fetch`, a 4.2 GB download of the
+  Windows installer.
+- The install is slow, but only once: about 45 minutes you don't need to watch.
+  After that `app-create` takes seconds, and with a
+  [golden image](docs/DEVELOPMENT.md#the-golden-image) every new VM is a clone
+  that answers in about 23 seconds.
 - Every command is safe to repeat. If the work is already done, it says so and
   stops.
-- `irgo-winvm doctor` shows what is set up and what is missing.
 
 Your `.exe` is any build made with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
+
+## For AI agents
+
+```sh
+claude mcp add irgo-winvm -- irgo-winvm mcp
+```
+
+Other clients, what each tool does, a typical session and the exit codes are in
+the [MCP guide](https://joeblew999.github.io/irgo-windows-vm/mcp.html);
+`irgo-winvm mcp -h` prints the essentials.
 
 ## What you'll see
 
@@ -75,30 +87,17 @@ Windows ready to run your program:
 
 ![ready](docs/screens/vm/ready.png)
 
-## Check glaze on Windows
-
-```sh
-mise run glaze:mac       # on this Mac
-mise run glaze:windows   # in the VM
-```
-
-Each prints one line: `YES`, or `NO` and the names of what failed.
-
-A `NO` is fixed in [crgimenes/glaze](https://github.com/crgimenes/glaze) or
-[crgimenes/native](https://github.com/crgimenes/native), never worked around
-here. A workaround would hide a bug that still ships to everyone using those
-libraries, and finding those bugs is the point of this project.
-
 ## Documentation
 
 | page | read it to |
 |---|---|
-| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, land a change, test glaze |
-| [Development](docs/DEVELOPMENT.md) | understand the commands, exit codes, costs and known traps |
+| [MCP guide](https://joeblew999.github.io/irgo-windows-vm/mcp.html) | drive it from an AI agent |
+| [Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html) | look up every command and flag, captured from the binary |
+| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, check glaze on Windows, land a change |
+| [Development](docs/DEVELOPMENT.md) | understand the commands, exit codes, costs, the golden image and known traps |
 | [Results](docs/RESULTS.md) | see what has been measured, with dates and screenshots |
 | [Upstream](docs/UPSTREAM.md) | see the bugs found in glaze, native and UTM, and their status |
 | [Roadmap](docs/ROADMAP.md) | see what is next |
 | [Threat model](docs/THREAT-MODEL.md) | know what the HTTP server exposes before you enable it |
-| [Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html) | look up every command and flag, captured from the binary |
 
 MIT licensed. See [LICENSE](LICENSE).

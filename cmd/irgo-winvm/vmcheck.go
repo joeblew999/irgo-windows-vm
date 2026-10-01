@@ -59,7 +59,7 @@ func checkVM(root string, e utmvm.Entry, say func(string, ...any)) (glazecheck.S
 	// to "which guest account" and "how long".
 	defaults := appCreateFlags()
 	user := defaults.Lookup("user").DefValue
-	timeout := values{defaults}.Duration("timeout")
+	timeout := values{fs: defaults}.Duration("timeout")
 
 	// Pictures taken on the host, by the name a result gives them; the rest
 	// are the guest's, pulled by the name a test logged.

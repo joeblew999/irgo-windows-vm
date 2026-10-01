@@ -15,3 +15,5 @@ exists before adding anything.
 | [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | the last recorded glaze run on the Mac and on Windows (generated) |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | what is next |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | what the HTTP transport exposes |
+
+Filing an issue here from another repository: [Reporting issues (for agents)](docs/CONTRIBUTING.md#reporting-issues-for-agents).

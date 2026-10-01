@@ -93,20 +93,23 @@ jobs:
           cache-dependency-path: '**/go.sum'
       # The windows-11-arm image comes up with a full-screen "Microsoft account"
       # prompt (WWAHost.exe) over every window, with the Start menu open under
-      # it. Chromium drops a wheel event aimed at a window that something else
-      # covers, so TestDriveScroll saw nothing (1 Oct 2026). Close both; this is
-      # a disposable runner. Found by native PR #2's own workflow.
+      # it, and Chromium drops a wheel event aimed at a window something else
+      # covers (TestDriveScroll, 1 Oct 2026). The script lists every shown
+      # window and the foreground one, stops what covers the desktop or can
+      # take the foreground on its own, lists again, and fails if the prompt
+      # or Start is still up. This is a disposable runner.
       - if: runner.os == 'Windows'
         name: clear the desktop
         shell: pwsh
-        run: |
-          Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
-          Get-Process -Name WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -PassThru | Format-Table Id, ProcessName
-          Start-Sleep -Seconds 2
-          (New-Object -ComObject WScript.Shell).SendKeys('{ESC}')
+        run: .github/scripts/runner-desktop.ps1 -Clear
       - if: runner.os == 'Windows'
         shell: bash
         run: go run ./cmd/irgo-winvm glaze-check
+      # What was on the desktop when the suite ended, for a failure's record.
+      - if: always() && runner.os == 'Windows'
+        name: the desktop after the suite
+        shell: pwsh
+        run: .github/scripts/runner-desktop.ps1
 
       # What glaze-check wrote, kept whatever the verdict: the record (the
       # same table the job summary shows), this runner's screenshots with

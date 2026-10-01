@@ -22,19 +22,20 @@ import (
 // stage an extensionless file, and Windows needs the extension to run it.
 const uploadExt = ".exe"
 
-// Upload stages one chunk of a binary and, once the whole binary has arrived
-// and its digest has been verified, commits it as bin/<sha256>.exe.
+// Upload stages one chunk of a binary into owner's part of bin/ and, once the
+// whole binary has arrived and its digest has been verified, commits it as
+// bin/<owner>/<sha256>.exe.
 //
 // Content-addressed: the path is the digest, so an unchanged binary transfers
 // nothing — a second upload of the same bytes finds the committed file and
-// returns it. Chunks land in bin/<sha256>.exe.part and are renamed into place
+// returns it. Chunks land in bin/<owner>/<sha256>.exe.part and are renamed into place
 // only after the full SHA-256 matches; a truncated or corrupted upload is
 // removed and refused rather than committed, because a truncated upload that
 // runs anyway is this repository's oldest category of bug.
 //
 // It returns the committed path once complete (with n == total), or "" with the
 // number of bytes staged so far when more chunks are needed.
-func Upload(hash string, total, offset int64, data []byte) (staged string, n int64, err error) {
+func Upload(owner, hash string, total, offset int64, data []byte) (staged string, n int64, err error) {
 	want, err := hex.DecodeString(hash)
 	if err != nil || len(want) != sha256.Size {
 		return "", 0, fmt.Errorf("upload: hash must be 64 hex digits, got %q", hash)
@@ -47,14 +48,15 @@ func Upload(hash string, total, offset int64, data []byte) (staged string, n int
 	}
 
 	key := hex.EncodeToString(want)
-	staged = filepath.Join(VMStageDir(), key+uploadExt)
+	dir := StageDir(owner)
+	staged = filepath.Join(dir, key+uploadExt)
 	if _, sErr := os.Stat(staged); sErr == nil {
 		// Already committed and verified; an unchanged binary transfers nothing.
 		return staged, total, nil
 	}
 
-	if err := os.MkdirAll(VMStageDir(), 0o755); err != nil {
-		return "", 0, fmt.Errorf("upload: creating %s: %w", VMStageDir(), err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", 0, fmt.Errorf("upload: creating %s: %w", dir, err)
 	}
 	part := staged + ".part"
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o644)
@@ -117,22 +119,37 @@ func Upload(hash string, total, offset int64, data []byte) (staged string, n int
 	return staged, total, nil
 }
 
-// ClearStage removes every staged binary under bin/, so app-delete undoes
-// app-upload. Deleting nothing is success: an empty or missing directory is the
-// undo having already happened, so it can be run twice.
-func ClearStage() error {
-	dir := VMStageDir()
-	entries, err := os.ReadDir(dir)
+// ClearStage removes what c staged, bin/<c's key>, so app-delete undoes
+// app-upload for that caller and leaves every other caller's uploads alone.
+// It returns the directory it cleared. Deleting nothing is success: an empty
+// or missing directory is the undo having already happened, so it can be run
+// twice.
+//
+// Files directly in bin/ were staged before uploads were kept per caller, by
+// whoever was using the machine then; the owner (Caller.Human) clears those
+// too, and nobody else does.
+func ClearStage(c Caller) (string, error) {
+	dir := StageDir(c.ID)
+	if err := os.RemoveAll(dir); err != nil {
+		return dir, fmt.Errorf("clearing staged binaries in %s: %w", dir, err)
+	}
+	if !c.Human() {
+		return dir, nil
+	}
+	entries, err := os.ReadDir(stageRoot())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return dir, nil
 		}
-		return fmt.Errorf("clearing staged binaries: %w", err)
+		return dir, fmt.Errorf("clearing staged binaries: %w", err)
 	}
 	for _, e := range entries {
-		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
-			return fmt.Errorf("clearing staged binaries: removing %s: %w", e.Name(), err)
+		if e.IsDir() {
+			continue // another caller's space
+		}
+		if err := os.Remove(filepath.Join(stageRoot(), e.Name())); err != nil {
+			return dir, fmt.Errorf("clearing staged binaries: removing %s: %w", e.Name(), err)
 		}
 	}
-	return nil
+	return dir, nil
 }

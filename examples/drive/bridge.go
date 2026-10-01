@@ -10,7 +10,8 @@ import (
 // bridgeJS is installed in every page the app loads, before the page's own
 // scripts. It reports what the page saw — every pointer, key, input and wheel
 // event, captured at the document so the page cannot stop it, with the
-// event's isTrusted flag — and the load. It only listens: it changes nothing
+// event's isTrusted flag — the page gaining and losing keyboard focus, and
+// the load. It only listens: it changes nothing
 // in the page.
 const bridgeJS = `(function () {
   if (window.__drive) return;
@@ -46,7 +47,17 @@ const bridgeJS = `(function () {
   window.addEventListener('wheel', function (e) {
     send({ type: 'wheel', target: describe(e.target), dx: e.deltaX, dy: e.deltaY, trusted: e.isTrusted });
   }, opt);
-  window.addEventListener('load', function () { send({ type: 'ready' }); });
+  // Whether the page has keyboard focus: keys reach only a focused page, and
+  // on Windows a page in a window that is never activated can lose it.
+  ['focus', 'blur'].forEach(function (t) {
+    window.addEventListener(t, function (e) {
+      if (e.target !== window) return;
+      send({ type: 'focus', target: describe(document.activeElement), focused: t === 'focus', trusted: e.isTrusted });
+    }, opt);
+  });
+  window.addEventListener('load', function () {
+    send({ type: 'ready', target: describe(document.activeElement), focused: document.hasFocus() });
+  });
   window.__drive = true;
 })();`
 

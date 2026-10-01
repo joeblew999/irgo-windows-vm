@@ -307,6 +307,9 @@ func runParts(o Options, su *Suite, exe string, sec *Section, say func(string, .
 			if !r.Inherited && r.failed() {
 				say("%s %s: %s", strings.ToUpper(r.Outcome), r.Name, r.Detail)
 			}
+			if r.Retried != "" {
+				say("RETRIED %s (%s): %s", r.Name, r.Outcome, r.Retried)
+			}
 		}
 	}
 	return events, nil, nil

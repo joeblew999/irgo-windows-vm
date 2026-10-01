@@ -19,6 +19,7 @@ package utmvm
 // because something later failed is one nobody will run twice.
 
 import (
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"errors"
@@ -147,8 +148,38 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 			_ = stage("clone the golden image", false, "cloned, booted, agent answering", nil)
 			return res, nil
 		} else {
-			say("          no golden image (%s) — falling back to a full install from the ISO.", GoldenVMName)
-			say("          vm-golden-create makes one, and every VM after that is a clone")
+			switch r, cached, cErr := GoldenCacheFromEnv(); {
+			case cErr != nil:
+				return res, stage("the golden image", false, "", fmt.Errorf(
+					"%w\n  vm-create -golden=false installs from the ISO instead", cErr))
+			case cached && opts.Install:
+				steps = 3
+				begin("the golden image, from your private cache")
+				say("          no golden image here; pulling it from %s instead of installing Windows", r.Where())
+				if pErr := importer.pullGolden(context.Background(), r, say); pErr != nil {
+					return res, stage("pull the golden image", false, "", pErr)
+				}
+				_ = stage("pull the golden image", false, "pulled and imported as "+GoldenVMName, nil)
+				begin("a clone of the golden image, " + GoldenVMName)
+				if _, cErr := CloneFromGolden(opts.VMName, say); cErr != nil {
+					return res, stage("clone the golden image", false, "", cErr)
+				}
+				res.Ready = true
+				_ = stage("clone the golden image", false, "cloned, booted, agent answering", nil)
+				return res, nil
+			case cached:
+				// Stopped here rather than going on to write a bundle: a VM
+				// that exists is never cloned, so the next -install would
+				// install after all.
+				say("          no golden image here, and your private cache is configured (%s).", r.Where())
+				say("          re-run with -install to pull it (minutes) and clone it, instead of installing Windows")
+				return res, nil
+			default:
+				say("          no golden image (%s) — falling back to a full install from the ISO.", GoldenVMName)
+				say("          To make every later VM take seconds instead: install one under a throwaway")
+				say("          name (vm-create -vm g1 -install), then vm-golden-create -vm g1. Or set")
+				say("          IRGO_GOLDEN_URL and IRGO_GOLDEN_TOKEN to pull one from your private cache.")
+			}
 		}
 	}
 
@@ -364,7 +395,7 @@ func (o *Options) setDefaults() {
 		o.DiskGiB = 64
 	}
 	if o.MemoryMiB == 0 {
-		o.MemoryMiB = 8192
+		o.MemoryMiB = vmMemoryMiB
 	}
 	if o.CPUCount == 0 {
 		o.CPUCount = 4

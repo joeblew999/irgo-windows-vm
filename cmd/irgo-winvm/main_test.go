@@ -220,7 +220,7 @@ func TestMCPHTTPRefusesANonLoopbackBind(t *testing.T) {
 	if err == nil {
 		t.Fatal("mcp -http accepted a non-loopback address without -allow-remote")
 	}
-	if !strings.Contains(err.Error(), "THREAT-MODEL") {
+	if !strings.Contains(err.Error(), "threat-model") {
 		t.Errorf("the refusal does not point at the threat model: %v", err)
 	}
 }

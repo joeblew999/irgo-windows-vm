@@ -1,0 +1,60 @@
+# Each field's label is a heading in the issue body, and `irgo-winvm report
+# -issue feature` prints the same headings for agents filing with gh.
+# cmd/irgo-winvm/issue_test.go fails if the two disagree.
+name: Feature request
+description: Your repository needs irgo-winvm to do something it does not.
+title: "[feature] "
+labels: ["feature", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what your repository is trying to get done, not only the flag you want: the
+        right change is often a different one. **Agents:** `irgo-winvm report -issue feature > body.md`,
+        then `gh issue create --body-file body.md`.
+  - type: input
+    id: reporter
+    attributes:
+      label: Reporting repo and agent
+      description: The repository that needs this, and who is asking. "joeblew999/foo, Claude Code (agent)".
+      placeholder: owner/repo, agent or person
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What the calling repo is trying to do
+      description: The outcome, in a sentence or two. "Run our Wails app's e2e tests on Windows from CI on a Mac."
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: The workflow today
+      description: The commands or MCP calls you run now, in order, and where it stops working or needs a workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How we both know it is done. Checkable statements, such as "app-create -foo returns exit 0 and prints X".
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed interface
+      description: A command, flag or MCP tool shape, if you have one in mind.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: irgo-winvm version
+      description: The output of `irgo-winvm version`.
+    validations:
+      required: true

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Create or update the issue labels in .github/labels.tsv on GitHub; DRY_RUN=1 prints the gh commands instead, REPO= targets another repo"
+set -euo pipefail
+# The labels are declared once, in .github/labels.tsv; this makes GitHub match.
+# `gh label create --force` updates a label that already exists, so running it
+# again is safe. It never deletes: a label dropped from the file, or one of
+# GitHub's defaults, stays until someone removes it by hand.
+
+file="${MISE_CONFIG_ROOT:-.}/.github/labels.tsv"
+repo=()
+if [ -n "${REPO:-}" ]; then repo=(--repo "$REPO"); fi
+
+n=0
+while IFS=$'\t' read -r name color desc; do
+  case "$name" in '' | '#'*) continue ;; esac
+  if [ -z "${color:-}" ] || [ -z "${desc:-}" ]; then
+    echo "$file: '$name' needs a colour and a description, tab-separated" >&2
+    exit 1
+  fi
+  if [ -n "${DRY_RUN:-}" ]; then
+    printf 'gh label create %q --color %s --description %q --force' "$name" "$color" "$desc"
+    if [ -n "${REPO:-}" ]; then printf ' --repo %s' "$REPO"; fi
+    printf '\n'
+  else
+    gh label create "$name" --color "$color" --description "$desc" --force ${repo[@]+"${repo[@]}"}
+  fi
+  n=$((n + 1))
+done <"$file"
+
+# Nothing read means the file moved or lost its tabs, not that there was
+# nothing to do.
+if [ "$n" -eq 0 ]; then
+  echo "no labels read from $file" >&2
+  exit 1
+fi
+if [ -n "${DRY_RUN:-}" ]; then
+  echo "$n labels; DRY_RUN set, nothing sent"
+else
+  echo "$n labels synced${REPO:+ to $REPO}"
+fi

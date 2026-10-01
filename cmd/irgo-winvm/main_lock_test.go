@@ -16,6 +16,7 @@ import (
 // before its own work starts, and help is not a mutation.
 func TestRunToolRefusesMutationWhileLockHeld(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv(utmvm.OwnerEnv, "") // the owner, so the default VM is admitted
 	release, err := utmvm.Acquire(utmvm.VMLock(utmvm.DefaultVMName))
 	if err != nil {
 		t.Fatal(err)
@@ -110,5 +111,31 @@ func TestRunToolReadOnlyCommandsSkipTheLock(t *testing.T) {
 
 	if err := runTool("doctor", nil); err != nil {
 		t.Fatalf("runTool(doctor) = %v, want nil while the lock is held", err)
+	}
+}
+
+// TestUploadsOfTwoCallersDoNotRefuseEachOther: the stage lock is per caller,
+// so one agent's app-upload does not make another's exit 6, and the same
+// caller is still refused.
+//
+// app-upload with no -hash stops at Upload's check of the hash, right after
+// the lock: that error proves it got through, ErrMutationInProgress that it
+// did not.
+//
+// Negative control, run by hand: make StageLockFor ignore its argument and
+// the -owner b call is refused.
+func TestUploadsOfTwoCallersDoNotRefuseEachOther(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	release, err := utmvm.Acquire(utmvm.StageLockFor("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if err := runTool("app-upload", []string{"-owner", "b"}); err == nil || errors.Is(err, utmvm.ErrMutationInProgress) {
+		t.Fatalf("app-upload -owner b while a uploads = %v, want it past the lock", err)
+	}
+	if err := runTool("app-upload", []string{"-owner", "a"}); !errors.Is(err, utmvm.ErrMutationInProgress) {
+		t.Fatalf("app-upload -owner a while a uploads = %v, want ErrMutationInProgress", err)
 	}
 }

@@ -153,6 +153,10 @@ func (s *Suite) parse(target string, stream []byte) ([]Result, []Fact, error) {
 				r.Evidence += ev
 				continue
 			}
+			// So is a retry: recorded even on a pass, never the first message.
+			if retryLine(r, e.Output) {
+				continue
+			}
 			// The first line the test itself wrote: its t.Error, t.Fatal or
 			// t.Skip message. The runner's own === and --- lines are not it.
 			if l := strings.TrimSpace(e.Output); r.Detail == "" && l != "" && !isFrame(l) {
@@ -242,6 +246,23 @@ var (
 	shotTaken  = regexp.MustCompile(`(?:^|: )screenshot: (\S+\.png)(?: \((.*)\))?$`)
 	shotMissed = regexp.MustCompile(`(?:^|: )screenshot not captured: (.+)$`)
 )
+
+// retryTaken is the line examples/conformance logs when it tries a step
+// again (drive_test.go: retried), after the file:line prefix t.Logf adds.
+var retryTaken = regexp.MustCompile(`(?:^|: )retry: (.+)$`)
+
+// retryLine records a retry line on r and reports whether l was one.
+func retryLine(r *Result, l string) bool {
+	m := retryTaken.FindStringSubmatch(strings.TrimSpace(l))
+	if m == nil {
+		return false
+	}
+	if r.Retried != "" {
+		r.Retried += " / "
+	}
+	r.Retried += m[1]
+	return true
+}
 
 // shotLine records a screenshot line on r and reports whether l was one.
 func shotLine(r *Result, l string) bool {

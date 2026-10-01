@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,9 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/glazecheck"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/internal/workerclient"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // repo finds the checkout. Not being in one is a usage error: nothing is
@@ -29,6 +33,8 @@ func glazeCheckFlags() *flag.FlagSet {
 	fs.String("vm", utmvm.DefaultVMName, "VM name, with -windows")
 	ownerFlag(fs)
 	fs.String("import", "", "record runs made elsewhere instead of running the suite: a directory holding the conformance CI job's downloaded artifacts, whose sections and screenshots replace this checkout's")
+	fs.String("post", "", "send this checkout's recorded run for a target (mac or windows) to the Worker instead of running the suite, as CI does: "+
+		wire.MustFind(wire.RouteGlazePost).Method+" "+wire.MustFind(wire.RouteGlazePost).Path+", to $"+wire.EnvGlazeURL+" with $"+glazeTokenEnv()+"; without both it says so and does nothing")
 	return fs
 }
 
@@ -39,7 +45,8 @@ func glazeCheckFlags() *flag.FlagSet {
 //
 // Natively it runs on macOS, and on Windows too: that is how the CI job on
 // GitHub's windows-11-arm runner gets the same record the VM run does. With
-// -import it runs nothing, and records CI's artifacts instead.
+// -import it runs nothing, and records CI's artifacts instead; with -post it
+// runs nothing, and sends the recorded run to the Worker.
 func runGlazeCheck(v values, _ []string) error {
 	windows, name := v.Bool("windows"), v.String("vm")
 	say := utmvm.Printer("glaze-check")
@@ -52,6 +59,9 @@ func runGlazeCheck(v values, _ []string) error {
 		// Nothing is built or run, so neither Go nor a desktop is needed:
 		// this is how the pages workflow, on Linux, publishes CI's record.
 		return glazecheck.Import(root, dir, say)
+	}
+	if target := v.String("post"); target != "" {
+		return glazePost(root, target, say)
 	}
 	if err := glazecheck.NeedGo(); err != nil {
 		return err
@@ -172,4 +182,28 @@ func runGlazeStatus(values, []string) error {
 		say("%s", l)
 	}
 	return nil
+}
+
+// glazeTokenEnv is the variable the glaze-post token is read from.
+func glazeTokenEnv() string {
+	i, _ := wire.ScopeGlazeWrite.Info()
+	return i.Env
+}
+
+// glazePost is glaze-check -post. Unconfigured is not an error: CI runs it on
+// every push to main, and a fork without the variable and the secret should
+// stay green.
+func glazePost(root, target string, say func(string, ...any)) error {
+	origin, token := os.Getenv(wire.EnvGlazeURL), os.Getenv(glazeTokenEnv())
+	if origin == "" || token == "" {
+		say("%s or %s is not set: not posting", wire.EnvGlazeURL, glazeTokenEnv())
+		return nil
+	}
+	if err := workerclient.CheckOrigin(origin); err != nil {
+		return fmt.Errorf("%w: %s: %w", errUsage, wire.EnvGlazeURL, err)
+	}
+	c := workerclient.New(origin, map[wire.Scope]string{wire.ScopeGlazeWrite: token})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return glazecheck.Post(ctx, root, target, c, say)
 }

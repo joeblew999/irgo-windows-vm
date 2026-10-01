@@ -8,6 +8,7 @@ import (
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/remote"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // Negative control (by hand, 1 Oct 2026): making macOnly return nil fails
@@ -79,13 +80,13 @@ func TestRemoteSpelling(t *testing.T) {
 func TestAJobsCodeIsTheExitCode(t *testing.T) {
 	for _, c := range []command.Code{command.CodeOK, command.CodeFailed, command.CodeNoAgent, command.CodeBusy, command.CodeNotRun} {
 		n := int(c)
-		j := remote.Job{ID: "x", State: remote.StateFinished, ExitCode: &n}
-		if got := exitCode(j.Err()); got != c {
+		j := remote.Job{ID: "x", State: wire.JobFinished, ExitCode: &n}
+		if got := exitCode(remote.Err(j)); got != c {
 			t.Errorf("a job that exited %d on the Mac exits %d here", c, got)
 		}
 	}
-	lost := remote.Job{ID: "x", State: remote.StateLost}
-	if got := exitCode(fmt.Errorf("wrapped: %w", lost.Err())); got != command.CodeNotRun {
+	lost := remote.Job{ID: "x", State: wire.JobLost}
+	if got := exitCode(fmt.Errorf("wrapped: %w", remote.Err(lost))); got != command.CodeNotRun {
 		t.Errorf("a lost job exits %d, want %d", got, command.CodeNotRun)
 	}
 	if got := exitCode(remoteErr(fmt.Errorf("x: %w", remote.ErrAuth))); got != command.CodeUsage {

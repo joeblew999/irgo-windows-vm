@@ -18,8 +18,8 @@ import (
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
-	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // version is set at build time by .goreleaser.yaml: the tag for a release,
@@ -358,5 +358,5 @@ func macOnly(c command.Command, goos string) error {
 	}
 	return fmt.Errorf("%w: %s drives UTM, which needs macOS on Apple Silicon, and this is %s. "+
 		"To run a Windows binary from here on a Mac elsewhere: irgo-winvm remote submit [-gui] <app.exe> [args...] "+
-		"(with %s and %s set; irgo-winvm remote-submit -h)", errUsage, c.Name, goos, remote.EnvURL, remote.EnvToken)
+		"(with %s and %s set; irgo-winvm remote-submit -h)", errUsage, c.Name, goos, wire.EnvRemoteURL, "IRGO_REMOTE_TOKEN")
 }

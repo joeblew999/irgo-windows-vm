@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // fakeWorker is the Worker's job queue, as much of it as the client and the
@@ -57,7 +58,7 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if (p[0] == "runner") != (tok == "run") {
-		send(403, map[string]string{"error": "wrong role"})
+		send(401, map[string]string{"error": "refused: no valid bearer token"})
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
@@ -66,7 +67,7 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var s Spec
 		_ = json.Unmarshal(body, &s)
 		id := strings.Repeat("a", 31) + strconv.Itoa(len(f.jobs))
-		f.jobs[id] = &Job{ID: id, Owner: "me", Spec: s, State: StateUploading}
+		f.jobs[id] = &Job{ID: id, Owner: "me", Spec: s, State: wire.JobUploading}
 		send(201, map[string]any{"job": f.jobs[id]})
 	case p[0] == "jobs" && len(p) >= 2:
 		j, ok := f.jobs[p[1]]
@@ -78,10 +79,10 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case len(p) == 2:
 			send(200, j)
 		case p[2] == "input":
-			f.input[j.ID], j.State, j.Position = body, StateQueued, 1
+			f.input[j.ID], j.State, j.Position = body, wire.JobQueued, 1
 			send(200, j)
 		case p[2] == "cancel":
-			j.State = StateCancelled
+			j.State = wire.JobCancelled
 			send(200, j)
 		case p[2] == "log":
 			off, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -102,8 +103,8 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case p[0] == "runner" && p[1] == "claim":
 		for _, j := range f.jobs {
-			if j.State == StateQueued {
-				j.State, j.Runner = StateRunning, r.Header.Get("X-Runner")
+			if j.State == wire.JobQueued {
+				j.State, j.Runner = wire.JobRunning, r.Header.Get("X-Runner")
 				send(200, j)
 				return
 			}
@@ -111,7 +112,7 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 	case p[0] == "runner" && p[1] == "jobs":
 		j, ok := f.jobs[p[2]]
-		if !ok || j.State != StateRunning {
+		if !ok || j.State != wire.JobRunning {
 			send(409, map[string]string{"error": "the job is gone, not running"})
 			return
 		}
@@ -132,15 +133,15 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.files[j.ID+"/"+p[4]] = body
 			send(201, map[string]any{})
 		case "finish":
-			var res Result
+			var res wire.JobResult
 			_ = json.Unmarshal(body, &res)
-			j.State, j.ExitCode, j.Outcome, j.Message = StateFinished, &res.ExitCode, res.Outcome, res.Message
+			j.State, j.ExitCode, j.Outcome, j.Message = wire.JobFinished, &res.ExitCode, res.Outcome, res.Message
 			if f.cancel {
-				j.State = StateCancelled
+				j.State = wire.JobCancelled
 			}
 			j.Files = nil
 			for _, n := range res.Files {
-				j.Files = append(j.Files, FileInfo{Name: n, Size: int64(len(f.files[j.ID+"/"+n]))})
+				j.Files = append(j.Files, FileInfo{Key: n, Size: int64(len(f.files[j.ID+"/"+n]))})
 			}
 			send(200, j)
 		}
@@ -160,21 +161,21 @@ func TestJobCodeMapsOntoTheToolsTable(t *testing.T) {
 		j    Job
 		want command.Code
 	}{
-		{"ran and passed", Job{State: StateFinished, ExitCode: intp(0)}, command.CodeOK},
-		{"program failed", Job{State: StateFinished, ExitCode: intp(1)}, command.CodeFailed},
-		{"VM gone on the Mac", Job{State: StateFinished, ExitCode: intp(3)}, command.CodeNoVM},
-		{"agent away on the Mac", Job{State: StateFinished, ExitCode: intp(4)}, command.CodeNoAgent},
-		{"busy on the Mac", Job{State: StateFinished, ExitCode: intp(6)}, command.CodeBusy},
-		{"undeclared", Job{State: StateFinished, ExitCode: intp(42)}, command.CodeFailed},
-		{"finished with no code", Job{State: StateFinished}, command.CodeNotRun},
-		{"lost", Job{State: StateLost, ExitCode: intp(0)}, command.CodeNotRun},
-		{"cancelled", Job{State: StateCancelled, ExitCode: intp(0)}, command.CodeNotRun},
-		{"expired", Job{State: StateExpired}, command.CodeNotRun},
+		{"ran and passed", Job{State: wire.JobFinished, ExitCode: intp(0)}, command.CodeOK},
+		{"program failed", Job{State: wire.JobFinished, ExitCode: intp(1)}, command.CodeFailed},
+		{"VM gone on the Mac", Job{State: wire.JobFinished, ExitCode: intp(3)}, command.CodeNoVM},
+		{"agent away on the Mac", Job{State: wire.JobFinished, ExitCode: intp(4)}, command.CodeNoAgent},
+		{"busy on the Mac", Job{State: wire.JobFinished, ExitCode: intp(6)}, command.CodeBusy},
+		{"undeclared", Job{State: wire.JobFinished, ExitCode: intp(42)}, command.CodeFailed},
+		{"finished with no code", Job{State: wire.JobFinished}, command.CodeNotRun},
+		{"lost", Job{State: wire.JobLost, ExitCode: intp(0)}, command.CodeNotRun},
+		{"cancelled", Job{State: wire.JobCancelled, ExitCode: intp(0)}, command.CodeNotRun},
+		{"expired", Job{State: wire.JobExpired}, command.CodeNotRun},
 	} {
-		if got := c.j.Code(); got != c.want {
+		if got := Code(c.j); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
-		if err := c.j.Err(); (err == nil) != (c.want == command.CodeOK) {
+		if err := Err(c.j); (err == nil) != (c.want == command.CodeOK) {
 			t.Errorf("%s: Err() = %v", c.name, err)
 		}
 	}
@@ -186,31 +187,28 @@ func TestJobCodeMapsOntoTheToolsTable(t *testing.T) {
 func TestClientClassifiesRefusals(t *testing.T) {
 	_, s := newFake(t)
 	ctx := context.Background()
-	bad := &Client{URL: s.URL, Token: "nope"}
+	bad := NewClient(s.URL, map[wire.Scope]string{wire.ScopeJobs: "nope", wire.ScopeJobsRunner: "nope"})
 	if _, err := bad.Status(ctx, "x"); !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "no valid bearer token") {
 		t.Errorf("a refused token: %v, want ErrAuth with the Worker's message", err)
 	}
-	sub := &Client{URL: s.URL, Token: "sub"}
+	sub := NewClient(s.URL, map[wire.Scope]string{wire.ScopeJobs: "sub", wire.ScopeJobsRunner: "sub"})
 	if _, err := sub.Status(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a missing job: %v, want ErrNotFound", err)
 	}
 	if _, err := sub.Claim(ctx); !errors.Is(err, ErrAuth) {
 		t.Errorf("a caller claiming: %v, want ErrAuth", err)
 	}
-	run := &Client{URL: s.URL, Token: "run"}
+	run := runner(s.URL, "run", "")
 	if _, err := run.Heartbeat(ctx, "missing"); !errors.Is(err, ErrGone) {
 		t.Errorf("a heartbeat for a job that is not running: %v, want ErrGone", err)
-	}
-	if err := bad.callJSON(ctx, "GET", "/api/nothing", nil, nil); errors.Is(err, ErrGone) {
-		t.Error("a caller's 4xx was classified as the runner's ErrGone")
 	}
 }
 
 func TestFromEnvNamesWhatIsMissing(t *testing.T) {
-	t.Setenv(EnvURL, "")
-	t.Setenv(EnvToken, "")
-	_, err := FromEnv(EnvToken)
-	if !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), EnvURL) || !strings.Contains(err.Error(), EnvToken) {
+	t.Setenv(wire.EnvRemoteURL, "")
+	t.Setenv("IRGO_REMOTE_TOKEN", "")
+	_, err := FromEnv(wire.ScopeJobs)
+	if !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), wire.EnvRemoteURL) || !strings.Contains(err.Error(), "IRGO_REMOTE_TOKEN") {
 		t.Fatalf("FromEnv with nothing set: %v", err)
 	}
 }
@@ -256,12 +254,12 @@ func submitted(t *testing.T, s *httptest.Server, gui bool) (*Client, Job, []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Client{URL: s.URL, Token: "sub"}
+	c := NewClient(s.URL, map[wire.Scope]string{wire.ScopeJobs: "sub", wire.ScopeJobsRunner: "sub"})
 	j, err := c.Submit(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j, err = c.Upload(ctx, j.ID, path); err != nil || j.State != StateQueued {
+	if j, err = c.Upload(ctx, j.ID, path); err != nil || j.State != wire.JobQueued {
 		t.Fatalf("upload: %v %+v", err, j)
 	}
 	return c, j, b
@@ -272,7 +270,7 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 	c, j, b := submitted(t, s, true)
 	ex := &fakeExec{out: Outcome{Code: command.CodeFailed, Message: "hello.exe exited 3 in the guest",
 		Files: map[string][]byte{"stdout.txt": []byte("hi\n"), "desktop.png": []byte("\x89PNG")}}}
-	run := &Client{URL: s.URL, Token: "run", Runner: "mac-test"}
+	run := runner(s.URL, "run", "mac-test")
 	if err := Serve(context.Background(), run, ex, ServeOptions{Once: true, Poll: 10 * time.Millisecond}); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +282,7 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final.Code() != command.CodeFailed || final.Runner != "mac-test" || !strings.Contains(final.Message, "exited 3") {
+	if Code(final) != command.CodeFailed || final.Runner != "mac-test" || !strings.Contains(final.Message, "exited 3") {
 		t.Fatalf("final job: %+v", final)
 	}
 	if !strings.Contains(out.String(), "fake: ran hello.exe") {
@@ -311,14 +309,14 @@ func TestADamagedBinaryIsNeverRun(t *testing.T) {
 	c, j, _ := submitted(t, s, false)
 	f.corrupt = true
 	ex := &fakeExec{out: Outcome{Code: command.CodeOK}}
-	if err := Serve(context.Background(), &Client{URL: s.URL, Token: "run"}, ex, ServeOptions{Once: true}); err != nil {
+	if err := Serve(context.Background(), runner(s.URL, "run", ""), ex, ServeOptions{Once: true}); err != nil {
 		t.Fatal(err)
 	}
 	if ex.ran != nil {
 		t.Fatal("the executor ran a binary that did not match its SHA-256")
 	}
 	final, _ := c.Status(context.Background(), j.ID)
-	if final.Code() != command.CodeNotRun || !strings.Contains(final.Message, "SHA-256") {
+	if Code(final) != command.CodeNotRun || !strings.Contains(final.Message, "SHA-256") {
 		t.Fatalf("final: %+v", final)
 	}
 }
@@ -332,7 +330,7 @@ func TestACancelledJobStops(t *testing.T) {
 	f.cancel = true
 	ex := &fakeExec{untilCtx: true}
 	start := time.Now()
-	err := Serve(context.Background(), &Client{URL: s.URL, Token: "run"}, ex,
+	err := Serve(context.Background(), runner(s.URL, "run", ""), ex,
 		ServeOptions{Once: true, Heartbeat: 20 * time.Millisecond, Flush: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +339,7 @@ func TestACancelledJobStops(t *testing.T) {
 		t.Fatalf("the cancelled job ran on for %s", time.Since(start))
 	}
 	final, _ := c.Status(context.Background(), j.ID)
-	if final.State != StateCancelled || final.Code() != command.CodeNotRun || !strings.Contains(final.Message, "cancelled") {
+	if final.State != wire.JobCancelled || Code(final) != command.CodeNotRun || !strings.Contains(final.Message, "cancelled") {
 		t.Fatalf("final: %+v", final)
 	}
 }
@@ -350,7 +348,7 @@ func TestServeStopsOnARefusedToken(t *testing.T) {
 	_, s := newFake(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := Serve(ctx, &Client{URL: s.URL, Token: "wrong"}, &fakeExec{}, ServeOptions{Poll: time.Millisecond})
+	err := Serve(ctx, runner(s.URL, "wrong", ""), &fakeExec{}, ServeOptions{Poll: time.Millisecond})
 	if !errors.Is(err, ErrAuth) {
 		t.Fatalf("Serve with a refused token: %v, want ErrAuth and to stop", err)
 	}
@@ -368,4 +366,13 @@ func TestSpecForRefusesWhatIsNotAWindowsBinary(t *testing.T) {
 	if _, err := SpecFor(noExt, KindApp, false, nil, time.Minute); err == nil {
 		t.Error("a binary without .exe was accepted")
 	}
+}
+
+// runner is the Mac's client, with retries off so a refused or failed call
+// answers at once.
+func runner(url, token, name string) *Client {
+	c := NewClient(url, map[wire.Scope]string{wire.ScopeJobsRunner: token})
+	c.Runner = name
+	c.wc.Attempts = 1
+	return c
 }

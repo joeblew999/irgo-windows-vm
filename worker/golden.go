@@ -2,16 +2,10 @@ package main
 
 // The golden image's private bucket, bound to the Worker as GOLDEN, and the
 // only way to it: vm-golden-push and vm-golden-pull talk to these endpoints,
-// so no machine needs R2's S3 keys.
-//
-//	GET    /api/golden/{key}            the object, streamed; Range for resume  (GOLDEN_TOKEN)
-//	HEAD   /api/golden/{key}            its size and SHA-256                     (GOLDEN_TOKEN)
-//	PUT    /api/golden/{key}            stored if it hashes to X-Golden-SHA256   (GOLDEN_PUSH_TOKEN)
-//	DELETE /api/golden/{key}            removed; nothing there is success        (GOLDEN_PUSH_TOKEN)
-//	GET    /api/golden-list/{kind}      manifests or chunks, a page at a time    (GOLDEN_PUSH_TOKEN)
-//
-// {key} is exactly one of the keys internal/utmvm/vm_golden_cache.go writes
-// (isGoldenKey); anything else is 404, whatever the token.
+// so no machine needs R2's S3 keys. The routes, their tokens and their
+// limits are the golden-* entries of wire.Routes; {key} is exactly one of the
+// keys internal/utmvm/vm_golden_cache.go writes (wire.IsGoldenKey), and
+// anything else is 404, whatever the token.
 //
 // Bytes never pass through Go: a GET hands R2's stream to the response, and a
 // PUT hands the request's stream to R2, so a 64 MiB chunk costs the Worker
@@ -25,6 +19,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // Blobs is the golden bucket as the API uses it.
@@ -45,89 +41,77 @@ type Blobs interface {
 }
 
 // BlobInfo is what the API says about a stored object.
-type BlobInfo struct {
-	Key    string `json:"key"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256,omitempty"` // as verified on PUT; "" for one not stored by this API
-}
+type BlobInfo = wire.BlobInfo
 
 // byteRange is a resolved Range: Length bytes from Offset.
 type byteRange struct{ Offset, Length int64 }
 
 // errDigestMismatch is a PUT whose body does not hash to what it claimed.
-var errDigestMismatch = errors.New("the body does not hash to X-Golden-SHA256")
+var errDigestMismatch = errors.New("the body does not hash to " + wire.HeaderSHA256)
 
-const (
-	varGoldenPushToken = "GOLDEN_PUSH_TOKEN" // secret: who may write and delete the golden image
-
-	// maxGoldenPut is the largest object accepted. A chunk is a 64 MiB region
-	// compressed with zstd, which adds a few KiB to data it cannot compress,
-	// and Workers refuses a body over 100 MB on the Free and Pro plans before
-	// the Worker sees it.
-	maxGoldenPut = 80 << 20
-
-	hdrSHA256 = "X-Golden-Sha256" // the object's SHA-256: claimed on PUT, verified one on GET and HEAD
-	hdrSize   = "X-Golden-Size"   // the whole object's size, also on HEAD, where Content-Length may not survive
-)
-
-// goldenKinds are the prefixes golden-list lists. Only these two: latest is
-// read directly, and nothing else in the bucket is reachable.
-var goldenKinds = map[string]string{"manifests": "golden/manifests/", "chunks": "golden/chunks/"}
-
-// golden is /api/golden/{key}.
-func (env Env) golden(w http.ResponseWriter, r *http.Request, key string) {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		if !env.authorized(w, r, varGoldenToken) {
-			return
-		}
-	case http.MethodPut, http.MethodDelete:
-		if !env.authorized(w, r, varGoldenPushToken) {
-			return
-		}
-	default:
-		fail(w, http.StatusMethodNotAllowed, "GET, HEAD, PUT or DELETE")
-		return
+// goldenKey is the route's {key...}, or false after answering 404: it must
+// be exactly one of the cache's keys, whatever the token.
+func goldenKey(w http.ResponseWriter, params []string) (string, bool) {
+	if !wire.IsGoldenKey(params[0]) {
+		fail(w, wire.CodeNotFound, "not a golden-image key: %s, %s or %s", wire.GoldenLatestKey,
+			wire.GoldenManifestKey("<sha256>"), wire.GoldenChunkKey("<sha256>"))
+		return "", false
 	}
-	if !isGoldenKey(key) {
-		fail(w, http.StatusNotFound, "not a golden-image key: golden/latest, golden/manifests/<sha256>.json or golden/chunks/<sha256>.zst")
-		return
-	}
+	return params[0], true
+}
+
+// goldenBlobs answers 500 and false when the binding is missing.
+func (env Env) goldenBlobs(w http.ResponseWriter) (Blobs, bool) {
 	b, err := env.Golden()
 	if err != nil {
-		fail(w, http.StatusInternalServerError, "the GOLDEN bucket: %v", err)
-		return
+		fail(w, wire.CodeInternal, "the GOLDEN bucket: %v", err)
+		return nil, false
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	switch r.Method {
-	case http.MethodHead:
-		info, ok, err := b.Head(key)
-		switch {
-		case err != nil:
-			fail(w, http.StatusBadGateway, "reading %s: %v", key, err)
-		case !ok:
-			w.WriteHeader(http.StatusNotFound)
-		default:
-			describe(w, info)
-			w.WriteHeader(http.StatusOK)
-		}
-	case http.MethodGet:
-		goldenGet(w, r, b, key)
-	case http.MethodPut:
-		goldenPut(w, r, b, key)
-	case http.MethodDelete:
-		if err := b.Delete(key); err != nil {
-			fail(w, http.StatusBadGateway, "deleting %s: %v", key, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+	return b, true
+}
+
+func (env Env) goldenHead(w http.ResponseWriter, _ *http.Request, params []string) {
+	key, ok := goldenKey(w, params)
+	if !ok {
+		return
+	}
+	b, ok := env.goldenBlobs(w)
+	if !ok {
+		return
+	}
+	info, ok, err := b.Head(key)
+	switch {
+	case err != nil:
+		fail(w, wire.CodeStorage, "reading %s: %v", key, err)
+	case !ok:
+		w.WriteHeader(http.StatusNotFound)
+	default:
+		describe(w, info)
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
+func (env Env) goldenDelete(w http.ResponseWriter, _ *http.Request, params []string) {
+	key, ok := goldenKey(w, params)
+	if !ok {
+		return
+	}
+	b, ok := env.goldenBlobs(w)
+	if !ok {
+		return
+	}
+	if err := b.Delete(key); err != nil {
+		fail(w, wire.CodeStorage, "deleting %s: %v", key, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func describe(w http.ResponseWriter, info BlobInfo) {
-	w.Header().Set(hdrSize, strconv.FormatInt(info.Size, 10))
+	w.Header().Set(wire.HeaderSize, strconv.FormatInt(info.Size, 10))
 	if info.SHA256 != "" {
-		w.Header().Set(hdrSHA256, info.SHA256)
+		w.Header().Set(wire.HeaderSHA256, info.SHA256)
 	}
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -135,17 +119,25 @@ func describe(w http.ResponseWriter, info BlobInfo) {
 
 // goldenGet serves the object, or with a Range header the part asked for,
 // which is how vm-golden-pull resumes a chunk cut off part way.
-func goldenGet(w http.ResponseWriter, r *http.Request, b Blobs, key string) {
+func (env Env) goldenGet(w http.ResponseWriter, r *http.Request, params []string) {
+	key, ok := goldenKey(w, params)
+	if !ok {
+		return
+	}
+	b, ok := env.goldenBlobs(w)
+	if !ok {
+		return
+	}
 	var rng *byteRange
 	var size int64
 	if h := r.Header.Get("Range"); h != "" {
 		info, ok, err := b.Head(key)
 		switch {
 		case err != nil:
-			fail(w, http.StatusBadGateway, "reading %s: %v", key, err)
+			fail(w, wire.CodeStorage, "reading %s: %v", key, err)
 			return
 		case !ok:
-			fail(w, http.StatusNotFound, "no such object")
+			fail(w, wire.CodeNotFound, "no such object")
 			return
 		}
 		size = info.Size
@@ -153,17 +145,17 @@ func goldenGet(w http.ResponseWriter, r *http.Request, b Blobs, key string) {
 		rng, satisfiable = parseRange(h, size)
 		if !satisfiable {
 			w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
-			fail(w, http.StatusRequestedRangeNotSatisfiable, "range %q is outside the object's %d bytes", h, size)
+			fail(w, wire.CodeRangeNotSatisfiable, "range %q is outside the object's %d bytes", h, size)
 			return
 		}
 	}
 	info, body, ok, err := b.Get(key, rng)
 	switch {
 	case err != nil:
-		fail(w, http.StatusBadGateway, "reading %s: %v", key, err)
+		fail(w, wire.CodeStorage, "reading %s: %v", key, err)
 		return
 	case !ok:
-		fail(w, http.StatusNotFound, "no such object")
+		fail(w, wire.CodeNotFound, "no such object")
 		return
 	}
 	defer func() { _ = body.Close() }()
@@ -172,7 +164,7 @@ func goldenGet(w http.ResponseWriter, r *http.Request, b Blobs, key string) {
 		if info.Size != size {
 			// Replaced between the HEAD and the GET: the range was worked out
 			// for other bytes.
-			fail(w, http.StatusConflict, "%s changed while it was being read; ask again", key)
+			fail(w, wire.CodeConflict, "%s changed while it was being read; ask again", key)
 			return
 		}
 		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(rng.Offset, 10)+"-"+
@@ -199,7 +191,7 @@ func parseRange(h string, size int64) (*byteRange, bool) {
 		return nil, true
 	}
 	num := func(s string) (int64, bool) {
-		if s == "" || !allBytes(s, func(c byte) bool { return '0' <= c && c <= '9' }) || len(s) > 18 {
+		if s == "" || !wire.AllBytes(s, func(c byte) bool { return '0' <= c && c <= '9' }) || len(s) > 18 {
 			return 0, false
 		}
 		n, err := strconv.ParseInt(s, 10, 64)
@@ -238,34 +230,37 @@ func parseRange(h string, size int64) (*byteRange, bool) {
 // checks it as the body arrives and refuses the put if it does not match, so
 // nothing is stored that is not what was sent. A manifest is named by that
 // hash, so for one the claim must also be its name.
-func goldenPut(w http.ResponseWriter, r *http.Request, b Blobs, key string) {
-	if r.ContentLength < 0 {
-		fail(w, http.StatusLengthRequired, "send Content-Length: R2 stores a stream only of known length")
+//
+// Content-Length is required and limited by the route (wire.Routes), and
+// the dispatcher has checked both.
+func (env Env) goldenPut(w http.ResponseWriter, r *http.Request, params []string) {
+	key, ok := goldenKey(w, params)
+	if !ok {
 		return
 	}
-	if r.ContentLength > maxGoldenPut {
-		fail(w, http.StatusRequestEntityTooLarge, "%d bytes, over the %d this accepts", r.ContentLength, maxGoldenPut)
+	b, ok := env.goldenBlobs(w)
+	if !ok {
 		return
 	}
-	sum := r.Header.Get(hdrSHA256)
-	if !isHex(sum, 64) {
-		fail(w, http.StatusBadRequest, "send %s: the body's SHA-256, 64 lower-case hex digits", hdrSHA256)
+	sum := r.Header.Get(wire.HeaderSHA256)
+	if !wire.IsHex(sum, 64) {
+		fail(w, wire.CodeBadRequest, "send %s: the body's SHA-256, 64 lower-case hex digits", wire.HeaderSHA256)
 		return
 	}
 	if id, ok := strings.CutPrefix(key, "golden/manifests/"); ok && strings.TrimSuffix(id, ".json") != sum {
-		fail(w, http.StatusBadRequest, "a manifest is named by its SHA-256, and %s says %s", hdrSHA256, sum)
+		fail(w, wire.CodeBadRequest, "a manifest is named by its SHA-256, and %s says %s", wire.HeaderSHA256, sum)
 		return
 	}
 	info, err := b.Put(key, r.Body, r.ContentLength, sum)
 	switch {
 	case errors.Is(err, errDigestMismatch):
-		fail(w, http.StatusBadRequest, "%v; nothing was stored", err)
+		fail(w, wire.CodeDigestMismatch, "%v; nothing was stored", err)
 		return
 	case err != nil:
-		fail(w, http.StatusBadGateway, "storing %s: %v", key, err)
+		fail(w, wire.CodeStorage, "storing %s: %v", key, err)
 		return
 	case info.Size != r.ContentLength:
-		fail(w, http.StatusBadGateway, "%s was stored with %d bytes, and %d were sent", key, info.Size, r.ContentLength)
+		fail(w, wire.CodeStorage, "%s was stored with %d bytes, and %d were sent", key, info.Size, r.ContentLength)
 		return
 	}
 	writeJSON(w, http.StatusCreated, BlobInfo{Key: key, Size: info.Size, SHA256: sum})
@@ -274,31 +269,26 @@ func goldenPut(w http.ResponseWriter, r *http.Request, b Blobs, key string) {
 // goldenList is /api/golden-list/{kind}: what vm-golden-push -delete needs to
 // find every manifest and every chunk no manifest names. Write token only:
 // a machine that only pulls has no reason to enumerate the bucket.
-func (env Env) goldenList(w http.ResponseWriter, r *http.Request, kind string) {
-	if !env.authorized(w, r, varGoldenPushToken) {
-		return
-	}
-	prefix, ok := goldenKinds[kind]
+func (env Env) goldenList(w http.ResponseWriter, r *http.Request, params []string) {
+	prefix, ok := wire.GoldenListKinds[params[0]]
 	if !ok {
-		fail(w, http.StatusNotFound, "list manifests or chunks")
+		fail(w, wire.CodeNotFound, "list manifests or chunks")
 		return
 	}
-	b, err := env.Golden()
-	if err != nil {
-		fail(w, http.StatusInternalServerError, "the GOLDEN bucket: %v", err)
+	b, ok := env.goldenBlobs(w)
+	if !ok {
 		return
 	}
 	objs, next, err := b.List(prefix, r.URL.Query().Get("cursor"))
 	if err != nil {
-		fail(w, http.StatusBadGateway, "listing %s: %v", prefix, err)
+		fail(w, wire.CodeStorage, "listing %s: %v", prefix, err)
 		return
 	}
 	out := make([]BlobInfo, 0, len(objs))
 	for _, o := range objs {
-		if isGoldenKey(o.Key) { // anything else under the prefix is not ours to name
+		if wire.IsGoldenKey(o.Key) { // anything else under the prefix is not ours to name
 			out = append(out, BlobInfo{Key: o.Key, Size: o.Size})
 		}
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"objects": out, "cursor": next})
+	writeJSON(w, http.StatusOK, wire.GoldenList{Objects: out, Cursor: next})
 }

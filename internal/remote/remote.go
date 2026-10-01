@@ -1,50 +1,40 @@
-// Package remote drives a Mac somewhere else: the client of the Worker's job
-// queue (worker/jobs.go), for `irgo-winvm remote ...` on any OS, and the loop
-// `irgo-winvm serve` runs on a Mac to take jobs from it.
+// Package remote drives a Mac somewhere else: the client side of the
+// Worker's job queue, for `irgo-winvm remote-*` on any OS, and the loop
+// `irgo-winvm serve` runs on a Mac to take jobs from it. The requests are
+// internal/workerclient's, built from wire's route table; this package waits,
+// prints, checks and maps outcomes onto the tool's exit codes.
 //
 // The Mac only connects out. It asks the Worker for the oldest queued job,
 // runs it on a fresh clone of the golden image, and sends the log, the result
-// files and the exit code back. The Worker holds the queue in R2; nothing
-// here listens on a port.
+// files and the exit code back. Nothing here listens on a port.
 //
 // It knows nothing about UTM: what running a job means is the Executor the
-// serve command passes in, which is the CLI's own commands. That keeps this
+// serve command passes in, which is the CLI's own code. That keeps this
 // package building and testing on Linux and Windows, where the client runs.
 package remote
 
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // GuideURL is the page that says how to set the remote up and use it.
 const GuideURL = "https://joeblew999.github.io/irgo-windows-vm/agents.html#from-another-machine-linux-windows-github"
 
-// The environment the client and the Mac read. GuideURL says how each is set.
-const (
-	EnvURL         = "IRGO_REMOTE_URL"          // the Worker, e.g. https://irgo-windows-vm.<you>.workers.dev
-	EnvToken       = "IRGO_REMOTE_TOKEN"        // a caller's token (JOBS_TOKENS), or the admin token
-	EnvRunnerToken = "IRGO_REMOTE_RUNNER_TOKEN" // the Mac's token (JOBS_RUNNER_TOKEN), for serve only
+// The types are wire's: what the routes send and answer.
+type (
+	Spec     = wire.JobSpec
+	Job      = wire.JobView
+	FileInfo = wire.BlobInfo // Key is the file's name
 )
-
-// Spec is what a caller asks for: the Worker's JobSpec, field for field.
-type Spec struct {
-	Kind     string   `json:"kind"` // KindApp or KindTest
-	Name     string   `json:"name"`
-	Size     int64    `json:"size"`
-	SHA256   string   `json:"sha256"`
-	GUI      bool     `json:"gui,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	TimeoutS int      `json:"timeout_s,omitempty"`
-}
 
 // Job kinds.
 const (
-	KindApp  = "app"  // an .exe: run, its output and exit code back
-	KindTest = "test" // a `go test -c` binary: run with -test.v=test2json, events back
+	KindApp  = wire.JobKindApp
+	KindTest = wire.JobKindTest
 )
 
 // OutToken in an argument is replaced on the Mac by a directory in the
@@ -53,58 +43,13 @@ const (
 // a result.
 const OutToken = "{out}"
 
-// FileInfo is one stored result file.
-type FileInfo struct {
-	Name   string `json:"key"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256,omitempty"`
-}
-
-// Job is a job as the Worker reports it.
-type Job struct {
-	ID       string     `json:"id"`
-	Owner    string     `json:"owner"`
-	Spec     Spec       `json:"spec"`
-	State    string     `json:"state"`
-	Created  time.Time  `json:"created"`
-	Queued   time.Time  `json:"queued,omitzero"`
-	Started  time.Time  `json:"started,omitzero"`
-	Finished time.Time  `json:"finished,omitzero"`
-	Runner   string     `json:"runner,omitempty"`
-	Cancel   bool       `json:"cancel_requested,omitempty"`
-	ExitCode *int       `json:"exit_code,omitempty"`
-	Outcome  string     `json:"outcome,omitempty"`
-	Message  string     `json:"message,omitempty"`
-	Files    []FileInfo `json:"files,omitempty"`
-	Why      string     `json:"why,omitempty"`
-	Position int        `json:"position,omitempty"`
-	Running  int        `json:"running"`
-}
-
-// Job states, as the Worker names them.
-const (
-	StateUploading = "uploading"
-	StateQueued    = "queued"
-	StateRunning   = "running"
-	StateFinished  = "finished"
-	StateCancelled = "cancelled"
-	StateExpired   = "expired"
-	StateLost      = "lost"
-	StateTimedOut  = "timed-out"
-)
-
-// Final reports whether the job has ended, one way or another.
-func (j Job) Final() bool {
-	return j.State != StateUploading && j.State != StateQueued && j.State != StateRunning
-}
-
 // Code is the exit code a job maps to on the tool's table
 // (command.Outcomes): what the Mac's command exited with when the job ran,
 // and CodeNotRun when it never ran or never finished: cancelled, expired in
 // the queue, its Mac gone. A code the Mac reported that this build does not
 // declare is CodeFailed, never passed through as if it meant something here.
-func (j Job) Code() command.Code {
-	if j.State != StateFinished || j.ExitCode == nil {
+func Code(j Job) command.Code {
+	if j.State != wire.JobFinished || j.ExitCode == nil {
 		return command.CodeNotRun
 	}
 	c := command.Code(*j.ExitCode)
@@ -116,13 +61,13 @@ func (j Job) Code() command.Code {
 
 // Err is the job's outcome as an error: nil when it exited 0, otherwise one
 // that carries its code (see Code) and says why.
-func (j Job) Err() error {
-	c := j.Code()
+func Err(j Job) error {
+	c := Code(j)
 	if c == command.CodeOK {
 		return nil
 	}
 	why := j.Message
-	if j.State != StateFinished {
+	if j.State != wire.JobFinished {
 		why = j.State
 		if j.Why != "" {
 			why += ": " + j.Why
@@ -150,7 +95,7 @@ func (e *JobError) Error() string {
 var (
 	// ErrConfig is IRGO_REMOTE_URL or a token missing.
 	ErrConfig = errors.New("remote is not configured")
-	// ErrAuth is the Worker refusing the token: 401 or 403.
+	// ErrAuth is the Worker refusing the token, or not configured for it.
 	ErrAuth = errors.New("the Worker refused the token")
 	// ErrNotFound is a job that does not exist, or is not this caller's.
 	ErrNotFound = errors.New("no such job")

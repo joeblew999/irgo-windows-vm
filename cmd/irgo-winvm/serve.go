@@ -19,6 +19,7 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 const serveAbout = `  On the Mac: takes jobs that remote-submit queued at the Worker and runs
@@ -40,7 +41,7 @@ func serveFlags() *flag.FlagSet {
 
 // runServe is the Mac's side of the remote queue.
 func runServe(v values, _ []string) error {
-	c, err := remote.FromEnv(remote.EnvRunnerToken)
+	c, err := remote.FromEnv(wire.ScopeJobsRunner)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}

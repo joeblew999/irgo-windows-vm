@@ -1,12 +1,15 @@
 // Separate module: the Cloudflare Worker that serves the site, the live glaze
 // status and the golden image's signed links. workers-go and the Wasm build have
 // no business in the graph of the binary users download, the same reason site/
-// and examples/ are separate.
+// and examples/ are separate. The root module is required, through the
+// replace below, for package wire alone: the route table, standard library
+// only (docs/WORKER.md, "The route table").
 module github.com/joeblew999/irgo-windows-vm/worker
 
 go 1.27.1
 
 require (
+	github.com/joeblew999/irgo-windows-vm v0.0.0
 	github.com/syumai/workers-go v0.36.0
 	modernc.org/sqlite v1.59.0
 )
@@ -17,10 +20,12 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
 
 tool github.com/syumai/workers-go/cmd/workers-assets-gen
+
+replace github.com/joeblew999/irgo-windows-vm => ../

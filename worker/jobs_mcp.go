@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // mcpProtocol is the newest MCP revision this answers as; a client asking
@@ -97,24 +99,11 @@ func idTool(name, desc string) map[string]any {
 	}
 }
 
-// mcp is POST /api/mcp.
-func (env Env) mcp(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		// No server-sent events stream: this server never starts a message.
-		w.Header().Set("Allow", "POST")
-		fail(w, http.StatusMethodNotAllowed, "POST a JSON-RPC message")
-		return
-	}
-	_, role, ok := env.jobCaller(w, r)
-	if !ok {
-		return
-	}
-	if role == roleRunner {
-		fail(w, http.StatusForbidden, "refused: the runner token only takes and reports jobs")
-		return
-	}
+// mcp is POST /api/mcp. The dispatcher has checked the caller's token; the
+// tools reuse it.
+func (env Env) mcp(w http.ResponseWriter, r *http.Request, _ []string) {
 	var req rpcRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxInlineBinary*2)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, wire.MaxJobMCP)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, rpcError(nil, -32700, "parse error: "+err.Error()))
 		return
 	}
@@ -165,12 +154,12 @@ func (env Env) mcpCall(auth, name string, a map[string]any) ([]mcpContent, bool)
 	str := func(k string) string { s, _ := a[k].(string); return s }
 	num := func(k string) int64 { f, _ := a[k].(float64); return int64(f) }
 	id := str("id")
-	if name != "submit_job" && !isJobID(id) {
+	if name != "submit_job" && !wire.IsJobID(id) {
 		return text("id must be a job id: 32 hex digits"), true
 	}
 	switch name {
 	case "submit_job":
-		spec := JobSpec{Kind: str("kind"), Name: str("name"), TimeoutS: int(num("timeout_s"))}
+		spec := wire.JobSpec{Kind: str("kind"), Name: str("name"), TimeoutS: int(num("timeout_s"))}
 		spec.GUI, _ = a["gui"].(bool)
 		if list, ok := a["args"].([]any); ok {
 			for _, x := range list {
@@ -192,12 +181,12 @@ func (env Env) mcpCall(auth, name string, a map[string]any) ([]mcpContent, bool)
 			spec.Size, spec.SHA256 = num("size"), str("sha256")
 		}
 		body, _ := json.Marshal(spec)
-		code, out := env.call(auth, http.MethodPost, "/api/jobs", body)
+		code, out := env.call(auth, http.MethodPost, wire.MustFind(wire.RouteJobSubmit).URL(""), body)
 		if code != http.StatusCreated || data == nil {
 			return text(string(out)), code != http.StatusCreated
 		}
 		var made struct {
-			Job    jobView `json:"job"`
+			Job    wire.JobView `json:"job"`
 			Upload string  `json:"upload"`
 		}
 		if err := json.Unmarshal(out, &made); err != nil {
@@ -206,37 +195,37 @@ func (env Env) mcpCall(auth, name string, a map[string]any) ([]mcpContent, bool)
 		code, out = env.call(auth, http.MethodPut, made.Upload, data)
 		return text(string(out)), code != http.StatusOK
 	case "job_status":
-		code, out := env.call(auth, http.MethodGet, jobPath(id), nil)
+		code, out := env.call(auth, http.MethodGet, wire.MustFind(wire.RouteJobGet).URL("", id), nil)
 		return text(string(out)), code != http.StatusOK
 	case "cancel_job":
-		code, out := env.call(auth, http.MethodPost, jobPath(id, "cancel"), nil)
+		code, out := env.call(auth, http.MethodPost, wire.MustFind(wire.RouteJobCancel).URL("", id), nil)
 		return text(string(out)), code != http.StatusOK
 	case "job_log":
 		off := num("offset")
-		rec := env.record(auth, http.MethodGet, jobPath(id, "log")+"?offset="+strconv.FormatInt(off, 10), nil)
+		rec := env.record(auth, http.MethodGet, wire.MustFind(wire.RouteJobLog).URL("", id)+"?offset="+strconv.FormatInt(off, 10), nil)
 		if rec.code != http.StatusOK {
 			return text(rec.buf.String()), true
 		}
-		return text(rec.buf.String() + "\n[next offset: " + rec.h.Get("X-Log-Size") + "]"), false
+		return text(rec.buf.String() + "\n[next offset: " + rec.h.Get(wire.HeaderLogSize) + "]"), false
 	case "job_result":
-		code, out := env.call(auth, http.MethodGet, jobPath(id), nil)
+		code, out := env.call(auth, http.MethodGet, wire.MustFind(wire.RouteJobGet).URL("", id), nil)
 		if code != http.StatusOK {
 			return text(string(out)), true
 		}
-		var j jobView
+		var j wire.JobView
 		if err := json.Unmarshal(out, &j); err != nil {
 			return text(string(out)), true
 		}
-		if !finalState(j.State) {
+		if !wire.JobFinal(j.State) {
 			return text(fmt.Sprintf("job %s is %s; ask again when it is final\n%s", id, j.State, out)), true
 		}
 		content := text(string(out))
 		for _, f := range j.Files {
 			if f.Size > 2<<20 {
-				content = append(content, mcpContent{Type: "text", Text: fmt.Sprintf("%s: %d bytes, too large to include; GET %s", f.Key, f.Size, jobPath(id, "files", f.Key))})
+				content = append(content, mcpContent{Type: "text", Text: fmt.Sprintf("%s: %d bytes, too large to include; GET %s", f.Key, f.Size, wire.MustFind(wire.RouteJobFile).URL("", id, f.Key))})
 				continue
 			}
-			code, b := env.call(auth, http.MethodGet, jobPath(id, "files", f.Key), nil)
+			code, b := env.call(auth, http.MethodGet, wire.MustFind(wire.RouteJobFile).URL("", id, f.Key), nil)
 			switch {
 			case code != http.StatusOK:
 				content = append(content, mcpContent{Type: "text", Text: f.Key + ": " + string(b)})
@@ -247,7 +236,7 @@ func (env Env) mcpCall(auth, name string, a map[string]any) ([]mcpContent, bool)
 				content = append(content, mcpContent{Type: "text", Text: "--- " + f.Key + "\n" + string(b)})
 			}
 		}
-		return content, j.State != stFinished || j.ExitCode == nil || *j.ExitCode != 0
+		return content, j.State != wire.JobFinished || j.ExitCode == nil || *j.ExitCode != 0
 	}
 	return text("no such tool: " + name), true
 }
@@ -291,7 +280,7 @@ func (env Env) record(auth, method, path string, body []byte) *recorder {
 	if body != nil {
 		req.Body, req.ContentLength = inBody{bytes.NewReader(body), body}, int64(len(body))
 		sum := sha256.Sum256(body)
-		req.Header.Set(hdrJobSHA256, hex.EncodeToString(sum[:]))
+		req.Header.Set(wire.HeaderJobSHA256, hex.EncodeToString(sum[:]))
 	}
 	req.Header.Set("Authorization", auth)
 	Handler(env).ServeHTTP(rec, req)
@@ -309,3 +298,8 @@ func (env Env) call(auth, method, path string, body []byte) (int, []byte) {
 	rec := env.record(auth, method, path, body)
 	return rec.code, rec.buf.Bytes()
 }
+
+// The MCP handler is registered here, not in the handlers literal: it calls
+// Handler in-process, which reads handlers, and Go refuses that cycle in an
+// initializer.
+func init() { handlers[wire.RouteJobsMCP] = Env.mcp }

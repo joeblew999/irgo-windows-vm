@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // Deps is what the server needs from the program that wires it.
@@ -236,7 +238,25 @@ func describe(c command.Command) string {
 	if c.Undo != "" {
 		d += " Undo: " + c.Undo + "."
 	}
+	if rs := workerRoutes(c.Name); rs != "" {
+		d += " Through the project's Worker when configured: " + rs + "."
+	}
 	return d
+}
+
+// workerRoutes names the Worker routes a command calls, from wire's table
+// (Route.Commands), so a tool's description points at the route rather than
+// restating what it does.
+func workerRoutes(name string) string {
+	var out []string
+	for _, r := range wire.Routes {
+		for _, c := range r.Commands {
+			if c == name {
+				out = append(out, r.Name+" ("+r.Method+" "+r.Path+")")
+			}
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // handler runs one command and returns what it printed.

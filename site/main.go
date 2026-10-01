@@ -41,6 +41,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 //go:embed page.tmpl
@@ -96,6 +98,9 @@ var pages = []struct {
 	{"docs/VM-STATUS.md", "vm-status.html", "VM status", "", "testing.html", "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"},
 	{"docs/ARCHITECTURE.md", "architecture.html", "Architecture", "Architecture", "", "How the code is built: stages, packages, locks, jobs, data, the golden image"},
 	{"docs/WORKER.md", "worker.html", "The Cloudflare Worker", "", "architecture.html", "The Worker: the site, live glaze status and the golden image's private API"},
+	// Generated from the Worker's route table in package wire, the table the
+	// Worker routes by and the tool's client builds requests from.
+	{"", "api.html", "Worker API", "", "architecture.html", "Every endpoint of the Cloudflare Worker, generated from its route table"},
 	{"docs/TRAPS.md", "traps.html", "Known traps", "", "architecture.html", "What fails silently or misleadingly, one line each"},
 	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "", "Set up, run the checks, land a change, cut a release"},
 	{"docs/CONVENTIONS.md", "conventions.html", "Conventions", "", "contributing.html", "How code here is written, and the defect behind each rule"},
@@ -184,6 +189,11 @@ type page struct {
 	// (worker/) for the newest run when it is served from there. On GitHub
 	// Pages the request finds nothing and the page stays as rendered.
 	Live bool
+
+	// LiveAPI is the path the Live page asks, relative so it resolves
+	// against wherever the site is served: the glaze-latest route's, from
+	// wire's table, not written in the template.
+	LiveAPI string
 }
 
 // livePage is the page that shows the Worker's latest glaze runs.
@@ -313,6 +323,8 @@ func build(root, out, repo, siteURL, sha string) error {
 					return gErr
 				}
 				raw = []byte(g)
+			case "api.html":
+				raw = generateAPI()
 			default:
 				return fmt.Errorf("%s has no source file and no generator", p.Out)
 			}
@@ -353,7 +365,8 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, All: all, Repo: repo, Source: p.Src, Build: stamp.line(), Home: isHome(p.Nav, p.Under), Site: siteName(), Live: p.Out == livePage}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, All: all, Repo: repo, Source: p.Src, Build: stamp.line(), Home: isHome(p.Nav, p.Under), Site: siteName(), Live: p.Out == livePage,
+			LiveAPI: strings.TrimPrefix(wire.MustFind(wire.RouteGlazeLatest).Path, "/")}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}
@@ -362,7 +375,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 		from := p.Src
 		if from == "" {
-			from = "(the binary)"
+			from = "(the Go code)"
 		}
 		fmt.Printf("  %-18s <- %s\n", p.Out, from)
 	}

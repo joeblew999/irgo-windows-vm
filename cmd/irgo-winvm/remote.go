@@ -13,6 +13,7 @@ import (
 
 	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // The remote-* commands: the client of the Worker's job queue. They build and
@@ -45,7 +46,7 @@ func remoteSubmitFlags() *flag.FlagSet {
 }
 
 func remoteClient() (*remote.Client, error) {
-	c, err := remote.FromEnv(remote.EnvToken)
+	c, err := remote.FromEnv(wire.ScopeJobs)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -127,7 +128,7 @@ func fetchAndReport(ctx context.Context, c *remote.Client, j remote.Job, dir str
 		b, _ := json.Marshal(j)
 		_, _ = fmt.Fprintln(utmvm.Out, string(b))
 	}
-	return j.Err()
+	return remote.Err(j)
 }
 
 func exitWords(j remote.Job) string {
@@ -201,16 +202,16 @@ func runRemoteStatus(v values, args []string) error {
 	say := utmvm.Reporter("remote-status")
 	say("job:      %s (%s %s, from %s)", j.ID, j.Spec.Kind, j.Spec.Name, j.Owner)
 	say("state:    %s", j.State)
-	if j.State == remote.StateQueued {
+	if j.State == wire.JobQueued {
 		say("queue:    %d ahead of it, %d running", j.Position-1, j.Running)
 	}
 	if j.Runner != "" {
 		say("runner:   %s", j.Runner)
 	}
-	if j.Final() {
+	if wire.JobFinal(j.State) {
 		say("exit:     %s", exitWords(j))
 		for _, f := range j.Files {
-			say("file:     %s (%s)", f.Name, utmvm.HumanBytes(f.Size))
+			say("file:     %s (%s)", f.Key, utmvm.HumanBytes(f.Size))
 		}
 	}
 	return nil
@@ -237,7 +238,7 @@ func runRemoteLogs(v values, args []string) error {
 		if err != nil {
 			return remoteErr(err)
 		}
-		return j.Err()
+		return remote.Err(j)
 	}
 	b, _, err := c.Log(ctx, id, 0)
 	if err != nil {
@@ -270,8 +271,8 @@ func runRemoteResult(v values, args []string) error {
 	if err != nil {
 		return remoteErr(err)
 	}
-	if !j.Final() {
-		return &remote.JobError{ID: id, Code: j.Code(), Msg: "still " + j.State + "; wait with: irgo-winvm remote logs -f " + id}
+	if !wire.JobFinal(j.State) {
+		return &remote.JobError{ID: id, Code: remote.Code(j), Msg: "still " + j.State + "; wait with: irgo-winvm remote logs -f " + id}
 	}
 	return fetchAndReport(ctx, c, j, v.String("o"), v.Bool("json"), utmvm.Printer("remote-result"))
 }
@@ -290,7 +291,7 @@ func runRemoteCancel(_ values, args []string) error {
 		return remoteErr(err)
 	}
 	say := utmvm.Printer("remote-cancel")
-	if j.State == remote.StateRunning {
+	if j.State == wire.JobRunning {
 		say("job %s is running on %s; it stops at its next step (heartbeats are every 20 s; a program already running finishes or reaches its timeout first) and its VM is deleted", id, j.Runner)
 		return nil
 	}

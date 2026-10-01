@@ -1,242 +1,135 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/internal/workerclient"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
-// Client talks to the Worker's job queue. One method per endpoint; the
-// waiting, printing and mapping to exit codes are the callers'.
+// Client is workerclient's, for the queue's routes, with each refusal
+// classified (ErrAuth, ErrNotFound, ErrGone) and the files checked.
 type Client struct {
-	URL    string // the Worker, no trailing slash
-	Token  string
-	Runner string // the Mac's name, sent as X-Runner by the runner calls
-	HTTP   *http.Client
+	URL    string // the Worker's origin
+	Runner string // the Mac's name, sent with the runner's requests
+	wc     *workerclient.Client
 }
 
-// FromEnv is a client from IRGO_REMOTE_URL and the token named by tokenVar,
-// or ErrConfig naming every variable that is missing.
-func FromEnv(tokenVar string) (*Client, error) {
-	c := &Client{URL: strings.TrimRight(os.Getenv(EnvURL), "/"), Token: os.Getenv(tokenVar)}
+// NewClient is a client of the Worker at origin holding a token per scope.
+func NewClient(origin string, tokens map[wire.Scope]string) *Client {
+	return &Client{URL: strings.TrimSuffix(origin, "/"), wc: workerclient.New(origin, tokens)}
+}
+
+// FromEnv is a client from IRGO_REMOTE_URL and the token of scope (its
+// variable is wire's: IRGO_REMOTE_TOKEN for a caller, IRGO_REMOTE_RUNNER_TOKEN
+// for the Mac), plus IRGO_REMOTE_ADMIN_TOKEN when it is set. A missing one is
+// ErrConfig, naming every variable that is missing.
+func FromEnv(scope wire.Scope) (*Client, error) {
+	info, _ := scope.Info()
+	origin := os.Getenv(wire.EnvRemoteURL)
+	tok := os.Getenv(info.Env)
 	var missing []string
-	if c.URL == "" {
-		missing = append(missing, EnvURL)
+	if origin == "" {
+		missing = append(missing, wire.EnvRemoteURL)
 	}
-	if c.Token == "" {
-		missing = append(missing, tokenVar)
+	if tok == "" {
+		missing = append(missing, info.Env)
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("%w: set %s (%s)", ErrConfig, strings.Join(missing, " and "), GuideURL)
 	}
+	if err := workerclient.CheckOrigin(origin); err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", ErrConfig, wire.EnvRemoteURL, err)
+	}
+	tokens := map[wire.Scope]string{scope: tok}
+	if a, ok := wire.ScopeJobsAdmin.Info(); ok && os.Getenv(a.Env) != "" {
+		tokens[wire.ScopeJobsAdmin] = os.Getenv(a.Env)
+	}
+	c := NewClient(origin, tokens)
+	c.wc.HTTP = &http.Client{} // no overall timeout: an upload of 95 MB takes minutes
 	return c, nil
 }
 
-func (c *Client) http() *http.Client {
-	if c.HTTP != nil {
-		return c.HTTP
-	}
-	// No overall timeout: an upload of 95 MB on a slow line takes minutes.
-	// Each call has its context instead.
-	return http.DefaultClient
-}
-
-// apiError is a refusal from the Worker, with its message.
-type apiError struct {
-	Status int
-	Msg    string
-}
-
-func (e *apiError) Error() string { return fmt.Sprintf("the Worker answered %d: %s", e.Status, e.Msg) }
-
-func isStatus(err error, code int) bool {
-	var ae *apiError
-	return errors.As(err, &ae) && ae.Status == code
-}
-
-// call makes one request and returns the response, which the caller closes,
-// or an error classified by status: ErrAuth, ErrNotFound, ErrGone, or the
-// Worker's own message.
-func (c *Client) call(ctx context.Context, method, path string, body io.Reader, size int64, hdr map[string]string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.URL+path, body)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.ContentLength = size
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	if c.Runner != "" {
-		req.Header.Set("X-Runner", c.Runner)
-	}
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	res, err := c.http().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode < 300 {
-		return res, nil
-	}
-	defer func() { _ = res.Body.Close() }()
-	b, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
-	var e struct {
-		Error string `json:"error"`
-	}
-	msg := strings.TrimSpace(string(b))
-	if json.Unmarshal(b, &e) == nil && e.Error != "" {
-		msg = e.Error
-	}
-	ae := &apiError{res.StatusCode, msg}
-	switch res.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return nil, fmt.Errorf("%w: %w", ErrAuth, ae)
-	case http.StatusNotFound:
-		return nil, fmt.Errorf("%w: %w", ErrNotFound, ae)
-	case http.StatusConflict:
-		if strings.HasPrefix(path, "/api/runner/jobs/") {
-			return nil, fmt.Errorf("%w: %w", ErrGone, ae)
-		}
-	}
-	return nil, ae
-}
-
-// callJSON makes a request with a JSON body (or none) and decodes the JSON
-// answer into out, when out is not nil.
-func (c *Client) callJSON(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
-	var size int64
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body, size = bytes.NewReader(b), int64(len(b))
-	}
-	res, err := c.call(ctx, method, path, body, size, map[string]string{"Content-Type": "application/json"})
-	// 503 is the Worker losing its compare-and-swap on the queue to other
-	// writers every time, which stored nothing: ask again, a few times.
-	for try := 1; try <= 4 && isStatus(err, http.StatusServiceUnavailable) && ctx.Err() == nil; try++ {
-		time.Sleep(time.Duration(try) * 500 * time.Millisecond)
-		if in != nil {
-			b, _ := json.Marshal(in)
-			body = bytes.NewReader(b)
-		}
-		res, err = c.call(ctx, method, path, body, size, map[string]string{"Content-Type": "application/json"})
-	}
-	if err != nil {
+// classify maps the Worker's refusal onto the package's errors.
+func classify(err error) error {
+	var e *workerclient.Error
+	if !errors.As(err, &e) {
 		return err
 	}
-	defer func() { _ = res.Body.Close() }()
-	if out == nil || res.StatusCode == http.StatusNoContent {
-		return nil
+	switch {
+	case e.Status == http.StatusUnauthorized, e.Code == wire.CodeNotConfigured:
+		return fmt.Errorf("%w: %w", ErrAuth, err)
+	case e.Status == http.StatusNotFound:
+		return fmt.Errorf("%w: %w", ErrNotFound, err)
+	case e.Status == http.StatusConflict && e.Route.Scope == wire.ScopeJobsRunner:
+		return fmt.Errorf("%w: %w", ErrGone, err)
 	}
-	return json.NewDecoder(res.Body).Decode(out)
+	return err
 }
 
-func jobPath(id string, rest ...string) string {
-	return "/api/jobs/" + strings.Join(append([]string{id}, rest...), "/")
-}
-
-func runnerPath(id string, rest ...string) string {
-	return "/api/runner/jobs/" + strings.Join(append([]string{id}, rest...), "/")
-}
-
-// Submit creates a job from spec and returns it, waiting for its binary.
+// Submit creates a job from spec; it waits for its binary.
 func (c *Client) Submit(ctx context.Context, spec Spec) (Job, error) {
-	var out struct {
-		Job Job `json:"job"`
-	}
-	err := c.callJSON(ctx, http.MethodPost, "/api/jobs", spec, &out)
-	return out.Job, err
+	out, err := c.wc.JobSubmit(ctx, spec)
+	return out.Job, classify(err)
 }
 
-// Upload sends the job's binary from path. The Worker checks it against the
-// spec's size and SHA-256 and queues the job.
+// Upload sends the job's binary from path.
 func (c *Client) Upload(ctx context.Context, id, path string) (Job, error) {
-	f, err := os.Open(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return Job{}, err
 	}
-	defer func() { _ = f.Close() }() // read-only
-	st, err := f.Stat()
-	if err != nil {
-		return Job{}, err
-	}
-	res, err := c.call(ctx, http.MethodPut, jobPath(id, "input"), f, st.Size(), map[string]string{"Content-Type": "application/octet-stream"})
-	if err != nil {
-		return Job{}, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	var j Job
-	return j, json.NewDecoder(res.Body).Decode(&j)
+	j, err := c.wc.JobInput(ctx, id, b)
+	return j, classify(err)
 }
 
 // Status is the job now, with its place in the queue.
 func (c *Client) Status(ctx context.Context, id string) (Job, error) {
-	var j Job
-	return j, c.callJSON(ctx, http.MethodGet, jobPath(id), nil, &j)
+	j, err := c.wc.JobGet(ctx, id)
+	return j, classify(err)
 }
 
-// Cancel cancels the job: at once if it has not started, otherwise its Mac
-// stops it at the next heartbeat.
+// Cancel cancels the job.
 func (c *Client) Cancel(ctx context.Context, id string) (Job, error) {
-	var j Job
-	return j, c.callJSON(ctx, http.MethodPost, jobPath(id, "cancel"), nil, &j)
+	j, err := c.wc.JobCancel(ctx, id)
+	return j, classify(err)
 }
 
-// List is every job in the index. Admin token only.
+// List is every job in the index (the admin token).
 func (c *Client) List(ctx context.Context) ([]Job, error) {
-	var out struct {
-		Jobs []Job `json:"jobs"`
-	}
-	return out.Jobs, c.callJSON(ctx, http.MethodGet, "/api/jobs", nil, &out)
+	l, err := c.wc.JobList(ctx)
+	return l.Jobs, classify(err)
 }
 
-// Log is the job's log from byte offset, and its whole size, which is the
-// offset to ask from next.
+// Log is the job's log from byte offset, and the offset to ask from next.
 func (c *Client) Log(ctx context.Context, id string, offset int64) ([]byte, int64, error) {
-	res, err := c.call(ctx, http.MethodGet, jobPath(id, "log")+"?offset="+strconv.FormatInt(offset, 10), nil, 0, nil)
-	if err != nil {
-		return nil, offset, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, offset, err
-	}
-	size, err := strconv.ParseInt(res.Header.Get("X-Log-Size"), 10, 64)
-	if err != nil {
-		return b, offset + int64(len(b)), nil
-	}
-	return b, size, nil
+	b, next, err := c.wc.JobLog(ctx, id, offset)
+	return b, next, classify(err)
 }
 
-// File downloads one result file into dir and returns where it went. Its
-// SHA-256 is checked against what the Mac stored when the Worker says.
+// File downloads one result file into dir and returns where it went,
+// checked against the SHA-256 the Worker stored.
 func (c *Client) File(ctx context.Context, id, name, dir string) (string, error) {
-	if filepath.Base(name) != name || name == "" || name[0] == '.' {
+	if !wire.IsSafeName(name) {
 		return "", fmt.Errorf("%q is not a result file name", name)
 	}
-	res, err := c.call(ctx, http.MethodGet, jobPath(id, "files", name), nil, 0, nil)
+	body, sum, err := c.wc.JobFile(ctx, id, name)
 	if err != nil {
-		return "", err
+		return "", classify(err)
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer func() { _ = body.Close() }()
 	dst := filepath.Join(dir, name)
-	return dst, writeChecked(dst, res.Body, res.Header.Get("X-Job-Sha256"))
+	return dst, writeChecked(dst, body, sum)
 }
 
 // writeChecked writes r to dst through a temporary file, and renames it into
@@ -256,81 +149,55 @@ func writeChecked(dst string, r io.Reader, want string) error {
 		return err
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); want != "" && got != want {
-		return fmt.Errorf("%s arrived with SHA-256 %s, the Worker stored %s", filepath.Base(dst), got, want)
+		return fmt.Errorf("%s arrived with SHA-256 %s, which should be %s", filepath.Base(dst), got, want)
 	}
 	return os.Rename(tmp.Name(), dst)
 }
 
-// Claim takes the oldest queued job for this Mac, or returns nil when there
-// is none.
+// Claim takes the oldest queued job for this Mac, or returns nil.
 func (c *Client) Claim(ctx context.Context) (*Job, error) {
-	res, err := c.call(ctx, http.MethodPost, "/api/runner/claim", nil, 0, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode == http.StatusNoContent {
-		return nil, nil
-	}
-	var j Job
-	return &j, json.NewDecoder(res.Body).Decode(&j)
+	j, err := c.wc.RunnerClaim(ctx, c.Runner)
+	return j, classify(err)
 }
 
 // Heartbeat keeps the job's lease and answers whether it was cancelled.
 // ErrGone means its lease already ran out or it was ended: stop.
-func (c *Client) Heartbeat(ctx context.Context, id string) (cancel bool, err error) {
-	var out struct {
-		Cancel bool `json:"cancel"`
-	}
-	return out.Cancel, c.callJSON(ctx, http.MethodPost, runnerPath(id, "heartbeat"), nil, &out)
+func (c *Client) Heartbeat(ctx context.Context, id string) (bool, error) {
+	hb, err := c.wc.RunnerHeartbeat(ctx, c.Runner, id)
+	return hb.Cancel, classify(err)
 }
 
 // Input downloads the job's binary to dst and checks it against the spec.
 func (c *Client) Input(ctx context.Context, j Job, dst string) error {
-	res, err := c.call(ctx, http.MethodGet, runnerPath(j.ID, "input"), nil, 0, nil)
+	body, err := c.wc.RunnerInput(ctx, c.Runner, j.ID)
 	if err != nil {
-		return err
+		return classify(err)
 	}
-	defer func() { _ = res.Body.Close() }()
-	return writeChecked(dst, res.Body, j.Spec.SHA256)
-}
-
-// put sends bytes with their SHA-256, which R2 checks as they arrive.
-func (c *Client) put(ctx context.Context, path string, b []byte) error {
-	s := sha256.Sum256(b)
-	res, err := c.call(ctx, http.MethodPut, path, bytes.NewReader(b), int64(len(b)),
-		map[string]string{"X-Job-Sha256": hex.EncodeToString(s[:])})
-	if err != nil {
-		return err
-	}
-	return res.Body.Close()
+	defer func() { _ = body.Close() }()
+	return writeChecked(dst, body, j.Spec.SHA256)
 }
 
 // PutLog replaces the job's log with everything said so far.
 func (c *Client) PutLog(ctx context.Context, id string, b []byte) error {
-	return c.put(ctx, runnerPath(id, "log"), b)
+	return classify(c.wc.RunnerLog(ctx, c.Runner, id, b))
 }
 
 // PutFile stores one result file.
 func (c *Client) PutFile(ctx context.Context, id, name string, b []byte) error {
-	return c.put(ctx, runnerPath(id, "files", name), b)
+	return classify(c.wc.RunnerFile(ctx, c.Runner, id, name, b))
 }
 
 // Result is how a job ended on the Mac.
-type Result struct {
-	ExitCode int      `json:"exit_code"`
-	Outcome  string   `json:"outcome"`
-	Message  string   `json:"message,omitempty"`
-	Files    []string `json:"files,omitempty"`
-}
+type Result = wire.JobResult
 
 // Finish reports the result. Every file it names must have been stored.
 func (c *Client) Finish(ctx context.Context, id string, r Result) (Job, error) {
-	var j Job
-	return j, c.callJSON(ctx, http.MethodPost, runnerPath(id, "finish"), r, &j)
+	j, err := c.wc.RunnerFinish(ctx, c.Runner, id, r)
+	return j, classify(err)
 }
 
-// SpecFor reads a binary for a spec: its name, size and SHA-256.
+// SpecFor reads a binary for a spec: its name, size and SHA-256. It must be
+// a Windows executable named .exe.
 func SpecFor(path, kind string, gui bool, args []string, timeout time.Duration) (Spec, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -338,29 +205,20 @@ func SpecFor(path, kind string, gui bool, args []string, timeout time.Duration) 
 	}
 	defer func() { _ = f.Close() }() // read-only
 	h := sha256.New()
+	head := make([]byte, 2)
+	_, hErr := io.ReadFull(f, head)
+	h.Write(head)
 	n, err := io.Copy(h, f)
 	if err != nil {
 		return Spec{}, err
 	}
 	name := filepath.Base(path)
-	if !strings.HasSuffix(strings.ToLower(name), ".exe") {
+	switch {
+	case !strings.HasSuffix(strings.ToLower(name), ".exe"):
 		return Spec{}, fmt.Errorf("%s: the binary must be a Windows .exe (GOOS=windows GOARCH=arm64)", path)
-	}
-	if !isPE(path) {
+	case hErr != nil || string(head) != "MZ":
 		return Spec{}, errors.New(path + " is not a Windows executable (no MZ header); build it with GOOS=windows GOARCH=arm64 CGO_ENABLED=0")
 	}
-	return Spec{Kind: kind, Name: name, Size: n, SHA256: hex.EncodeToString(h.Sum(nil)), GUI: gui, Args: args,
+	return Spec{Kind: kind, Name: name, Size: n + 2, SHA256: hex.EncodeToString(h.Sum(nil)), GUI: gui, Args: args,
 		TimeoutS: int(timeout / time.Second)}, nil
-}
-
-// isPE is whether the file starts as a Windows executable does.
-func isPE(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }() // read-only
-	b := make([]byte, 2)
-	_, err = io.ReadFull(f, b)
-	return err == nil && string(b) == "MZ"
 }

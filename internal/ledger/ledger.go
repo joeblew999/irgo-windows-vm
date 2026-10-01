@@ -32,51 +32,38 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/internal/workerclient"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // Type is what happened. An Op pairs the types that open work with those
 // that close it: Start with End, LeaseAcquire with LeaseRelease; Reap closes
 // the op it names. The Worker flags open work it never sees closed.
-type Type string
+type Type = wire.LedgerType
 
+// The event types, wire's.
 const (
-	Start        Type = "start"
-	End          Type = "end"
-	LeaseAcquire Type = "lease-acquire"
-	LeaseRelease Type = "lease-release"
-	VMCreate     Type = "vm-create"
-	VMDelete     Type = "vm-delete"
-	Reap         Type = "reap"
+	Start        = wire.LedgerStart
+	End          = wire.LedgerEnd
+	LeaseAcquire = wire.LedgerLeaseAcquire
+	LeaseRelease = wire.LedgerLeaseRelease
+	VMCreate     = wire.LedgerVMCreate
+	VMDelete     = wire.LedgerVMDelete
+	Reap         = wire.LedgerReap
 )
 
-// Event is one thing that happened. The JSON names are the wire contract with
-// the Worker (worker/ledger.go, Event). Record fills ID, TS, Machine, Host,
-// Owner, Repo, Version and Client when they are empty.
-type Event struct {
-	ID         string `json:"id"`
-	TS         int64  `json:"ts"` // Unix milliseconds
-	Type       Type   `json:"type"`
-	Op         string `json:"op,omitempty"`
-	Machine    string `json:"machine"`
-	Host       string `json:"host,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Client     string `json:"client,omitempty"`
-	Repo       string `json:"repo,omitempty"`
-	VM         string `json:"vm,omitempty"`
-	Command    string `json:"command,omitempty"`
-	Exit       *int   `json:"exit,omitempty"`
-	DurationMS *int64 `json:"duration_ms,omitempty"`
-	Expires    *int64 `json:"expires,omitempty"` // Unix ms; a lease past this is stale
-	Version    string `json:"version,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-}
+// Event is one thing that happened: the Worker's wire.LedgerEvent. Record
+// fills ID, TS, Machine, Host, Owner, Repo, Version and Client when they are
+// empty.
+type Event = wire.LedgerEvent
 
-// Limits the Worker enforces (worker/ledger.go); kept under them here so an
-// event is never refused for its size.
+// Limits the Worker enforces (wire's); kept under them here so an event is
+// never refused for its size.
 const (
-	maxBatch   = 25
-	maxField   = 200
-	maxDetail  = 500
+	maxBatch   = wire.LedgerMaxBatch
+	maxField   = wire.LedgerMaxField
+	maxDetail  = wire.LedgerMaxDetail
 	maxSpool   = 4 << 20 // past this, new events are dropped rather than filling the disk
 	sendBudget = 2 * time.Second
 )
@@ -273,28 +260,27 @@ func (c *Client) flushRound(ctx context.Context) (more bool, err error) {
 	return true, os.Remove(inflight)
 }
 
-// post sends one batch. A 2xx, and a 400 or 413 (the Worker will never take
-// these bytes, so sending them again would block the spool forever), count
-// as done. Anything else, a 401 included, keeps them for later.
+// post sends one batch through the shared Worker client (ledger-post), once:
+// the spool is the retry. A 2xx, and a 400 or 413 (the Worker will never
+// take these bytes, so sending them again would block the spool forever),
+// count as done. Anything else, a 401 included, keeps them for later.
 func (c *Client) post(ctx context.Context, batch [][]byte) error {
 	body := append([]byte(`{"events":[`), bytes.Join(batch, []byte(","))...)
 	body = append(body, "]}"...)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.URL+"/api/ledger/events", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.cfg.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	_ = resp.Body.Close()
+	wc := workerclient.New(c.cfg.URL, map[wire.Scope]string{wire.ScopeLedgerWrite: c.cfg.Token})
+	wc.Attempts, wc.HTTP = 1, c.cfg.HTTP
+	h := http.Header{}
+	h.Set("Content-Type", wire.TypeJSON)
+	resp, err := wc.Do(ctx, wire.RouteLedgerPost, nil, nil, body, h)
+	var e *workerclient.Error
 	switch {
-	case resp.StatusCode/100 == 2, resp.StatusCode == http.StatusBadRequest, resp.StatusCode == http.StatusRequestEntityTooLarge:
+	case err == nil:
+		_ = resp.Body.Close()
+		return nil
+	case errors.As(err, &e) && (e.Status == http.StatusBadRequest || e.Status == http.StatusRequestEntityTooLarge):
 		return nil
 	}
-	return fmt.Errorf("ledger: %s answered %s", c.cfg.URL, resp.Status)
+	return fmt.Errorf("ledger: %w", err)
 }
 
 // The backoff mark: the time of the last failed send, in Unix ms, read with

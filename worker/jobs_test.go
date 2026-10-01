@@ -12,12 +12,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 var jobVars = map[string]string{
-	varJobTokens:      "alice=tok-alice, bob=tok-bob",
-	varJobAdminToken:  "tok-admin",
-	varJobRunnerToken: "tok-runner",
+	"JOBS_TOKENS":       "alice=tok-alice, bob=tok-bob",
+	"JOBS_ADMIN_TOKEN":  "tok-admin",
+	"JOBS_RUNNER_TOKEN": "tok-runner",
 }
 
 // jobsEnv is a Worker with an in-memory JOBS bucket and a clock the test
@@ -54,12 +56,12 @@ func specJSON(b []byte, extra string) []byte {
 	return []byte(fmt.Sprintf(`{"kind":"app","name":"hello.exe","size":%d,"sha256":%q%s}`, len(b), sum(b), extra))
 }
 
-func decodeJob(t *testing.T, w *httptest.ResponseRecorder) jobView {
+func decodeJob(t *testing.T, w *httptest.ResponseRecorder) wire.JobView {
 	t.Helper()
-	var v jobView
+	var v wire.JobView
 	body := w.Body.Bytes()
 	var made struct {
-		Job *jobView `json:"job"`
+		Job *wire.JobView `json:"job"`
 	}
 	if json.Unmarshal(body, &made) == nil && made.Job != nil {
 		return *made.Job
@@ -84,9 +86,13 @@ func submit(t *testing.T, h http.Handler, token string) string {
 	return id
 }
 
-// Negative control (by hand, 1 Oct 2026): making jobCaller accept any
-// non-empty token fails "wrong token" here; dropping the role checks in jobs
-// fails the three 403 rows. Restored.
+// Each token does its one job: the scopes are wire's, enforced by the
+// dispatcher (TestEveryRouteEnforcesItsScope covers every route); this pins
+// the queue's own rule on top, that a caller sees only its own jobs.
+//
+// Negative control (by hand, 1 Oct 2026): making callerJob skip the owner
+// check fails "another caller's job"; making namedMatch match a name as well
+// as a token fails "a token's name". Restored.
 func TestJobsAuth(t *testing.T) {
 	h, _, _ := jobsEnv(jobVars)
 	id := submit(t, h, "tok-alice")
@@ -99,12 +105,12 @@ func TestJobsAuth(t *testing.T) {
 		{"a token's name is not a token", "GET", "/api/jobs/" + id, "alice", 401},
 		{"another caller's job is not there", "GET", "/api/jobs/" + id, "tok-bob", 404},
 		{"the owner sees it", "GET", "/api/jobs/" + id, "tok-alice", 200},
-		{"an admin sees it", "GET", "/api/jobs/" + id, "tok-admin", 200},
-		{"a submitter cannot list", "GET", "/api/jobs", "tok-alice", 403},
+		{"the admin token does not read jobs", "GET", "/api/jobs/" + id, "tok-admin", 401},
+		{"a caller cannot list", "GET", "/api/jobs", "tok-alice", 401},
 		{"an admin can", "GET", "/api/jobs", "tok-admin", 200},
-		{"a submitter cannot claim", "POST", "/api/runner/claim", "tok-alice", 403},
-		{"the runner cannot submit or read", "GET", "/api/jobs/" + id, "tok-runner", 403},
-		{"the runner token is not an MCP caller", "POST", "/api/mcp", "tok-runner", 403},
+		{"a caller cannot claim", "POST", "/api/runner/claim", "tok-alice", 401},
+		{"the runner cannot read a job", "GET", "/api/jobs/" + id, "tok-runner", 401},
+		{"the runner token is not an MCP caller", "POST", "/api/mcp", "tok-runner", 401},
 	} {
 		if w := jdo(h, c.method, c.path, c.token, nil); w.Code != c.want {
 			t.Errorf("%s: %d %s, want %d", c.name, w.Code, w.Body, c.want)
@@ -131,7 +137,7 @@ func TestJobSpecRefusals(t *testing.T) {
 		"bad kind":   `{"kind":"sh","name":"a.exe","size":1,"sha256":"` + sum(exe) + `"}`,
 		"a path":     `{"kind":"app","name":"../a.exe","size":1,"sha256":"` + sum(exe) + `"}`,
 		"not an exe": `{"kind":"app","name":"a.sh","size":1,"sha256":"` + sum(exe) + `"}`,
-		"too big":    fmt.Sprintf(`{"kind":"app","name":"a.exe","size":%d,"sha256":"%s"}`, maxJobInput+1, sum(exe)),
+		"too big":    fmt.Sprintf(`{"kind":"app","name":"a.exe","size":%d,"sha256":"%s"}`, wire.MaxJobInput+1, sum(exe)),
 		"no hash":    `{"kind":"app","name":"a.exe","size":1}`,
 		"timeout":    `{"kind":"app","name":"a.exe","size":1,"sha256":"` + sum(exe) + `","timeout_s":99999}`,
 	} {
@@ -150,7 +156,7 @@ func TestJobLifecycle(t *testing.T) {
 		t.Fatalf("submit: %d %s", w.Code, w.Body)
 	}
 	j := decodeJob(t, w)
-	if j.State != stUploading || j.Spec.TimeoutS != defJobTimeout || !strings.Contains(w.Body.String(), `"upload":"/api/jobs/`+j.ID+`/input"`) {
+	if j.State != wire.JobUploading || j.Spec.TimeoutS != wire.DefJobTimeout || !strings.Contains(w.Body.String(), `"upload":"/api/jobs/`+j.ID+`/input"`) {
 		t.Fatalf("submitted: %s", w.Body)
 	}
 	// Nothing to claim until the binary is in.
@@ -165,7 +171,7 @@ func TestJobLifecycle(t *testing.T) {
 	if w := jdo(h, "PUT", "/api/jobs/"+j.ID+"/input", "tok-alice", exe[:3]); w.Code != 400 {
 		t.Fatalf("short upload: %d, want 400", w.Code)
 	}
-	if w := jdo(h, "PUT", "/api/jobs/"+j.ID+"/input", "tok-alice", exe); w.Code != 200 || decodeJob(t, w).State != stQueued {
+	if w := jdo(h, "PUT", "/api/jobs/"+j.ID+"/input", "tok-alice", exe); w.Code != 200 || decodeJob(t, w).State != wire.JobQueued {
 		t.Fatalf("upload: %d %s", w.Code, w.Body)
 	}
 	if w := jdo(h, "PUT", "/api/jobs/"+j.ID+"/input", "tok-alice", exe); w.Code != 409 {
@@ -189,11 +195,11 @@ func TestJobLifecycle(t *testing.T) {
 		t.Fatalf("input: %d", w.Code)
 	}
 	log1 := []byte("clone job-x\n")
-	if w := jdo(h, "PUT", r+"/log", "tok-runner", log1, hdrJobSHA256, sum(log1)); w.Code != 201 {
+	if w := jdo(h, "PUT", r+"/log", "tok-runner", log1, wire.HeaderJobSHA256, sum(log1)); w.Code != 201 {
 		t.Fatalf("log: %d %s", w.Code, w.Body)
 	}
 	log2 := append(log1, "running\n"...)
-	jdo(h, "PUT", r+"/log", "tok-runner", log2, hdrJobSHA256, sum(log2))
+	jdo(h, "PUT", r+"/log", "tok-runner", log2, wire.HeaderJobSHA256, sum(log2))
 	if w := jdo(h, "GET", "/api/jobs/"+j.ID+"/log?offset="+fmt.Sprint(len(log1)), "tok-alice", nil); w.Body.String() != "running\n" || w.Header().Get("X-Log-Size") != fmt.Sprint(len(log2)) {
 		t.Fatalf("log from offset: %q size %s", w.Body, w.Header().Get("X-Log-Size"))
 	}
@@ -201,10 +207,10 @@ func TestJobLifecycle(t *testing.T) {
 		t.Fatalf("log past the end: %d %q", w.Code, w.Body)
 	}
 	png := append([]byte("\x89PNG\r\n\x1a\n"), "pic"...)
-	if w := jdo(h, "PUT", r+"/files/desktop.png", "tok-runner", png, hdrJobSHA256, sum(png)); w.Code != 201 {
+	if w := jdo(h, "PUT", r+"/files/desktop.png", "tok-runner", png, wire.HeaderJobSHA256, sum(png)); w.Code != 201 {
 		t.Fatalf("file: %d %s", w.Code, w.Body)
 	}
-	if w := jdo(h, "PUT", r+"/files/run.sh", "tok-runner", png, hdrJobSHA256, sum(png)); w.Code != 400 {
+	if w := jdo(h, "PUT", r+"/files/run.sh", "tok-runner", png, wire.HeaderJobSHA256, sum(png)); w.Code != 400 {
 		t.Fatalf("a file that is not a result type: %d, want 400", w.Code)
 	}
 	if w := jdo(h, "POST", r+"/finish", "tok-runner", []byte(`{"exit_code":1,"outcome":"failed","files":["missing.png"]}`)); w.Code != 400 {
@@ -212,7 +218,7 @@ func TestJobLifecycle(t *testing.T) {
 	}
 	w = jdo(h, "POST", r+"/finish", "tok-runner", []byte(`{"exit_code":1,"outcome":"failed","message":"hello.exe exited 3 in the guest","files":["desktop.png"]}`))
 	v := decodeJob(t, w)
-	if w.Code != 200 || v.State != stFinished || v.ExitCode == nil || *v.ExitCode != 1 || len(v.Files) != 1 || v.Files[0].Size != int64(len(png)) {
+	if w.Code != 200 || v.State != wire.JobFinished || v.ExitCode == nil || *v.ExitCode != 1 || len(v.Files) != 1 || v.Files[0].Size != int64(len(png)) {
 		t.Fatalf("finish: %d %s", w.Code, w.Body)
 	}
 	if w := jdo(h, "GET", "/api/jobs/"+j.ID+"/files/desktop.png", "tok-alice", nil); w.Code != 200 || !bytes.Equal(w.Body.Bytes(), png) || w.Header().Get("Content-Type") != "image/png" {
@@ -250,7 +256,7 @@ func TestJobCancel(t *testing.T) {
 	if w := jdo(h, "POST", "/api/jobs/"+queued+"/cancel", "tok-bob", nil); w.Code != 404 {
 		t.Fatalf("cancelling another caller's job: %d, want 404", w.Code)
 	}
-	if v := decodeJob(t, jdo(h, "POST", "/api/jobs/"+queued+"/cancel", "tok-alice", nil)); v.State != stCancelled {
+	if v := decodeJob(t, jdo(h, "POST", "/api/jobs/"+queued+"/cancel", "tok-alice", nil)); v.State != wire.JobCancelled {
 		t.Fatalf("cancelled while queued: %s", v.State)
 	}
 	if w := jdo(h, "POST", "/api/runner/claim", "tok-runner", nil); w.Code != 204 {
@@ -262,13 +268,13 @@ func TestJobCancel(t *testing.T) {
 	if w := jdo(h, "POST", r+"/heartbeat", "tok-runner", nil); !strings.Contains(w.Body.String(), `"cancel":false`) {
 		t.Fatalf("heartbeat: %s", w.Body)
 	}
-	if v := decodeJob(t, jdo(h, "POST", "/api/jobs/"+running+"/cancel", "tok-admin", nil)); v.State != stRunning || !v.Cancel {
+	if v := decodeJob(t, jdo(h, "POST", "/api/jobs/"+running+"/cancel", "tok-alice", nil)); v.State != wire.JobRunning || !v.Cancel {
 		t.Fatalf("cancel while running: %+v", v)
 	}
 	if w := jdo(h, "POST", r+"/heartbeat", "tok-runner", nil); !strings.Contains(w.Body.String(), `"cancel":true`) {
 		t.Fatalf("the Mac was not told to stop: %s", w.Body)
 	}
-	if v := decodeJob(t, jdo(h, "POST", r+"/finish", "tok-runner", []byte(`{"exit_code":7,"outcome":"not-run"}`))); v.State != stCancelled {
+	if v := decodeJob(t, jdo(h, "POST", r+"/finish", "tok-runner", []byte(`{"exit_code":7,"outcome":"not-run"}`))); v.State != wire.JobCancelled {
 		t.Fatalf("finished after a cancel: %s", v.State)
 	}
 }
@@ -285,15 +291,15 @@ func TestJobSweep(t *testing.T) {
 	noBinary := decodeJob(t, w).ID
 
 	*now = now.Add(leaseFor + time.Second)
-	if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+lost, "tok-alice", nil)); v.State != stLost {
-		t.Fatalf("lost: %s, want %s", v.State, stLost)
+	if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+lost, "tok-alice", nil)); v.State != wire.JobLost {
+		t.Fatalf("lost: %s, want %s", v.State, wire.JobLost)
 	}
-	if w := jdo(h, "POST", "/api/runner/jobs/"+lost+"/heartbeat", "tok-runner", nil); w.Code != 409 || !strings.Contains(w.Body.String(), stLost) {
+	if w := jdo(h, "POST", "/api/runner/jobs/"+lost+"/heartbeat", "tok-runner", nil); w.Code != 409 || !strings.Contains(w.Body.String(), wire.JobLost) {
 		t.Fatalf("a heartbeat after the lease ran out: %d %s", w.Code, w.Body)
 	}
 	*now = now.Add(queueTTL)
 	for _, id := range []string{waiting, noBinary} {
-		if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+id, "tok-alice", nil)); v.State != stExpired {
+		if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+id, "tok-alice", nil)); v.State != wire.JobExpired {
 			t.Fatalf("%s: %s, want expired", id, v.State)
 		}
 	}
@@ -302,8 +308,8 @@ func TestJobSweep(t *testing.T) {
 	if w := jdo(h, "GET", "/api/jobs", "tok-admin", nil); strings.Contains(w.Body.String(), lost) {
 		t.Fatalf("a day-old job is still in the index: %s", w.Body)
 	}
-	if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+lost, "tok-alice", nil)); v.State != stLost {
-		t.Fatalf("archived: %s, want it readable as %s", v.State, stLost)
+	if v := decodeJob(t, jdo(h, "GET", "/api/jobs/"+lost, "tok-alice", nil)); v.State != wire.JobLost {
+		t.Fatalf("archived: %s, want it readable as %s", v.State, wire.JobLost)
 	}
 }
 
@@ -364,7 +370,7 @@ func TestJobsMCP(t *testing.T) {
 	if isErr || !strings.Contains(s, `"state":"queued"`) {
 		t.Fatalf("submit_job: %s", s)
 	}
-	var j jobView
+	var j wire.JobView
 	_ = json.Unmarshal([]byte(s), &j)
 	if s, isErr := toolText(t, rpc(t, h, "tok-alice", "tools/call", map[string]any{"name": "job_result", "arguments": map[string]any{"id": j.ID}})); !isErr || !strings.Contains(s, "queued") {
 		t.Fatalf("job_result before it ran must say so and be an error: %s", s)

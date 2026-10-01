@@ -9,7 +9,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
+
+// The secrets' names, from the table.
+var (
+	varGlazeToken      = secret(wire.ScopeGlazeWrite)
+	varGoldenToken     = secret(wire.ScopeGoldenRead)
+	varGoldenPushToken = secret(wire.ScopeGoldenWrite)
+)
+
+func secret(s wire.Scope) string {
+	i, _ := s.Info()
+	return i.Secret
+}
 
 var testNow = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
@@ -129,7 +143,7 @@ func TestGlazeRoundTrip(t *testing.T) {
 	}
 
 	w = do(h, "GET", "/api/glaze-status", "", nil, "")
-	var got map[string]*latest
+	var got wire.GlazeLatest
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
@@ -167,27 +181,3 @@ func TestGlazeFileRejectsTraversal(t *testing.T) {
 		}
 	}
 }
-
-func TestValidators(t *testing.T) {
-	h64 := strings.Repeat("0a", 32)
-	for k, want := range map[string]bool{
-		"golden/latest": true, "golden/manifests/" + h64 + ".json": true, "golden/chunks/" + h64 + ".zst": true,
-		"golden/": false, "golden/latest/": false, "golden/chunks/" + h64 + ".json": false,
-		"golden/chunks/" + strings.ToUpper(h64) + ".zst": false, "golden/chunks/" + h64[1:] + ".zst": false,
-		"other/latest": false, "golden/manifests/../latest": false,
-	} {
-		if isGoldenKey(k) != want {
-			t.Errorf("isGoldenKey(%q) = %v", k, !want)
-		}
-	}
-	for p, want := range map[string]bool{
-		"TestTray_running.png": true, "a.b-c.png": true,
-		".png": false, ".hidden.png": false, "../x.png": false, "a/b.png": false, "x.PNG": false,
-		strings.Repeat("a", 101) + ".png": false, "x.png.exe": false,
-	} {
-		if isPicture(p) != want {
-			t.Errorf("isPicture(%q) = %v", p, !want)
-		}
-	}
-}
-

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // Wait follows a job until it is final: the Mac's log as it grows, written to
@@ -36,17 +38,17 @@ func Wait(ctx context.Context, c *Client, id string, out io.Writer, poll time.Du
 				off = size
 			}
 			now := j.State
-			if j.State == StateQueued {
+			if j.State == wire.JobQueued {
 				now = fmt.Sprintf("queued, %d ahead of it, %d running", j.Position-1, j.Running)
 			}
-			if j.State == StateRunning {
+			if j.State == wire.JobRunning {
 				now = "running on " + j.Runner
 			}
 			if now != last {
 				_, _ = fmt.Fprintf(out, "job %s: %s\n", id, now)
 				last = now
 			}
-			if j.Final() {
+			if wire.JobFinal(j.State) {
 				return j, nil
 			}
 		}
@@ -66,9 +68,9 @@ func Fetch(ctx context.Context, c *Client, j Job, dir string) ([]string, error) 
 	}
 	var paths []string
 	for _, f := range j.Files {
-		p, err := c.File(ctx, j.ID, f.Name, dir)
+		p, err := c.File(ctx, j.ID, f.Key, dir)
 		if err != nil {
-			return paths, fmt.Errorf("%s: %w", f.Name, err)
+			return paths, fmt.Errorf("%s: %w", f.Key, err)
 		}
 		paths = append(paths, p)
 	}

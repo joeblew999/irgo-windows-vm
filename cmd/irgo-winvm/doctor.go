@@ -108,7 +108,7 @@ func doctorRows() []doctorRow {
 	for _, r := range utmvm.Records() {
 		rows = append(rows, recordRow(r))
 	}
-	rows = append(rows, jobsRow())
+	rows = append(rows, jobsRow(), vmRecordsRow())
 	return append(rows, goldenRows()...)
 }
 
@@ -227,6 +227,26 @@ func recordRow(r utmvm.External) doctorRow {
 // jobsRow reports the jobs directory, which grows by a record and a log per
 // detached run. It is here rather than in utmvm.Records because package job
 // imports utmvm. The size is what is kept after pruning.
+// vmRecordsRow is how many VMs have a recorded owner; status lists them.
+func vmRecordsRow() doctorRow {
+	r := doctorRow{What: "VM owners", State: "none yet", Path: utmvm.RecordsDir(),
+		Note: "irgo-winvm status lists each VM with its owner and last use"}
+	if _, err := os.Stat(r.Path); err != nil {
+		return r
+	}
+	r.Present = true
+	records, bad, err := utmvm.VMRecords()
+	switch {
+	case err != nil:
+		r.State = "unreadable"
+	case len(bad) > 0:
+		r.State = fmt.Sprintf("%d, %d unreadable", len(records), len(bad))
+	default:
+		r.State = fmt.Sprintf("%d recorded", len(records))
+	}
+	return r
+}
+
 func jobsRow() doctorRow {
 	all, err := job.All()
 	if err != nil || len(all) == 0 {

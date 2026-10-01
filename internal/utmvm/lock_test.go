@@ -76,7 +76,7 @@ func TestVMLockNamesCannotCollide(t *testing.T) {
 		if strings.ContainsAny(string(l), `/\ `) {
 			t.Errorf("VMLock(%q) = %q, which is not a plain file name", n, l)
 		}
-		if l == MachineLock || l == StageLockFor(n) {
+		if l == MachineLock || l == CapacityLock || l == StageLockFor(n) {
 			t.Errorf("VMLock(%q) = %q, which is not a VM's lock", n, l)
 		}
 		if prev, ok := seen[l]; ok && !strings.EqualFold(prev, n) {

@@ -51,8 +51,8 @@ func runTool(name string, args []string) error { return runToolFor("", name, arg
 // runToolFor is the one path every command takes: the CLI, an MCP tool call
 // (mcpClient is the client's name from its initialize request), and the job
 // child. After the flags parse it decides who is calling, refuses a caller
-// other than the owner who would land on the owner's VM by default, and takes
-// the command's mutation locks. So -h is answered even
+// other than the owner who would land on the owner's VM by default, takes the
+// command's mutation locks and records the VM as used. So -h is answered even
 // while another mutation holds the locks; a second mutation is refused, never
 // queued.
 func runToolFor(mcpClient, name string, args []string) error {
@@ -74,6 +74,13 @@ func runToolFor(mcpClient, name string, args []string) error {
 			return err
 		}
 		defer release()
+	}
+	if vm, ok := usedVM(c, v); ok {
+		// The lease starts again. A failure is said, not fatal: the command
+		// itself is fine, and the worst outcome is a VM reaped early.
+		if err := utmvm.TouchVM(vm); err != nil {
+			_, _ = fmt.Fprintf(utmvm.Out, "warning: could not record %s as used: %v\n", vm, err)
+		}
 	}
 	return c.run(v, rest)
 }
@@ -124,6 +131,16 @@ func admit(c cmd, v values) error {
 		return nil
 	}
 	return utmvm.CheckVMChoice(v.caller, vm, given)
+}
+
+// usedVM is the VM whose lease this command renews. vm-create records its own
+// VM (utmvm.BeginCreate), and vm-delete removes the record instead.
+func usedVM(c cmd, v values) (string, bool) {
+	if c.Name == "vm-create" || c.Name == "vm-delete" {
+		return "", false
+	}
+	vm, _, ok := vmFlag(c, v)
+	return vm, ok
 }
 
 // locksFor is the locks c takes with these parsed flags: LockVM becomes the
@@ -210,6 +227,7 @@ func init() {
 
 		"vm-golden-create": {flags: vmGoldenCreateFlags, run: runVMGoldenCreate},
 		"vm-golden-delete": {flags: vmGoldenDeleteFlags, run: runVMGoldenDelete},
+		"vm-reap":          {flags: vmReapFlags, run: runVMReap},
 
 		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
 		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},

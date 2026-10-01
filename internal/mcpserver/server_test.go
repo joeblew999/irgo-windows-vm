@@ -312,7 +312,8 @@ func TestTheFailureIsMachineReadable(t *testing.T) {
 // Retryable is advice an agent acts on: it will wait and call again. Marking a
 // permanent code retryable — "no such VM", say — would have it retry forever
 // against a VM that will never exist. The retryable outcomes are the transient
-// ones: a guest agent that is away, and a mutation lock someone else holds.
+// ones: a guest agent that is away, a mutation lock someone else holds, and
+// no room for another VM until one stops.
 func TestOnlyTransientOutcomesAreRetryable(t *testing.T) {
 	var retryable []string
 	for _, o := range command.Outcomes {
@@ -320,8 +321,8 @@ func TestOnlyTransientOutcomesAreRetryable(t *testing.T) {
 			retryable = append(retryable, o.Name)
 		}
 	}
-	if len(retryable) != 2 || retryable[0] != "no-agent" || retryable[1] != "busy" {
-		t.Errorf("retryable outcomes are %v; want exactly [no-agent busy] — only "+
+	if strings.Join(retryable, " ") != "no-agent busy no-room" {
+		t.Errorf("retryable outcomes are %v; want exactly [no-agent busy no-room] — only "+
 			"transient states, where waiting changes the answer", retryable)
 	}
 }

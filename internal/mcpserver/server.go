@@ -343,7 +343,14 @@ func failure(name, out string, err error, classify func(error) command.Code) *mc
 		// Said in the text as well as the field, because this is the one an
 		// agent gets wrong in a way that wastes a 45-minute install: give up on
 		// a working VM, or retry forever against one that is not there.
-		text += "\nThis one is worth retrying: Windows Update takes the guest agent away for minutes at a time and the VM is fine."
+		switch o.Code {
+		case command.CodeNoAgent:
+			text += "\nThis one is worth retrying: Windows Update takes the guest agent away for minutes at a time and the VM is fine."
+		case command.CodeNoRoom:
+			text += "\nThis one is worth retrying once a VM has stopped; `status` lists the running VMs and their owners."
+		default:
+			text += "\nThis one is worth retrying: the holder of the lock finishes on its own schedule."
+		}
 	}
 	if out != "" {
 		text = out + "\n" + text

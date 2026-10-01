@@ -80,3 +80,14 @@ const immutableSupported = true
 // until either is written. Fails across volumes and on filesystems without
 // clones; the caller copies then.
 func cloneFile(src, dst string) error { return unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW) }
+
+// hostMemory is the Mac's physical memory, hw.memsize.
+func hostMemory() (uint64, error) { return unix.SysctlUint64("hw.memsize") }
+
+// processAlive reports whether pid is a running process. Signal 0 checks
+// without sending; EPERM is a live process owned by somebody else. A recycled
+// pid reads as alive, the same trade job.alive makes.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}

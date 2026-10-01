@@ -364,7 +364,7 @@ func (o *Options) setDefaults() {
 		o.DiskGiB = 64
 	}
 	if o.MemoryMiB == 0 {
-		o.MemoryMiB = 8192
+		o.MemoryMiB = vmMemoryMiB
 	}
 	if o.CPUCount == 0 {
 		o.CPUCount = 4

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The mutation locks. A command that changes state on disk takes the ones it
@@ -23,6 +24,9 @@ import (
 //   - StageLockFor(owner): one caller's part of bin/, which app-upload writes
 //     and app-delete clears. Per caller, so two agents uploading at once do
 //     not refuse each other (see owner.go).
+//   - CapacityLock: the few hundred milliseconds in which vm-create decides
+//     whether there is room for another VM and records that it is making one,
+//     so two creates cannot both see the same free memory (vm_capacity.go).
 //
 // The primitive that releases on process death differs per platform, hence
 // lock_darwin.go and lock_other.go.
@@ -40,6 +44,10 @@ const (
 	// the split and one from after still exclude each other on the machine-wide
 	// work they both do.
 	MachineLock Lock = "mutation.lock"
+
+	// CapacityLock is held only while vm-create checks for room and records
+	// the VM it is about to start. See BeginCreate.
+	CapacityLock Lock = "mutation-capacity.lock"
 )
 
 // vmLockPrefix is what every per-VM lock file starts with, and stageLockPrefix
@@ -101,6 +109,8 @@ func (l Lock) String() string {
 	switch {
 	case l == MachineLock:
 		return "the machine-wide lock (media and golden image)"
+	case l == CapacityLock:
+		return "the check for room for another VM (held for under a second)"
 	case strings.HasPrefix(string(l), stageLockPrefix):
 		return "the staged binaries of " + strings.TrimSuffix(strings.TrimPrefix(string(l), stageLockPrefix), ".lock")
 	case strings.HasPrefix(string(l), vmLockPrefix):
@@ -130,3 +140,17 @@ func ordered(locks []Lock) []Lock {
 	return out
 }
 
+// acquireWithin is Acquire, retried while the only answer is "busy", for up to
+// d. Only for a lock that is held for well under a second (CapacityLock):
+// refusing a second vm-create because a first was mid-way through a check
+// that takes a few hundred milliseconds would be an exit 6 nobody can act on.
+func acquireWithin(d time.Duration, locks ...Lock) (func(), error) {
+	deadline := time.Now().Add(d)
+	for {
+		release, err := Acquire(locks...)
+		if err == nil || !errors.Is(err, ErrMutationInProgress) || time.Now().After(deadline) {
+			return release, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

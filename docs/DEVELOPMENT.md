@@ -103,13 +103,15 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
 ```
 ~/Library/Application Support/irgo-winvm/
   media/    the ISO, the .esd it was built from, and scratch
-  bin/      binaries staged into a VM
+  bin/      binaries staged into a VM, one directory per caller
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
   vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
   golden.json            what is known about the golden image
-  mutation*.lock         the mutation locks, one machine-wide, one per VM, one for bin/
+  vms/      who made each VM and when it was last used, one record per VM
+  mutation*.lock         the mutation locks: one machine-wide, one per VM, one per
+                         caller's part of bin/, and the capacity check's
   net/      the guest address the last SMB push reached, one file per VM
   utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
@@ -168,7 +170,8 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
   where both callers get it.
 - **Uploads.** Over HTTP, an agent with no shared filesystem can send a
   cross-compiled `.exe` in chunks with `app-upload`. It is staged
-  content-addressed under `bin/`, verified by SHA-256 before it is committed,
+  content-addressed under the caller's own `bin/<caller>/` (see
+  [Sharing one Mac](#sharing-one-mac)), verified by SHA-256 before it is committed,
   and then passed to `app-create` by path.
 - **Remote access.** Binding wider than loopback requires `-allow-remote` and
   `IRGO_WINVM_TOKEN`. Read the [threat model](THREAT-MODEL.md) first.
@@ -191,13 +194,17 @@ directory.
 ### The mutation locks
 
 Every command that changes state takes the locks it declares in
-`command.All` (`Locks`), from three kinds (`internal/utmvm/lock.go`):
+`command.All` (`Locks`), from these kinds (`internal/utmvm/lock.go`):
 
 | lock | guards | taken by |
 |---|---|---|
 | machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
 | per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
-| stage (`mutation-stage.lock`) | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+| stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
+| capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
+
+`vm-reap` takes each VM's lock itself, one at a time, without waiting, and
+keeps a VM whose lock is held: that VM is in use.
 
 So `app-create` on two VMs runs side by side, and a second mutation of the same
 VM is **refused, not queued**, with exit code 6 and a message naming the busy
@@ -392,8 +399,9 @@ Once one VM has been installed, **`vm-golden-create`** (undo
 `vm-create` then clones that instead of installing.
 
 Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
-reports what is installed and where, and **`status`** lists long-running
-[jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
+reports what is installed and where, and **`status`** lists every VM with its
+owner and last use, then long-running [jobs](#jobs). **`vm-reap`** removes the
+clones callers left behind ([Sharing one Mac](#sharing-one-mac)). `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
 such, and offline it says "cannot tell" rather than failing.
@@ -613,8 +621,9 @@ that `vm-delete` removes.
 seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new
 VM's lock only. It refuses when the golden image is running (it must stay
 stopped: UTM will not clone a running VM, and a golden image that has booted is
-no longer the one its manifest describes) and when free space is below 10 GiB,
-an estimate of how much a clone grows until it is measured.
+no longer the one its manifest describes). Whether there is memory and disk
+for another VM is `vm-create`'s question, asked before any of this
+([Sharing one Mac](#sharing-one-mac)).
 
 Why it is built this way:
 
@@ -644,6 +653,105 @@ Why it is built this way:
 The research, and what is measured and what is not, is in
 `.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
 
+## Sharing one Mac
+
+One Mac is used by several independent callers at once: the owner at a
+terminal, agents working in this repository, and agents from other
+repositories through the CLI or `irgo-winvm mcp`. Before 1 Oct 2026 they all
+defaulted to the owner's VM, queued on its lock and left their binaries in it;
+any of them could create clones until the Mac ran out of memory; `app-delete`
+emptied every caller's uploads; and `vm-delete` and `app-delete` exited 0 when
+`utmctl` itself had failed.
+
+**Who is calling** (`internal/utmvm/owner.go`) is, in order: `-owner` on the
+command, else `IRGO_WINVM_OWNER`, else the MCP client's name from its
+`initialize` request followed by `/user@host:repo`, else `user@host:repo` for
+the person at the terminal (the repository is the nearest directory up from
+the working directory holding `.git`). The repository is added to the MCP name
+because every Claude Code session calls itself `claude-code`; over stdio the
+server runs in the agent's own repository, so two agents from two repositories
+differ. It is a label, not authentication: anyone can claim any name. An MCP
+job is started with `-owner` set to its caller, because the job is a new
+process with no client.
+
+**The owner's VM is not anyone else's default.** Only the person at the
+terminal — no `-owner`, no `IRGO_WINVM_OWNER`, not over MCP — gets
+`irgo-win11` by leaving `-vm` out, so `irgo-winvm app-create x.exe` keeps
+working. Anyone else who leaves it out is refused with exit 2 before any lock
+is taken, and told to make a VM of their own:
+`irgo-winvm vm-create -vm <name>`, about 23 s from the golden image. Passing
+`-vm irgo-win11` explicitly is allowed; that is a choice, not a default.
+`glaze-check` without `-windows` touches no VM and is not affected.
+
+**Every VM `vm-create` makes has a record** in `vms/<name>.json`: owner, where
+the identity came from, created, last used, and the pid of the `vm-create`
+still making it. It is written before the clone or install starts, so a create
+that is killed still leaves an owner, and removed again if no VM came of it.
+`app-create`, `app-delete`, `vm-repair`, `vm-screen` and `glaze-check -windows`
+move "last used"; `vm-delete` removes the record. A VM without a record —
+`irgo-win11`, the golden image, anything made before records — has no known
+owner and is never reaped. `status` lists every VM UTM knows with its owner,
+last use and idle time, and any record whose VM is gone; `doctor` counts the
+records.
+
+**`vm-reap`** removes clones nobody is using (`internal/utmvm/vm_lease.go`).
+A VM goes only when all of these hold: it has a record; it is not
+`irgo-win11`, `irgo-golden` or the golden image's verification clone (decided
+without even taking their locks, so the owner's commands are never refused for
+it); its creator is not alive; its lock is free (taken without waiting and held
+through the delete, so nothing can start using it in between); UTM lists it; and
+its last use is older than `-stale` (default 24 h). A record whose VM UTM says
+is gone is forgotten. Anything it cannot tell — an unreadable lock, UTM not
+answering, an unreadable record — is kept and said. Without `-force` it lists
+the verdicts and exits 5, like every destructive command.
+
+**Is there room?** (`internal/utmvm/vm_capacity.go`). `vm-create` asks before
+it makes or boots a VM, under the capacity lock, and answers yes, no or cannot
+tell; no and cannot tell refuse with exit 7, the numbers, and the running VMs by
+name.
+
+- **Memory:** `hw.memsize`, less the memory UTM says each VM that is not
+  stopped is configured with (AppleScript `memory of configuration`, which
+  needs no Full Disk Access; paused VMs keep theirs), less the VMs other
+  `vm-create`s are still making (their records' live pids), less the new VM's,
+  must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the owner's own
+  work. Configured, not current use, because the guest commits it: on 1 Oct
+  2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of it dirty,
+  with 6.3 GB of the Mac's 7 GB swap in use. So a 16 GiB Mac holds one VM and
+  refuses a second; 32 GiB holds three. `-overcommit` skips the memory half for
+  a person who accepts swapping: three VMs did boot and pass `glaze-check` on
+  16 GiB for a few minutes ([RESULTS](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026)).
+- **Disk:** free space on the volume holding UTM's VMs (`statfs`, which works
+  there without Full Disk Access) must cover the new VM's growth plus
+  `hostDiskReserveBytes`, **10 GiB**, which keeps macOS, whose swap lives on
+  that volume, out of its low-space warnings. The growth is `cloneHeadroomBytes`,
+  **10 GiB**, for a clone (still an estimate; a clone's boot and one run moved
+  `df` by about 1 GiB) and `installHeadroomBytes`, **30 GiB**, for an install.
+  So a clone wants 20 GiB free and an install 40 GiB. An existing stopped VM
+  being booted needs no disk check.
+
+**Staging is per caller.** `app-upload` writes `bin/<caller>/<sha256>.exe`,
+under a stage lock of that caller's own, so two agents uploading at once do not
+refuse each other, and `app-delete` removes only its caller's directory. The
+directory name is the identity made readable, with a short hash when it had to
+be changed (`claude-code-apple-mac-repo-1a2b3c4d`). Files directly in `bin/`,
+from before this, are cleared only by the owner.
+
+**Undo commands tell "no such VM" from "no answer".** `vm-delete` and
+`app-delete` succeed with nothing to do only when UTM answered that there is no
+such VM (`ErrNoVM`); when `utmctl` could not be asked they fail and say
+nothing was deleted.
+
+**For an agent from another repository**, the whole contract:
+
+1. Set `IRGO_WINVM_OWNER` (or pass `-owner`) to something that names you, or
+   rely on the MCP client name.
+2. `irgo-winvm vm-create -vm <name>`. Exit 7 means no room: wait, or ask
+   whoever `status` names.
+3. Pass `-vm <name>` to `app-create`, `vm-screen` and the rest.
+4. `irgo-winvm vm-delete -vm <name> -force` when done. If you go away, a clone
+   idle for a day is removed by whoever runs `vm-reap -force`.
+
 ## What it exits with
 
 `utmctl` exits 0 when it fails (see [UPSTREAM.md](UPSTREAM.md#utm)), so this
@@ -659,6 +767,7 @@ thing:
 | **4** | the VM is there, the guest agent is not answering |
 | **5** | refused — a destructive command without `-force` |
 | **6** | refused — another mutation is in progress |
+| **7** | refused — another VM would leave this Mac too little memory or disk, or that could not be determined |
 
 **1 is your program, not this tool.** The guest's exit code is *not* passed
 through: a binary exiting 3 makes `app-create` exit **1**, and the message names
@@ -669,7 +778,9 @@ script.
 minutes at a time while the VM is fine. `app-create` already waits and tries to
 recover before giving up, which is why it can take several minutes to return 4.
 6 means another mutation holds a [lock](#the-mutation-locks) this one needs,
-and the message names which; the holder finishes on its own schedule.
+and the message names which; the holder finishes on its own schedule. **7 is
+worth retrying once a VM stops**: the message gives the numbers and names the
+running VMs, and `status` says whose they are.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.
@@ -705,9 +816,9 @@ records *why* these particular numbers were chosen, only that they are fixed.
 
 | | value | |
 |---|---|---|
-| name | `irgo-win11` | `utmvm.DefaultVMName`; `-vm` overrides, for a disposable VM |
+| name | `irgo-win11` | `utmvm.DefaultVMName`, the machine owner's; `-vm` overrides, and every other caller must pass it ([Sharing one Mac](#sharing-one-mac)) |
 | disk | **64 GiB, sparse** | costs kilobytes until the guest writes; see [what it costs](#what-it-costs) |
-| RAM | **8192 MiB** | |
+| RAM | **8192 MiB** | `vmMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds one ([Sharing one Mac](#sharing-one-mac)) |
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 
 The guest logs itself in as **`dev`**, an administrator, with the password

@@ -34,6 +34,8 @@ func exitCode(err error) command.Code {
 		return command.CodeNoAgent
 	case errors.Is(err, utmvm.ErrMutationInProgress):
 		return command.CodeBusy
+	case errors.Is(err, utmvm.ErrNoRoom):
+		return command.CodeNoRoom
 	case errors.Is(err, errUsage), errors.Is(err, utmvm.ErrDefaultVMReserved):
 		return command.CodeUsage
 	default:

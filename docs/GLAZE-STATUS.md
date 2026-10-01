@@ -8,16 +8,16 @@ hand. Each run replaces only its own section. Every row is one test of
 `examples/conformance`, from its test2json events; what each checks is in its
 comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
 
-<!-- glaze-status:mac commit=d9e99a8bb5feba64cc04d051b986563301971db0 examples-dirty=false glaze=v0.0.61 native=github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e -->
+<!-- glaze-status:mac commit=6eccd485752fb4c69c5f8148a9011fca70d06b0c examples-dirty=false glaze=v0.0.61 native=github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e -->
 ## On the Mac — YES: 40 passed, 1 skipped
 
-- when: 2026-10-01 07:43 +0700, took 20s
+- when: 2026-10-01 07:44 +0700, took 20s
 - platform: darwin/arm64 (this machine, natively)
-- this repository: commit `d9e99a8bb5fe`
+- this repository: commit `6eccd485752f`, **with uncommitted changes**
 - glaze v0.0.61 (released)
 - native from the fork github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e (go.mod requires v0.1.15 and replaces it)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074308.log`
-- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074308.json`
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074444.log`
+- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074444.json`
 - screenshots: 14 of the 14 tests that open a window took one — see [Screenshots](#screenshots)
 
 | test | result | first message |
@@ -114,7 +114,7 @@ comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-gla
 
 Every test that opens a window photographs it at the moment that shows what it checked — the page loaded, the tray up, the menu installed, the dialog open — and the picture is recorded with the run it came from. A capture that failed says why instead of showing a picture; a black or one-colour frame counts as failed. How each is taken is in `examples/conformance/shots_test.go`.
 
-- Mac: 2026-10-01 07:43 +0700, commit `d9e99a8bb5fe`, darwin/arm64 (this machine, natively)
+- Mac: 2026-10-01 07:44 +0700, commit `6eccd485752f`, darwin/arm64 (this machine, natively)
 - Windows: 2026-09-30 15:43 +0700, commit `f16189091b5e`, windows/arm64, VM irgo-win11 (through app-create -gui)
 
 | test | Mac | Windows |

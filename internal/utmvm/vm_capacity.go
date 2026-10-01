@@ -40,7 +40,9 @@ const hostMemoryReserveBytes = 4 << 30
 const hostDiskReserveBytes = 10 << 30
 
 // installHeadroomBytes is what a VM installed from the ISO takes: about 30 GiB
-// once Windows is on it ("What it costs" in docs/DEVELOPMENT.md).
+// once Windows is on it ("What it costs" in docs/DEVELOPMENT.md). It also
+// covers vm-create pulling the golden image when there is none here: 8.4 GB
+// of chunks, then the bundle rebuilt (19 GB of data, measured 1 Oct 2026).
 const installHeadroomBytes = 30 << 30
 
 // diskNeed is which disk headroom a create needs.

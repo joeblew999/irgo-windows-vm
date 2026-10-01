@@ -20,6 +20,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // connect starts a server with the given runner and returns a connected client
@@ -665,5 +666,30 @@ func TestTheClientNameReachesTheProgram(t *testing.T) {
 	}
 	if ClientName(context.Background()) != "" {
 		t.Fatal("a context from outside a tool call names a client")
+	}
+}
+
+// TestWorkerRoutesNameRealCommands: every command wire's table says calls a
+// route exists, and its tool's description names the route.
+//
+// Negative control (by hand, 1 Oct 2026): naming "vm-golden-pul" in
+// golden-get's Commands fails this; restored.
+func TestWorkerRoutesNameRealCommands(t *testing.T) {
+	n := 0
+	for _, r := range wire.Routes {
+		for _, name := range r.Commands {
+			c, ok := command.Find(name)
+			if !ok {
+				t.Errorf("route %s names command %q, which does not exist", r.Name, name)
+				continue
+			}
+			if !strings.Contains(describe(c), r.Name+" ("+r.Method+" "+r.Path+")") {
+				t.Errorf("%s's description does not name route %s: %s", name, r.Name, describe(c))
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatal("no route names a command; this would pass vacuously")
 	}
 }

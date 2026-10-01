@@ -153,7 +153,7 @@ func TestRecordFillsAndRedacts(t *testing.T) {
 	clk := &clock{t: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
 	c := newClient(t, srv.URL, clk)
 	home, _ := os.UserHomeDir()
-	exit := 1
+	exit := int64(1)
 	if err := c.Record(Event{Type: End, Op: "op-123456", VM: "w1", Command: "app-create", Exit: &exit,
 		Detail: "failed at " + home + "/secret/x: token=abc123 via https://u:p@host/x key " + strings.Repeat("a", 40)}); err != nil {
 		t.Fatal(err)

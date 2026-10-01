@@ -39,6 +39,8 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 const (
@@ -58,16 +60,17 @@ const (
 	GoldenParallel = 4
 
 	goldenCacheFormat = 1
-	goldenPrefix      = "golden/"
-	goldenLatestKey   = goldenPrefix + "latest"
+	goldenPrefix      = wire.GoldenPrefix
+	goldenLatestKey   = wire.GoldenLatestKey
 
 	// goldenJSONName is the golden image's own record under the app root,
 	// carried in the manifest so a pulled image says what it is.
 	goldenJSONName = "golden.json"
 )
 
-func goldenChunkKey(id string) string    { return goldenPrefix + "chunks/" + id + ".zst" }
-func goldenManifestKey(id string) string { return goldenPrefix + "manifests/" + id + ".json" }
+// The keys are wire's, which the Worker accepts and no other.
+func goldenChunkKey(id string) string    { return wire.GoldenChunkKey(id) }
+func goldenManifestKey(id string) string { return wire.GoldenManifestKey(id) }
 
 // GoldenPullDir is where vm-golden-pull puts what it downloads by default.
 func GoldenPullDir() string { return filepath.Join(appRoot(), "golden-pull") }

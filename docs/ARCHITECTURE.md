@@ -71,10 +71,11 @@ There are four modules. The split controls what reaches the shipped binary.
 | root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
 | `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
 | `site` | needs a markdown parser the tool has no business carrying |
-| `worker` | the [Cloudflare Worker](WORKER.md), on workers-go and built to Wasm by TinyGo |
+| `worker` | the [Cloudflare Worker](WORKER.md), on workers-go and built to Wasm by TinyGo. Imports the root module's `wire` package only, through `replace … => ../` |
 
 Verify the split with `go list -deps`, not by reading imports. The site module
-requires goldmark, its extensions and the chroma highlighter, and nothing else.
+requires goldmark, its extensions and the chroma highlighter, and the root
+module for `wire` alone (standard library only, for the Worker API page).
 That is why the generated MCP page is captured from the binary rather than
 produced by importing the server: importing it would pull the protocol SDK's
 dependency graph into the documentation generator.
@@ -114,7 +115,9 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
-| `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
+| `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports only `wire` and `internal/workerclient`, so `utmvm` can call it |
+| `wire` | the Worker's API declared once ([the route table](WORKER.md#the-route-table)): routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
+| `internal/workerclient` | the one client of the Worker, built from `wire`'s table |
 | `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 

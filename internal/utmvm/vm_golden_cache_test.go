@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -381,7 +382,9 @@ func TestGoldenCacheRoundTrip(t *testing.T) {
 	}
 
 	disk := filepath.Join(pulled.Bundle, "Data", "disk.img")
-	if alloc, ok := diskUsage(disk); ok {
+	// macOS only: the tool runs nowhere else, and allocation is a property
+	// of the filesystem. GitHub's Linux runner allocated all 64 MiB.
+	if alloc, ok := diskUsage(disk); ok && runtime.GOOS == "darwin" {
 		// Three regions and 1000 bytes hold data; the other 61 MiB must be
 		// holes. APFS allocated 6 MiB for those ~3 MiB (measured 1 Oct 2026),
 		// so the bound is loose, and it does not see the 64 KiB zero block

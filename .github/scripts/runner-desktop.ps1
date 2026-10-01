@@ -115,7 +115,6 @@ $t = [Diagnostics.Stopwatch]::StartNew()
 $u = Start-Process wsl.exe -ArgumentList '--update', '--web-download' -NoNewWindow -PassThru
 if (-not $u.WaitForExit(300000)) { $u | Stop-Process -Force; "wsl --update did not finish in 300 s; stopped" }
 else { "wsl --update exited $($u.ExitCode) after $([int]$t.Elapsed.TotalSeconds) s" }
-& wsl.exe --version 2>&1 | ForEach-Object { "wsl --version: $_" }
 StopNamed $covering
 Start-Sleep -Seconds 2
 
@@ -151,13 +150,21 @@ if ($back) {
   exit 1
 }
 
-# -Watch N: for N seconds, print every wsl.exe or Windows Terminal that starts
-# (to see whether the updater still comes back).
-$seen = @{}
-for ($i = 0; $i -lt $Watch; $i += 5) {
-  Get-CimInstance Win32_Process -Filter "Name='wsl.exe' OR Name='WindowsTerminal.exe'" | Where-Object { -not $seen[$_.ProcessId] } | ForEach-Object {
-    $seen[$_.ProcessId] = $true
-    "+${i}s: $($_.Name) ($($_.ProcessId)) started $($_.CreationDate): $($_.CommandLine)"
+# -Watch N: for N seconds, print every process that starts, with its parent
+# as it was at that moment (to find what keeps starting the WSL updater).
+if ($Watch -gt 0) {
+  Register-CimIndicationEvent -ClassName Win32_ProcessStartTrace -SourceIdentifier procstart
+  $t = [Diagnostics.Stopwatch]::StartNew()
+  while ($t.Elapsed.TotalSeconds -lt $Watch) {
+    $e = Wait-Event -SourceIdentifier procstart -Timeout 5
+    if (-not $e) { continue }
+    Remove-Event -EventIdentifier $e.EventIdentifier
+    $n = $e.SourceEventArgs.NewEvent
+    $me = Get-CimInstance Win32_Process -Filter "ProcessId=$($n.ProcessID)" -ErrorAction SilentlyContinue
+    $pa = Get-CimInstance Win32_Process -Filter "ProcessId=$($n.ParentProcessID)" -ErrorAction SilentlyContinue
+    $gp = if ($pa) { Get-CimInstance Win32_Process -Filter "ProcessId=$($pa.ParentProcessId)" -ErrorAction SilentlyContinue }
+    "+$([int]$t.Elapsed.TotalSeconds)s: $($n.ProcessName) ($($n.ProcessID)) [$($me.CommandLine)] <- $($pa.Name) ($($n.ParentProcessID)) [$($pa.CommandLine)] <- $($gp.Name) ($($pa.ParentProcessId)) [$($gp.CommandLine)]"
   }
-  Start-Sleep -Seconds 5
+  Unregister-Event -SourceIdentifier procstart
 }
+exit 0

@@ -101,7 +101,7 @@ jobs:
       - if: runner.os == 'Windows'
         name: clear the desktop
         shell: pwsh
-        run: .github/scripts/runner-desktop.ps1 -Clear -Watch 120
+        run: .github/scripts/runner-desktop.ps1 -Clear -Watch 100
       - if: runner.os == 'Windows'
         shell: bash
         run: go run ./cmd/irgo-winvm glaze-check

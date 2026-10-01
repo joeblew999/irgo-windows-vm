@@ -48,6 +48,10 @@ type Result struct {
 	// what it said about the picture. NoShot is why a test that tried took
 	// none. All three are empty for a test that opens no window.
 	Shot, ShotNote, NoShot string
+
+	// Evidence is what the test logged it read ("evidence: ..."), kept
+	// whatever the outcome: for a check that passed, it is what was seen.
+	Evidence string
 }
 
 func (r Result) failed() bool { return r.Outcome == Fail || r.Outcome == Unfinished }
@@ -180,8 +184,16 @@ func (s Section) markdown() string {
 	case s.NotRun != "":
 		fmt.Fprintf(&b, "The suite did not run, which says nothing about %s:\n\n```\n%s\n```\n", su.Subject, s.NotRun)
 	default:
-		b.WriteString("| test | result | first message |\n|---|---|---|\n")
+		if su.Evidence {
+			b.WriteString("| test | result | first message | what it read |\n|---|---|---|---|\n")
+		} else {
+			b.WriteString("| test | result | first message |\n|---|---|---|\n")
+		}
 		for _, r := range s.Results {
+			if su.Evidence {
+				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", r.Name, r.label(su), cell(r.Detail), cell(r.Evidence))
+				continue
+			}
 			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(su), cell(r.Detail))
 		}
 	}

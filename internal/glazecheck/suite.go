@@ -38,6 +38,13 @@ type Suite struct {
 	// ShotsFlag is the binary's flag naming the directory it writes pictures
 	// into, or "" when it takes none.
 	ShotsFlag string
+	// ShotPrefix is the directory the binary names its pictures under
+	// (<prefix>/<Test>.png), when that is not the target: a binary in a VM
+	// does not know which VM it is in.
+	ShotPrefix string
+	// Evidence adds a column to the results table for what each test read
+	// (its "evidence:" lines), so a check that passed says what it saw.
+	Evidence bool
 
 	// Targets are the sections the file always has, in order, each a
 	// placeholder until it is run. With Open, any other target recorded gets
@@ -130,6 +137,14 @@ func (s *Suite) order(have map[string]string) []string {
 	}
 	sort.Strings(extra)
 	return append(out, extra...)
+}
+
+// shotPrefix is the directory a target's pictures are named under.
+func (s *Suite) shotPrefix(target string) string {
+	if s.ShotPrefix != "" {
+		return s.ShotPrefix
+	}
+	return target
 }
 
 // shotsURL is ShotsDir as the status file, in docs/, refers to it.

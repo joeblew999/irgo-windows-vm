@@ -145,6 +145,14 @@ func (s *Suite) parse(target string, stream []byte) ([]Result, []Fact, error) {
 				facts = setFact(facts, k, v)
 				continue
 			}
+			// And what the test read, kept even when it passes.
+			if ev, ok := evidenceLine(e.Output); ok {
+				if r.Evidence != "" {
+					r.Evidence += " / "
+				}
+				r.Evidence += ev
+				continue
+			}
 			// The first line the test itself wrote: its t.Error, t.Fatal or
 			// t.Skip message. The runner's own === and --- lines are not it.
 			if l := strings.TrimSpace(e.Output); r.Detail == "" && l != "" && !isFrame(l) {
@@ -227,8 +235,8 @@ func rawTail(raw []byte, n int) string {
 	return strings.Join(lines, " / ")
 }
 
-// The lines examples/conformance logs about its screenshots (shots_test.go:
-// shotOK and shotNone), after the file:line prefix t.Logf adds. A picture's
+// The lines a suite logs about its screenshots (examples/shots: OK and
+// None), after the file:line prefix t.Logf adds. A picture's
 // line may end in a parenthesised note about it.
 var (
 	shotTaken  = regexp.MustCompile(`(?:^|: )screenshot: (\S+\.png)(?: \((.*)\))?$`)
@@ -260,6 +268,18 @@ func factLine(l string) (key, value string, ok bool) {
 		return "", "", false
 	}
 	return m[1], strings.TrimSpace(m[2]), true
+}
+
+// evidenceMark is the line a test logs to say what it read: "evidence: ...".
+var evidenceMark = regexp.MustCompile(`(?:^|: )evidence: (.+)$`)
+
+// evidenceLine reads what a test said it read from one line of its output.
+func evidenceLine(l string) (string, bool) {
+	m := evidenceMark.FindStringSubmatch(strings.TrimSpace(l))
+	if m == nil {
+		return "", false
+	}
+	return strings.TrimSpace(m[1]), true
 }
 
 // setFact sets key in facts, in place when it is there already.

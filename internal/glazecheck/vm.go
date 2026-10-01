@@ -22,6 +22,9 @@ var VM = Suite{
 	Source:       vmSource,
 	StatusFile:   VMStatusFile,
 	ShotsDir:     "docs/screens/vm-conformance",
+	ShotsFlag:    "-vmconformance.shots=",
+	ShotPrefix:   "vm",
+	Evidence:     true,
 	Targets:      []string{utmvm.DefaultVMName},
 	Open:         true,
 	Header:       vmHeader,
@@ -36,8 +39,11 @@ var VM = Suite{
 	Thing:        "VM conformance suite",
 	Subject:      "the VM",
 	ShotsBullet:  "- screenshots: %d of %d taken — see [Screenshots](#screenshots)\n",
-	GalleryIntro: "The VM's desktop at the end of each check, photographed from the host with `vm-screen` after the suite " +
-		"looked for stray windows. A capture that failed says why instead of showing a picture.\n\n",
+	GalleryIntro: "Every check with something to see photographs it inside the guest, in dev's session, at the moment that shows " +
+		"what it checked — the desktop, a WebView2 window rendering, the setting as Windows reports it in a console — and the host " +
+		"photographs the whole VM with `vm-screen` at the end, after looking for stray windows. Every window a check opens it closes. " +
+		"A capture that failed says why instead of showing a picture; a black or one-colour frame counts as failed. How each is " +
+		"taken is in `examples/vmconformance`.\n\n",
 	Marker: func(s Section) []string {
 		return []string{
 			"commit=" + s.Tree.Commit,

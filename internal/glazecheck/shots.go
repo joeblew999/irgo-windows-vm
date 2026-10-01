@@ -85,7 +85,7 @@ func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, err
 			continue
 		}
 		if r.Shot != "" {
-			if err := copyShot(dir, sec.Target, r.Shot, fetch); err != nil {
+			if err := copyShot(dir, su.shotPrefix(sec.Target), r.Shot, fetch); err != nil {
 				r.Shot, r.ShotNote, r.NoShot = "", "", "taken in the run, and not copied back: "+err.Error()
 			}
 		}
@@ -111,11 +111,12 @@ func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, err
 var pngMagic = []byte("\x89PNG\r\n\x1a\n")
 
 // copyShot fetches one picture and writes it into dir, checking it is a PNG
-// the test named for this target and not something else that arrived.
-func copyShot(dir, target, rel string, fetch func(string) ([]byte, error)) error {
-	name, ok := strings.CutPrefix(rel, target+"/")
+// the test named under prefix (the target, unless the suite says otherwise)
+// and not something else that arrived.
+func copyShot(dir, prefix, rel string, fetch func(string) ([]byte, error)) error {
+	name, ok := strings.CutPrefix(rel, prefix+"/")
 	if !ok || name == "" || strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("%s is not a picture of %s", rel, target)
+		return fmt.Errorf("%s is not a picture of %s", rel, prefix)
 	}
 	b, err := fetch(rel)
 	if err != nil {

@@ -17,7 +17,11 @@ const partsSuite = `package fake
 
 import "testing"
 
-func TestSystemThing(t *testing.T) { t.Log("fact: windows=26100.4349 (24H2)") }
+func TestSystemThing(t *testing.T) {
+	t.Log("fact: windows=26100.4349 (24H2)")
+	t.Log("evidence: AUOptions=2")
+	t.Log("evidence: NoAutoRebootWithLoggedOnUsers=1")
+}
 
 func TestSystemBroken(t *testing.T) {
 	t.Log("fact: free=12 GiB")
@@ -65,12 +69,14 @@ func runExe(exe string, args []string) (string, error) {
 func TestPartsRunApartAndAreNamed(t *testing.T) {
 	exe := fakeExe(t, partsSuite)
 	quiet := func(string, ...any) {}
-	o := Options{Suite: &VM, Target: "vc1", Parts: []Part{
+	su := VM
+	su.ShotsFlag = "" // the fake binary takes no such flag
+	o := Options{Suite: &su, Target: "vc1", Parts: []Part{
 		{Name: "as SYSTEM", Args: []string{"-test.skip=^TestSession"}, Run: runExe},
 		{Name: "session", Args: []string{"-test.run=^TestSession"}, Run: runExe},
 	}}
-	sec := Section{Target: "vc1", suite: &VM}
-	events, notRun, err := runParts(o, &VM, exe, &sec, quiet)
+	sec := Section{Target: "vc1", suite: &su}
+	events, notRun, err := runParts(o, &su, exe, &sec, quiet)
 	if err != nil || notRun != nil {
 		t.Fatalf("runParts: %v, %v", err, notRun)
 	}
@@ -88,6 +94,13 @@ func TestPartsRunApartAndAreNamed(t *testing.T) {
 		if r.Name == "TestSystemBroken" && !strings.HasSuffix(r.Detail, "the reason it failed") {
 			t.Errorf("a fact line was taken for the first message: %q", r.Detail)
 		}
+		// A pass keeps what it read; the Detail of a pass is still dropped.
+		if r.Name == "TestSystemThing" && (r.Evidence != "AUOptions=2 / NoAutoRebootWithLoggedOnUsers=1" || r.Detail != "") {
+			t.Errorf("TestSystemThing = %+v", r)
+		}
+	}
+	if md := sec.markdown(); !strings.Contains(md, "| TestSystemThing | PASS |  | `AUOptions=2 / NoAutoRebootWithLoggedOnUsers=1` |") {
+		t.Errorf("the evidence is not in the table:\n%s", md)
 	}
 	if !strings.Contains(string(events), "TestSessionThing") || !strings.Contains(string(events), "TestSystemThing") {
 		t.Error("the events kept beside the log lack a part")
@@ -98,8 +111,8 @@ func TestPartsRunApartAndAreNamed(t *testing.T) {
 	o.Parts[1].Run = func(string, []string) (string, error) {
 		return "", errors.New("no desktop session for dev")
 	}
-	sec = Section{Target: "vc1", suite: &VM}
-	if _, _, err := runParts(o, &VM, exe, &sec, quiet); err != nil {
+	sec = Section{Target: "vc1", suite: &su}
+	if _, _, err := runParts(o, &su, exe, &sec, quiet); err != nil {
 		t.Fatal(err)
 	}
 	last := sec.Results[len(sec.Results)-1]
@@ -114,8 +127,8 @@ func TestPartsRunApartAndAreNamed(t *testing.T) {
 	gone := errors.New("guest agent gone")
 	o.NotRun = func(err error) bool { return errors.Is(err, gone) }
 	o.Parts[0].Run = func(string, []string) (string, error) { return "", gone }
-	sec = Section{Target: "vc1", suite: &VM}
-	if _, notRun, _ := runParts(o, &VM, exe, &sec, quiet); !errors.Is(notRun, gone) {
+	sec = Section{Target: "vc1", suite: &su}
+	if _, notRun, _ := runParts(o, &su, exe, &sec, quiet); !errors.Is(notRun, gone) {
 		t.Errorf("notRun = %v, want the agent error", notRun)
 	}
 }
@@ -244,7 +257,7 @@ func TestVMShotFromTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, vm := range []string{"vc1", "irgo-win11"} {
-		s := vmSection(vm, Result{Name: "TestA", Outcome: Pass}, Result{Name: "Host/DesktopScreenshot", Outcome: Pass, Shot: vm + "/desktop.png"})
+		s := vmSection(vm, Result{Name: "TestA", Outcome: Pass}, Result{Name: "Host/DesktopScreenshot", Outcome: Pass, Shot: "vm/Host_DesktopScreenshot.png"})
 		if err := collectShots(root, &s, func(string) ([]byte, error) { return fakePNG, nil }, func(string, ...any) {}); err != nil {
 			t.Fatal(err)
 		}
@@ -252,13 +265,13 @@ func TestVMShotFromTheHost(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "docs/screens/vm-conformance/vc1/desktop.png")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "docs/screens/vm-conformance/vc1/Host_DesktopScreenshot.png")); err != nil {
 		t.Errorf("the desktop picture is not in the VM's directory: %v", err)
 	}
 	body := read(t, filepath.Join(root, VMStatusFile))
 	for _, want := range []string{
 		"| test | irgo-win11 | vc1 |\n|---|---|---|\n",
-		`<img src="screens/vm-conformance/vc1/desktop.png" width="280" alt="Host/DesktopScreenshot on vc1">`,
+		`<img src="screens/vm-conformance/vc1/Host_DesktopScreenshot.png" width="280" alt="Host/DesktopScreenshot on vc1">`,
 		"- screenshots: 1 of 1 taken",
 	} {
 		if !strings.Contains(body, want) {

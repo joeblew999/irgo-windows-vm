@@ -60,3 +60,7 @@ Left for the owner:
   if it goes stale.
 - The anchor attribute order could be fixed upstream in go.abhg.dev/goldmark/anchor (sort the
   map's keys); docsite's anchorAttributeOrder can then go.
+
+## Closed — 1 Oct 2026
+
+Done: docsite module (no config needed, hooks, OpenAPI rendering, all checks), this repo its first user with identical output, goldmark-highlighting replaced by a 40-line chroma renderer; released as binaries for every OS in v0.5.1 and checked from a download on a bare project. Next (optional): move to its own repo joeblew999/docsite.

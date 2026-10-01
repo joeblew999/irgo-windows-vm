@@ -267,6 +267,12 @@ is `macExecutor` in `cmd/irgo-winvm/serve.go`:
    command that removes it.
 
 Every line printed meanwhile is teed into the job's log (`utmvm.Tee`).
+`serve` calls this code directly rather than through the command path, so it
+tells [the ledger](#the-ledger-client) itself (`remote.Record`): the job's
+`start` and `end` (exit code, duration) from `RunJob`, and the clone's
+`vm-create` and `vm-delete` (the latter only once UTM no longer lists it)
+from `macExecutor`, each with the job's id as the op, owner
+`remote:<caller>/<job>`, client `remote` and command `serve`.
 Cancelling stops a job at its next step: a program already running in the
 guest finishes or reaches its timeout, because `utmctl` cannot interrupt it.
 One job at a time, because a clone is 8 GiB and a 16 GiB Mac holds one.
@@ -349,7 +355,8 @@ stored and how it is read is in [the Worker](WORKER.md#the-ledger).
 
 **The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
 the start and end of every command (exit code, duration, the error text)
-except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build
+except `mcp` and `serve` (they serve for hours; what they serve is recorded
+on its own), `help`, `version`, `commands` and `glaze-status` (the site build
 runs it as `glaze-status -h` a dozen times). Over MCP it records the client's
 name from its `initialize`, and so does a detached job an MCP client started:
 the server hands the name to the job's process in `IRGO_WINVM_JOB_CLIENT`

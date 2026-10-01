@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
@@ -365,6 +366,81 @@ func TestSpecForRefusesWhatIsNotAWindowsBinary(t *testing.T) {
 	_ = os.WriteFile(noExt, []byte("MZ"), 0o644)
 	if _, err := SpecFor(noExt, KindApp, false, nil, time.Minute); err == nil {
 		t.Error("a binary without .exe was accepted")
+	}
+}
+
+// ledgerSink is the Worker's ledger ingest, keeping what it was sent.
+type ledgerSink struct {
+	mu     sync.Mutex
+	events []ledger.Event
+}
+
+func (l *ledgerSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var in wire.LedgerBatch
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	l.mu.Lock()
+	l.events = append(l.events, in.Events...)
+	l.mu.Unlock()
+	_, _ = w.Write([]byte(`{}`))
+}
+
+// A job serve runs is in the ledger as its own work: a start and an end
+// under the job's id, owned by remote:<caller>/<job>, the end with the exit
+// code and the duration. A job that never ran (its binary arrived damaged)
+// is closed too, with not-run, so it never reads as work left open.
+//
+// Negative control (by hand, 1 Oct 2026): deleting the End Record from
+// RunJob fails both jobs with "no end"; giving Record j.Owner as the owner
+// fails the owner check. Restored.
+func TestServeRecordsEachJobInTheLedger(t *testing.T) {
+	sink := &ledgerSink{}
+	ls := httptest.NewServer(sink)
+	defer ls.Close()
+	ledger.Configure(ledger.New(ledger.Config{URL: ls.URL, Token: "t", Dir: t.TempDir(), Version: "test"}))
+	t.Cleanup(func() { ledger.Configure(nil) })
+
+	f, s := newFake(t)
+	_, ran, _ := submitted(t, s, false)
+	ex := &fakeExec{out: Outcome{Code: command.CodeFailed, Message: "hello.exe exited 3 in the guest"}}
+	if err := Serve(context.Background(), runner(s.URL, "run", "mac-test"), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, broken, _ := submitted(t, s, false)
+	f.corrupt = true
+	if err := Serve(context.Background(), runner(s.URL, "run", "mac-test"), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	ledger.DrainDefault(2 * time.Second)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, c := range []struct {
+		j    Job
+		want command.Code
+	}{{ran, command.CodeFailed}, {broken, command.CodeNotRun}} {
+		var start, end *ledger.Event
+		for i, e := range sink.events {
+			if e.Op != c.j.ID {
+				continue
+			}
+			switch e.Type {
+			case ledger.Start:
+				start = &sink.events[i]
+			case ledger.End:
+				end = &sink.events[i]
+			}
+		}
+		owner := "remote:me/" + c.j.ID[:12]
+		switch {
+		case start == nil:
+			t.Errorf("job %s: no start in %+v", c.j.ID, sink.events)
+		case end == nil:
+			t.Errorf("job %s: no end in %+v", c.j.ID, sink.events)
+		case start.Owner != owner || end.Owner != owner || end.Client != "remote" || end.Command != "serve":
+			t.Errorf("job %s: start %+v end %+v, want owner %s, client remote, command serve", c.j.ID, *start, *end, owner)
+		case end.Exit == nil || *end.Exit != int64(c.want) || end.DurationMS == nil:
+			t.Errorf("job %s: end %+v, want exit %d and a duration", c.j.ID, *end, c.want)
+		}
 	}
 }
 

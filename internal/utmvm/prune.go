@@ -204,8 +204,15 @@ func Prune(p PrunePolicy, force bool, now time.Time) ([]PruneItem, int64) {
 	return items, freed
 }
 
-// removeChecked removes path and reports success only if it is gone.
+// removeChecked removes path and reports success only if it is gone. It
+// refuses anything that is not strictly inside the tool's own root, however
+// the path was built: the root itself, a path that climbs out with "..", and
+// one whose parent resolves through a symlink to somewhere else. Prune deletes
+// in a shared home directory; a plan bug must not be able to reach past it.
 func removeChecked(path string) error {
+	if err := insideRoot(appRoot(), path); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(path); err != nil {
 		return err
 	}
@@ -256,4 +263,24 @@ func privateBytes(path string) int64 {
 	}
 	n, _ := diskUsage(path)
 	return n
+}
+
+// insideRoot reports an error unless path is strictly below root, both
+// resolved through symlinks (path's parent, so a symlink at path itself is
+// removed as a link, never followed).
+func insideRoot(root, path string) error {
+	r, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("prune: cannot resolve the tool's root %s: %w", root, err)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(filepath.Clean(path)))
+	if err != nil {
+		return fmt.Errorf("prune: refusing %s: cannot resolve its folder: %w", path, err)
+	}
+	full := filepath.Join(parent, filepath.Base(filepath.Clean(path)))
+	rel, err := filepath.Rel(r, full)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("prune: refusing %s: it is not inside %s", path, root)
+	}
+	return nil
 }

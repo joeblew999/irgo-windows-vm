@@ -91,6 +91,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: '**/go.sum'
+      # The windows-11-arm image comes up with a full-screen "Microsoft account"
+      # prompt (WWAHost.exe) over every window, with the Start menu open under
+      # it. Chromium drops a wheel event aimed at a window that something else
+      # covers, so TestDriveScroll saw nothing (1 Oct 2026). Close both; this is
+      # a disposable runner. Found by native PR #2's own workflow.
+      - if: runner.os == 'Windows'
+        name: clear the desktop
+        shell: pwsh
+        run: |
+          Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+          Get-Process -Name WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -PassThru | Format-Table Id, ProcessName
+          Start-Sleep -Seconds 2
+          (New-Object -ComObject WScript.Shell).SendKeys('{ESC}')
       - if: runner.os == 'Windows'
         shell: bash
         run: go run ./cmd/irgo-winvm glaze-check

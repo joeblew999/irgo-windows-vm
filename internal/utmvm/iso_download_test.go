@@ -29,12 +29,12 @@ func TestDownloadVerifiesSHA256(t *testing.T) {
 
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good")
-	if err := isoDownload(srv.URL, good, sha256Digest(hex.EncodeToString(sum[:])), nil); err != nil {
+	if err := isoDownload(srv.URL, nil, good, sha256Digest(hex.EncodeToString(sum[:])), nil); err != nil {
 		t.Fatalf("the right SHA-256 was refused: %v", err)
 	}
 
 	bad := filepath.Join(dir, "bad")
-	err := isoDownload(srv.URL, bad, sha256Digest(strings.Repeat("0", 64)), nil)
+	err := isoDownload(srv.URL, nil, bad, sha256Digest(strings.Repeat("0", 64)), nil)
 	if !errors.Is(err, errDigestMismatch) || !strings.Contains(err.Error(), "sha256") {
 		t.Fatalf("a wrong SHA-256 gave %v, want a sha256 mismatch", err)
 	}
@@ -65,7 +65,7 @@ func TestDownloadResumesAPart(t *testing.T) {
 	if err := os.WriteFile(dest+".part", body[:10], 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := isoDownload(srv.URL, dest, sha256Digest(hex.EncodeToString(sum[:])), nil); err != nil {
+	if err := isoDownload(srv.URL, nil, dest, sha256Digest(hex.EncodeToString(sum[:])), nil); err != nil {
 		t.Fatalf("resuming failed: %v", err)
 	}
 	if ranged != "bytes=10-" {
@@ -92,7 +92,7 @@ func TestDownloadRejectsShortBody(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "media.iso")
-	err := isoDownload(srv.URL, dest, digest{}, nil)
+	err := isoDownload(srv.URL, nil, dest, digest{}, nil)
 	if err == nil {
 		t.Fatal("a 400-byte body against a declared 1000 must fail, not report success")
 	}
@@ -111,7 +111,7 @@ func TestDownloadAcceptsCompleteBody(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "media.iso")
-	if err := isoDownload(srv.URL, dest, digest{}, nil); err != nil {
+	if err := isoDownload(srv.URL, nil, dest, digest{}, nil); err != nil {
 		t.Fatalf("a complete body must succeed: %v", err)
 	}
 	fi, err := os.Stat(dest)

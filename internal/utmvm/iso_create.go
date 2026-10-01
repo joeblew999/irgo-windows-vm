@@ -368,7 +368,9 @@ func sha256Digest(hex string) digest { return digest{"sha256", hex, sha256.New} 
 //
 // progress, if non-nil, is called about once a second with bytes so far and the
 // total. A 4 GB download with no output looks identical to a hung one.
-func isoDownload(url, dest string, want digest, progress func(done, total int64)) error {
+//
+// header is sent with the request (the golden cache's Worker token), or nil.
+func isoDownload(url string, header http.Header, dest string, want digest, progress func(done, total int64)) error {
 	if err := isoRefuseUnsafeDest(dest); err != nil {
 		return err
 	}
@@ -382,6 +384,9 @@ func isoDownload(url, dest string, want digest, progress func(done, total int64)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
+	}
+	for k, v := range header {
+		req.Header[k] = v
 	}
 	if have > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
@@ -616,7 +621,7 @@ func ISOGet(opts ISOGetOptions, say func(string, ...any)) (iso, detail string, s
 	if err := os.MkdirAll(ISODir(), 0o755); err != nil {
 		return "", "", false, err
 	}
-	if dErr := isoDownload(e.FilePath, esd, sha1Digest(e.Sha1), func(done, total int64) {
+	if dErr := isoDownload(e.FilePath, nil, esd, sha1Digest(e.Sha1), func(done, total int64) {
 		if total > 0 {
 			say("      %s / %s", HumanBytes(done), HumanBytes(total))
 		}

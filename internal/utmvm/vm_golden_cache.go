@@ -38,9 +38,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -312,7 +309,7 @@ func GoldenPush(ctx context.Context, o GoldenPushOptions, say func(string, ...an
 	if err := o.R2.requirePrivate(ctx, say); err != nil {
 		return res, err
 	}
-	cl := o.R2.client()
+	st := o.R2.store()
 
 	say("STEP 2/4  the bundle %s", Home(o.Bundle))
 	type entry struct {
@@ -384,7 +381,7 @@ func GoldenPush(ctx context.Context, o GoldenPushOptions, say func(string, ...an
 
 	say("STEP 3/4  chunks: %s regions, only those the bucket lacks are sent, %d at a time", HumanBytes(chunk), par)
 	t0 := time.Now()
-	up := &chunkUploader{cl: cl, bucket: o.R2.Bucket, table: m.Chunks, claimed: map[string]bool{}}
+	up := &chunkUploader{st: st, table: m.Chunks, claimed: map[string]bool{}}
 	tick, flush := throttle(say, 2*time.Second)
 	var read atomic.Int64
 	for _, f := range files {
@@ -411,12 +408,14 @@ func GoldenPush(ctx context.Context, o GoldenPushOptions, say func(string, ...an
 	// Verified before the manifest names them: every chunk it lists is in the
 	// bucket at the length recorded.
 	for id, c := range m.Chunks {
-		h, hErr := cl.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(o.R2.Bucket), Key: aws.String(goldenChunkKey(id))})
-		if hErr != nil {
+		size, _, ok, hErr := st.head(ctx, goldenChunkKey(id))
+		switch {
+		case hErr != nil:
 			return res, fmt.Errorf("checking chunk %s after the upload: %w", id, hErr)
-		}
-		if aws.ToInt64(h.ContentLength) != c.ZSize {
-			return res, fmt.Errorf("chunk %s is %d bytes in the bucket, and %d were sent", id, aws.ToInt64(h.ContentLength), c.ZSize)
+		case !ok:
+			return res, fmt.Errorf("chunk %s is not in the bucket after the upload", id)
+		case size != c.ZSize:
+			return res, fmt.Errorf("chunk %s is %d bytes in the bucket, and %d were sent", id, size, c.ZSize)
 		}
 	}
 
@@ -430,17 +429,17 @@ func GoldenPush(ctx context.Context, o GoldenPushOptions, say func(string, ...an
 	}
 	sum := sha256.Sum256(body)
 	res.ID = hex.EncodeToString(sum[:])
-	if err := putBytes(ctx, cl, o.R2.Bucket, goldenManifestKey(res.ID), body, nil); err != nil {
+	if err := st.put(ctx, goldenManifestKey(res.ID), body); err != nil {
 		return res, err
 	}
-	got, err := getBytes(ctx, cl, o.R2.Bucket, goldenManifestKey(res.ID))
+	got, ok, err := st.get(ctx, goldenManifestKey(res.ID))
 	if err != nil {
 		return res, fmt.Errorf("reading the manifest back: %w", err)
 	}
-	if !bytes.Equal(got, body) {
+	if !ok || !bytes.Equal(got, body) {
 		return res, fmt.Errorf("the manifest read back from the bucket is not the one written")
 	}
-	if err := putBytes(ctx, cl, o.R2.Bucket, goldenLatestKey, []byte(res.ID+"\n"), nil); err != nil {
+	if err := st.put(ctx, goldenLatestKey, []byte(res.ID+"\n")); err != nil {
 		return res, err
 	}
 	say("          %s", goldenManifestKey(res.ID))
@@ -450,8 +449,7 @@ func GoldenPush(ctx context.Context, o GoldenPushOptions, say func(string, ...an
 
 // chunkUploader sends the regions of files as chunks, each once.
 type chunkUploader struct {
-	cl     *s3.Client
-	bucket string
+	st goldenStore
 
 	mu      sync.Mutex
 	table   map[string]cacheChunk // what the manifest will list
@@ -548,25 +546,21 @@ func (u *chunkUploader) ensure(ctx context.Context, id string, raw []byte) error
 	u.mu.Unlock()
 
 	key := goldenChunkKey(id)
-	h, err := u.cl.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(u.bucket), Key: aws.String(key)})
+	size, zsum, ok, err := u.st.head(ctx, key)
 	switch {
-	case err == nil:
-		z := h.Metadata["zsha256"]
-		if isSHA256Hex(z) && aws.ToInt64(h.ContentLength) > 0 {
-			u.record(id, cacheChunk{Size: int64(len(raw)), ZSize: aws.ToInt64(h.ContentLength), ZSHA256: z})
-			u.reused.Add(1)
-			return nil
-		}
-		// There, but not written by this code: sent again, over it.
-	case isNotFound(err):
-	default:
+	case err != nil:
 		return fmt.Errorf("asking the bucket for chunk %s: %w", id, err)
+	case ok && isSHA256Hex(zsum) && size > 0:
+		u.record(id, cacheChunk{Size: int64(len(raw)), ZSize: size, ZSHA256: zsum})
+		u.reused.Add(1)
+		return nil
 	}
+	// Missing, or there but not written by this code: sent, over it.
 
 	z := zstdEncoder.EncodeAll(raw, make([]byte, 0, len(raw)/2))
 	zs := sha256.Sum256(z)
 	c := cacheChunk{Size: int64(len(raw)), ZSize: int64(len(z)), ZSHA256: hex.EncodeToString(zs[:])}
-	if err := putBytes(ctx, u.cl, u.bucket, key, z, map[string]string{"zsha256": c.ZSHA256}); err != nil {
+	if err := u.st.put(ctx, key, z); err != nil {
 		return err
 	}
 	u.record(id, c)
@@ -581,58 +575,29 @@ func (u *chunkUploader) record(id string, c cacheChunk) {
 	u.mu.Unlock()
 }
 
-func isNotFound(err error) bool {
-	var nf *types.NotFound
-	var nk *types.NoSuchKey
-	return errors.As(err, &nf) || errors.As(err, &nk)
-}
-
-func putBytes(ctx context.Context, cl *s3.Client, bucket, key string, b []byte, meta map[string]string) error {
-	_, err := cl.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(bucket),
-		Key:           aws.String(key),
-		Body:          bytes.NewReader(b),
-		ContentLength: aws.Int64(int64(len(b))),
-		Metadata:      meta,
-	})
-	if err != nil {
-		return fmt.Errorf("uploading %s: %w", key, err)
-	}
-	return nil
-}
-
-func getBytes(ctx context.Context, cl *s3.Client, bucket, key string) ([]byte, error) {
-	out, err := cl.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = out.Body.Close() }()
-	return io.ReadAll(io.LimitReader(out.Body, 64<<20))
-}
-
 // resolveManifest returns the manifest id asked for, or latest's, with the
 // manifest's bytes, refusing bytes that do not hash to the id. An empty id
 // with no latest in the bucket is ("", nil, nil): nothing has been pushed.
-func resolveManifest(ctx context.Context, cl *s3.Client, bucket, id string) (string, []byte, error) {
+func resolveManifest(ctx context.Context, st goldenStore, id string) (string, []byte, error) {
 	if id == "" {
-		b, err := getBytes(ctx, cl, bucket, goldenLatestKey)
-		if isNotFound(err) {
-			return "", nil, nil
-		}
+		b, ok, err := st.get(ctx, goldenLatestKey)
 		if err != nil {
 			return "", nil, fmt.Errorf("reading %s: %w", goldenLatestKey, err)
+		}
+		if !ok {
+			return "", nil, nil
 		}
 		id = strings.TrimSpace(string(b))
 	}
 	if !isSHA256Hex(id) {
 		return "", nil, fmt.Errorf("manifest id %q is not a SHA-256", id)
 	}
-	b, err := getBytes(ctx, cl, bucket, goldenManifestKey(id))
-	if isNotFound(err) {
-		return id, nil, nil
-	}
+	b, ok, err := st.get(ctx, goldenManifestKey(id))
 	if err != nil {
 		return "", nil, fmt.Errorf("reading manifest %s: %w", id, err)
+	}
+	if !ok {
+		return id, nil, nil
 	}
 	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != id {
 		return "", nil, fmt.Errorf("manifest %s does not hash to its name (it hashes to %s); refusing it",
@@ -676,10 +641,10 @@ func GoldenPull(ctx context.Context, o GoldenPullOptions, say func(string, ...an
 	if err := o.R2.requirePrivate(ctx, say); err != nil {
 		return res, err
 	}
-	cl := o.R2.client()
+	st := o.R2.store()
 
 	say("STEP 2/5  the manifest")
-	id, body, err := resolveManifest(ctx, cl, o.R2.Bucket, o.ID)
+	id, body, err := resolveManifest(ctx, st, o.ID)
 	if err != nil {
 		return res, err
 	}
@@ -747,7 +712,7 @@ func GoldenPull(ctx context.Context, o GoldenPullOptions, say func(string, ...an
 			done.Add(c.ZSize)
 			return nil
 		}
-		if fErr := fetchChunk(ctx, o.R2, cl, cid, c, dest); fErr != nil {
+		if fErr := fetchChunk(ctx, st, cid, c, dest); fErr != nil {
 			return fErr
 		}
 		done.Add(c.ZSize)
@@ -808,22 +773,13 @@ func GoldenPull(ctx context.Context, o GoldenPullOptions, say func(string, ...an
 // .part and verifies the SHA-256 before renaming. A mismatch is fetched once
 // more from nothing before it is an error: a truncated resume is likelier than
 // a bad object.
-func fetchChunk(ctx context.Context, r R2Config, cl *s3.Client, id string, c cacheChunk, dest string) error {
+func fetchChunk(ctx context.Context, st goldenStore, id string, c cacheChunk, dest string) error {
 	key := goldenChunkKey(id)
-	presign := s3.NewPresignClient(cl)
 	for attempt := 1; ; attempt++ {
-		req, err := presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r.Bucket), Key: aws.String(key)},
-			s3.WithPresignExpires(30*time.Minute))
-		if err != nil {
-			return err
-		}
-		err = isoDownload(req.URL, dest, sha256Digest(c.ZSHA256), nil)
+		err := st.fetch(ctx, key, dest, sha256Digest(c.ZSHA256))
 		if err == nil {
 			return nil
 		}
-		// The presigned URL is a credential for this object until it expires,
-		// and errors are logged: name the key instead.
-		err = errors.New(strings.ReplaceAll(err.Error(), req.URL, key))
 		if !strings.Contains(err.Error(), "mismatch") || attempt == 2 {
 			return fmt.Errorf("chunk %s: %w", id, err)
 		}
@@ -1003,19 +959,19 @@ type GoldenCacheRemoval struct {
 // latest points afterwards. It changes nothing.
 func InspectGoldenCacheRemoval(ctx context.Context, r R2Config, id string) (GoldenCacheRemoval, error) {
 	var rm GoldenCacheRemoval
-	cl := r.client()
-	target, body, err := resolveManifest(ctx, cl, r.Bucket, id)
+	st := r.store()
+	target, body, err := resolveManifest(ctx, st, id)
 	if err != nil {
 		return rm, err
 	}
 	latest := ""
-	if b, lErr := getBytes(ctx, cl, r.Bucket, goldenLatestKey); lErr == nil {
-		latest = strings.TrimSpace(string(b))
-	} else if !isNotFound(lErr) {
+	if b, ok, lErr := st.get(ctx, goldenLatestKey); lErr != nil {
 		return rm, lErr
+	} else if ok {
+		latest = strings.TrimSpace(string(b))
 	}
 
-	keys, err := listKeys(ctx, cl, r.Bucket, goldenPrefix+"manifests/")
+	keys, err := st.list(ctx, goldenPrefix+"manifests/")
 	if err != nil {
 		return rm, err
 	}
@@ -1026,7 +982,7 @@ func InspectGoldenCacheRemoval(ctx context.Context, r R2Config, id string) (Gold
 		if mid == target && body != nil {
 			continue
 		}
-		_, b, gErr := resolveManifest(ctx, cl, r.Bucket, mid)
+		_, b, gErr := resolveManifest(ctx, st, mid)
 		if gErr != nil {
 			return rm, fmt.Errorf("another manifest, %s, cannot be read, so which chunks it needs is unknown: %w", mid, gErr)
 		}
@@ -1051,7 +1007,7 @@ func InspectGoldenCacheRemoval(ctx context.Context, r R2Config, id string) (Gold
 		rm.MovesLatest = latest == target || latest == ""
 	}
 
-	chunks, err := listKeys(ctx, cl, r.Bucket, goldenPrefix+"chunks/")
+	chunks, err := st.list(ctx, goldenPrefix+"chunks/")
 	if err != nil {
 		return rm, err
 	}
@@ -1077,13 +1033,8 @@ func InspectGoldenCacheRemoval(ctx context.Context, r R2Config, id string) (Gold
 // Do not run it while a push to the same bucket is under way elsewhere: that
 // push's chunks are unreferenced until its manifest is written.
 func GoldenCacheDelete(ctx context.Context, r R2Config, rm GoldenCacheRemoval, say func(string, ...any)) error {
-	cl := r.client()
-	del := func(key string) error {
-		if _, err := cl.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(r.Bucket), Key: aws.String(key)}); err != nil {
-			return fmt.Errorf("deleting %s: %w", key, err)
-		}
-		return nil
-	}
+	st := r.store()
+	del := func(key string) error { return st.del(ctx, key) }
 	if rm.ID != "" {
 		if err := del(goldenManifestKey(rm.ID)); err != nil {
 			return err
@@ -1092,7 +1043,7 @@ func GoldenCacheDelete(ctx context.Context, r R2Config, rm GoldenCacheRemoval, s
 	}
 	if rm.MovesLatest {
 		if rm.NewLatest != "" {
-			if err := putBytes(ctx, cl, r.Bucket, goldenLatestKey, []byte(rm.NewLatest+"\n"), nil); err != nil {
+			if err := st.put(ctx, goldenLatestKey, []byte(rm.NewLatest+"\n")); err != nil {
 				return err
 			}
 			say("          latest -> %s", rm.NewLatest)
@@ -1114,7 +1065,7 @@ func GoldenCacheDelete(ctx context.Context, r R2Config, rm GoldenCacheRemoval, s
 	// Checked, not assumed: a delete that answered 204 and left the object
 	// would otherwise be reported as done.
 	if rm.ID != "" {
-		_, b, err := resolveManifest(ctx, cl, r.Bucket, rm.ID)
+		_, b, err := resolveManifest(ctx, st, rm.ID)
 		if err != nil {
 			return err
 		}
@@ -1123,20 +1074,4 @@ func GoldenCacheDelete(ctx context.Context, r R2Config, rm GoldenCacheRemoval, s
 		}
 	}
 	return nil
-}
-
-// listKeys lists every object under prefix, with its size.
-func listKeys(ctx context.Context, cl *s3.Client, bucket, prefix string) (map[string]int64, error) {
-	out := map[string]int64{}
-	p := s3.NewListObjectsV2Paginator(cl, &s3.ListObjectsV2Input{Bucket: aws.String(bucket), Prefix: aws.String(prefix)})
-	for p.HasMorePages() {
-		page, err := p.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing %s: %w", prefix, err)
-		}
-		for _, o := range page.Contents {
-			out[aws.ToString(o.Key)] = aws.ToInt64(o.Size)
-		}
-	}
-	return out, nil
 }

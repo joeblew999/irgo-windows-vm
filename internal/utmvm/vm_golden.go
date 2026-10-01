@@ -487,18 +487,45 @@ func shutdownGuest(vmRef string, say func(string, ...any)) error {
 	return fmt.Errorf("%s did not stop within 5m after Windows was asked to shut down (UTM says %q)", vmRef, st)
 }
 
-// stopAndWait stops a VM from outside and waits for UTM to say stopped.
-func stopAndWait(vm VM, limit time.Duration) error {
-	_ = vm.Stop() // its own error is not trusted either way; the status below is
-	deadline := time.Now().Add(limit)
-	for time.Now().Before(deadline) {
-		if st, err := vm.Status(); err == nil && strings.EqualFold(strings.TrimSpace(st), "stopped") {
-			return nil
+// unattendMarker is written by the answer file's last first-logon command, so
+// its presence means every one before it ran.
+const unattendMarker = `C:\unattend-complete.txt`
+
+// finishInstall ends an install whose agent has just answered: it waits for the
+// answer file's last first-logon command, then shuts Windows down from inside,
+// takes the install medium out through UTM, and boots again until the agent
+// answers. Out of a running VM, never out of a busy one: the first-logon
+// commands (guest tools, the SMB share) were cut off once by a hard stop.
+func finishInstall(vmRef string, logf func(string, ...any)) error {
+	say := func(f string, a ...any) { logf(f, a...) }
+	logf("waiting for the answer file's first-logon commands to finish (%s)", unattendMarker)
+	deadline := time.Now().Add(20 * time.Minute)
+	for {
+		res, err := appExec(vmRef, []string{"cmd", "/c", "if exist " + unattendMarker + " (exit 0) else (exit 1)"}, time.Minute, say)
+		if err == nil && res.ExitCode == 0 {
+			break
 		}
-		time.Sleep(2 * time.Second)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the guest agent answers, but %s did not appear within 20m: a first-logon command did not finish", unattendMarker)
+		}
+		time.Sleep(15 * time.Second)
 	}
-	st, _ := vm.Status()
-	return fmt.Errorf("%s did not stop within %s (UTM says %q)", vm.Ref, limit, st)
+	logf("first-logon commands done; shutting down from inside to take the install medium out")
+	if err := shutdownGuest(vmRef, say); err != nil {
+		return err
+	}
+	done, err := ejectInstallMedia(vmRef)
+	if err != nil {
+		return err
+	}
+	if done {
+		logf("install medium out")
+	}
+	vm := Named(vmRef)
+	if err := vm.StartWithDisplay(); err != nil {
+		return err
+	}
+	return vm.waitForAgentEvery(10*time.Minute, 5*time.Second)
 }
 
 // releaseLegacyMedia clears the immutable flag on a bundle's install.iso, if

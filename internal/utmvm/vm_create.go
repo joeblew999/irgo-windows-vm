@@ -950,7 +950,6 @@ func RunInstall(opts InstallOptions) error {
 	var stalls int
 	var lastPhase Phase
 	var assists int
-	var ejected bool
 
 	for time.Now().Before(deadline) {
 		p := Inspect(opts.VMRef, opts.BundlePath)
@@ -968,7 +967,11 @@ func RunInstall(opts InstallOptions) error {
 			lastPhase = p.Phase
 		}
 		if p.AgentUp {
-			logf("guest agent is answering — install complete")
+			logf("guest agent is answering")
+			if err := finishInstall(opts.VMRef, logf); err != nil {
+				return err
+			}
+			logf("install complete")
 			if shot, sErr := Shot(opts.VMRef, "ready"); sErr == nil {
 				logf("   %s", Home(shot))
 			}
@@ -984,51 +987,30 @@ func RunInstall(opts InstallOptions) error {
 		// Three consecutive quiet samples (~90s). Long enough that a slow copy
 		// phase is not mistaken for a stall, short enough not to waste the wait.
 		if stalls >= 3 {
-			target, what := BootInstaller, "installer"
+			stalls = 0
+			// Windows is on the disk: a quiet disk now is Windows working
+			// (specialize, OOBE, first-logon commands), never something to
+			// stop or type at. Measured 1 Oct 2026 on g1: the firmware booted
+			// Windows' own boot entry with the install CD still attached, and
+			// the desktop was up while the guest tools were still installing.
+			// This loop read that as a stall, hard-stopped the VM in the
+			// middle of the first-logon commands (so the guest tools never
+			// installed) and, after the restart, typed a boot path into the
+			// Start menu's search box. The install medium now comes out after
+			// the agent answers, below.
 			if p.DiskMiB >= partitionMiB {
-				// Windows has written to the disk, so the ESP exists and the
-				// stall is the post-copy reboot.
-				//
-				// Take the disc out first. Self-booting media wins the boot
-				// order every time and lands at "Start boot option" with no
-				// shell to redirect from, so no amount of typing helps until
-				// it is gone.
-				if !ejected {
-					// Stopped first: UTM changes the configuration of a stopped
-					// VM only. The error is returned, not dropped — it was
-					// dropped, and the loop went on typing at a medium that would
-					// not let go.
-					logf("Windows is on the disk — stopping it to take the install medium out")
-					if sErr := stopAndWait(vm, 2*time.Minute); sErr != nil {
-						return sErr
-					}
-					done, eErr := ejectInstallMedia(opts.VMRef)
-					if eErr != nil {
-						return eErr
-					}
-					ejected = true
-					if done {
-						logf("install medium out; starting it again so the firmware boots Windows")
-					}
-					if sErr := vm.StartWithDisplay(); sErr != nil {
-						return sErr
-					}
-					stalls = 0
-					continue
-				}
-				target, what = BootInstalled, "installed Windows off the ESP"
-			}
-			// selfBooting describes the INSTALL MEDIUM, and only the first
-			// boot comes off it. Setup then copies files, reboots, and lands
-			// back at the UEFI shell needing a boot off the ESP — which no
-			// medium does for us. This is checked BEFORE counting an attempt:
-			// waiting for a disc to boot itself is not an attempt at anything,
-			// and counting it burned the budget the second phase needs.
-			if selfBooting && target == BootInstaller {
-				logf("%s — waiting; this medium boots itself", p)
-				stalls = 0
+				logf("%s — quiet; Windows is on the disk, so waiting for the agent, not stopping or typing", p)
+				time.Sleep(30 * time.Second)
 				continue
 			}
+			// selfBooting describes the INSTALL MEDIUM: the first boot needs
+			// no typing. Not counted as an attempt.
+			if selfBooting {
+				logf("%s — waiting; this medium boots itself", p)
+				time.Sleep(30 * time.Second)
+				continue
+			}
+			target, what := BootInstaller, "installer"
 			assists++
 			if assists > 6 {
 				shot, _ := Shot(opts.VMRef, "gave-up")
@@ -1046,7 +1028,6 @@ func RunInstall(opts InstallOptions) error {
 			if err := BootAssistOn(opts.VMRef, target, ""); err != nil {
 				return err
 			}
-			stalls = 0
 		}
 		time.Sleep(30 * time.Second)
 	}

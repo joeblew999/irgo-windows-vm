@@ -11,7 +11,7 @@
 # whose point is over another process's window, so the prompt made
 # TestDriveScroll see nothing. Stopping a shell host is safe on a disposable
 # runner: StartMenuExperienceHost and SearchHost start again on demand.
-param([switch]$Clear)
+param([switch]$Clear, [int]$Watch = 0)
 $ErrorActionPreference = 'Stop'
 
 Add-Type @'
@@ -103,6 +103,20 @@ function StopNamed($names) {
   if ($p) { "stopped: $(($p | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ', ')" } else { "stopped: none of $($names -join ', ')" }
 }
 StopNamed $covering
+
+# The wsl.exe is the image's own WSL updater, `wsl.exe --update --confirm
+# --prompt-before-exit`, which Windows relaunches (30 s after it was stopped,
+# measured; every ~90 s for the whole job, actions/runner-images#14264) until
+# WSL is up to date, each time in a new Windows Terminal window that takes the
+# foreground. Stopping it is not enough. So run the update to the end, here,
+# in this step's own console, and say how it went.
+'== updating WSL, so the image stops relaunching its updater'
+$t = [Diagnostics.Stopwatch]::StartNew()
+$u = Start-Process wsl.exe -ArgumentList '--update', '--web-download' -NoNewWindow -PassThru
+if (-not $u.WaitForExit(300000)) { $u | Stop-Process -Force; "wsl --update did not finish in 300 s; stopped" }
+else { "wsl --update exited $($u.ExitCode) after $([int]$t.Elapsed.TotalSeconds) s" }
+& wsl.exe --version 2>&1 | ForEach-Object { "wsl --version: $_" }
+StopNamed $covering
 Start-Sleep -Seconds 2
 
 # Start and Search: the sign-in prompt sits over an open Start menu, and with
@@ -135,4 +149,15 @@ $back = @(StartPanes) + @([RunnerDesk]::Shown() | Where-Object { (ProcName $_.Pi
 if ($back) {
   "still shown after clearing: $(($back | ForEach-Object { "$(ProcName $_.Pid) '$($_.Title)'" }) -join ', ')"
   exit 1
+}
+
+# -Watch N: for N seconds, print every wsl.exe or Windows Terminal that starts
+# (to see whether the updater still comes back).
+$seen = @{}
+for ($i = 0; $i -lt $Watch; $i += 5) {
+  Get-CimInstance Win32_Process -Filter "Name='wsl.exe' OR Name='WindowsTerminal.exe'" | Where-Object { -not $seen[$_.ProcessId] } | ForEach-Object {
+    $seen[$_.ProcessId] = $true
+    "+${i}s: $($_.Name) ($($_.ProcessId)) started $($_.CreationDate): $($_.CommandLine)"
+  }
+  Start-Sleep -Seconds 5
 }

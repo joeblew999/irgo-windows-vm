@@ -69,7 +69,22 @@ function Show($label) {
 }
 
 Show 'shown windows'
+# Who started the console programs and terminals on the desktop: the wsl.exe
+# that turns into a Windows Terminal window was started by something at logon.
+Get-CimInstance Win32_Process -Filter "Name='wsl.exe' OR Name='wslhost.exe' OR Name='WindowsTerminal.exe' OR Name='OpenConsole.exe' OR Name='conhost.exe'" |
+  ForEach-Object {
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.ParentProcessId)" -ErrorAction SilentlyContinue
+    [pscustomobject]@{ Pid = $_.ProcessId; Name = $_.Name; Started = $_.CreationDate; Parent = "$($parent.Name) ($($_.ParentProcessId)) $($parent.CommandLine)"; CommandLine = $_.CommandLine }
+  } | Format-List | Out-String -Width 300
 if (-not $Clear) { exit 0 }
+'== where a program started at logon could come from'
+foreach ($k in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce') {
+  $v = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
+  if ($v) { $v.PSObject.Properties | Where-Object Name -notlike 'PS*' | ForEach-Object { "${k}: $($_.Name) = $($_.Value)" } }
+}
+Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp" -ErrorAction SilentlyContinue | ForEach-Object { "startup folder: $($_.FullName)" }
+Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { ($_.Actions | Out-String) -match 'wsl|bash' } | ForEach-Object { "scheduled task: $($_.TaskPath)$($_.TaskName) [$($_.State)]: $(($_.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join '; ')" }
 
 # Anything that covers the desktop or can take the foreground on its own: the
 # sign-in prompt, notification toasts (an uncloaked CoreWindow of

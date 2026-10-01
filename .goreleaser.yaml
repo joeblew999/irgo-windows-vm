@@ -22,7 +22,10 @@ builds:
     binary: irgo-winvm
     env:
       - CGO_ENABLED=0
-    goos: [darwin]
+    # macOS runs everything. Linux and Windows get the same binary as a client:
+    # the remote-* commands drive a Mac elsewhere through the Worker, and every
+    # command that needs UTM refuses there and points at remote-submit.
+    goos: [darwin, linux, windows]
     goarch: [arm64, amd64]
     # -buildvcs=false so the checksums mean something. Go stamps the commit, the
     # build time and whether the tree was dirty into every binary, so the same
@@ -156,6 +159,11 @@ release:
     installs it as `~/.local/bin/irgo-winvm` (`IRGO_WINVM_DIR` to put it elsewhere).
     Or with Homebrew: `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm`.
     Or with Go: `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@{{ .Tag }}`.
+
+    **On Linux or Windows?** Download `irgo-winvm-linux-<arch>` or `irgo-winvm-windows-<arch>.exe`
+    below: the same binary as a client. `irgo-winvm remote-submit` sends a Windows build to a Mac
+    running `irgo-winvm serve` and brings back its output, test results and screenshots. A GitHub
+    workflow can do the same with the action in `.github/actions/run`.
 
     Or download `irgo-winvm-darwin-arm64` (Apple Silicon) below, then:
 

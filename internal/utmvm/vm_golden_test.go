@@ -19,11 +19,11 @@ import (
 //
 // Negative control, run by hand: drop the last %q from the asset and this fails.
 func TestCloneScriptTakesItsArguments(t *testing.T) {
-	s := fmt.Sprintf(cloneScript, "src vm", `dst "vm"`, "52:54:00:AB:CD:EF", `dst "vm"`)
+	s := fmt.Sprintf(cloneScript, "src vm", 4096, `dst "vm"`, "52:54:00:AB:CD:EF", `dst "vm"`)
 	if strings.Contains(s, "%!") {
 		t.Fatalf("the clone script and cloneVM disagree about its arguments:\n%s", s)
 	}
-	for _, want := range []string{`"src vm"`, `"dst \"vm\""`, `"52:54:00:AB:CD:EF"`, "is NVMe", "duplicate src"} {
+	for _, want := range []string{`"src vm"`, `"dst \"vm\""`, `"52:54:00:AB:CD:EF"`, "is NVMe", "duplicate src", "set mem to 4096", "memory:mem"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered clone script has no %s", want)
 		}

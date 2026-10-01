@@ -55,8 +55,8 @@ func capacityLines(r utmvm.CapacityReport) []string {
 	if r.MemoryErr != "" {
 		add("memory:  cannot tell: %s", r.MemoryErr)
 	} else {
-		add("memory:  %s in this Mac, %s configured for running VMs, %s kept for macOS; each VM takes %s",
-			gib(r.Memory), gib(r.RunningMemory), gib(p.MemoryReserve), gib(p.VMMemory))
+		add("memory:  %s in this Mac, %s configured for running VMs, %s kept for macOS; a clone takes %s, an install %s",
+			gib(r.Memory), gib(r.RunningMemory), gib(p.MemoryReserve), gib(p.CloneMemory), gib(p.VMMemory))
 	}
 	add("")
 	add("%-18s %-8s %-7s %-34s %-6s %-10s %-10s %-9s %s", "VM", "STATE", "KIND", "OWNER", "MEMORY", "ITS OWN", "PROMISED", "IDLE", "")
@@ -120,7 +120,7 @@ func capacityLines(r utmvm.CapacityReport) []string {
 	add("")
 	add("room for another clone: %s", strings.ToUpper(r.Room.Clone))
 	add("  %s", r.Room.Why)
-	add("  by disk, %d more clone(s) fit (%s each, after %s still promised to the VMs here); by memory, %d more VM(s) can run",
+	add("  by disk, %d more clone(s) fit (%s each, after %s still promised to the VMs here); by memory, %d more clone(s) can run",
 		r.Room.MoreClones, gib(p.CloneReserve), gib(r.Promised), r.Room.MoreRunning)
 	return l
 }

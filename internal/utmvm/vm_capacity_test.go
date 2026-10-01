@@ -7,18 +7,20 @@ import (
 )
 
 // TestDecideCapacity: yes, no and cannot tell, on the machine this was written
-// on (16 GiB, VMs of 8 GiB) and a larger one. Every case that cannot be
-// answered must come out as cannot tell, never yes.
+// on (16 GiB; irgo-win11 and installs 8 GiB, clones 4) and a larger one.
+// Every case that cannot be answered must come out as cannot tell, never yes.
 //
 // Negative controls, run by hand: skip VMs whose MiB is 0 instead of
 // returning cannot tell, and "a running VM UTM will not size" says yes;
-// compare left with 0 instead of hostMemoryReserveBytes, and "16 GiB, one
-// running" says yes (run 1 Oct 2026: it, the paused and the pending cases
-// failed); ignore freeErr and "disk unreadable" says yes.
+// compare left with 0 instead of hostMemoryReserveBytes, and "irgo-win11 and
+// a clone running" says yes; count a new clone at vmMemoryMiB, and "one 4 GiB
+// clone fits" says no; ignore freeErr and "disk unreadable" says yes.
 func TestDecideCapacity(t *testing.T) {
 	const gib = 1 << 30
 	running := vmMemory{Name: "irgo-win11", Status: "started", MiB: 8192}
-	paused := vmMemory{Name: "a1", Status: "paused", MiB: 8192}
+	paused := vmMemory{Name: "a1", Status: "paused", MiB: 4096}
+	clone := vmMemory{Name: "a2", Status: "started", MiB: 4096}
+	install := CapacityPlan{VM: "z1", Disk: diskForInstall}
 	stopped := vmMemory{Name: "irgo-golden", Status: "stopped", MiB: 8192}
 	newClone := CapacityPlan{VM: "z1", Disk: diskForClone}
 	plenty := int64(100 * gib)
@@ -29,11 +31,13 @@ func TestDecideCapacity(t *testing.T) {
 		want Answer
 	}{
 		{"16 GiB, nothing running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{stopped}, free: plenty}, AnswerYes},
-		{"16 GiB, one running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{running, stopped}, free: plenty}, AnswerNo},
-		{"16 GiB, one paused (UTM keeps its memory)", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{paused}, free: plenty}, AnswerNo},
-		{"16 GiB, another vm-create making one", capacityFacts{plan: newClone, host: 16 * gib, pending: []string{"z0"}, free: plenty}, AnswerNo},
+		{"16 GiB, irgo-win11 running: one 4 GiB clone fits", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{running, stopped}, free: plenty}, AnswerYes},
+		{"16 GiB, irgo-win11 and a clone running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{running, clone}, free: plenty}, AnswerNo},
+		{"16 GiB, irgo-win11 running and a clone paused (UTM keeps its memory)", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{running, paused}, free: plenty}, AnswerNo},
+		{"16 GiB, irgo-win11 running, an install wants 8", capacityFacts{plan: install, host: 16 * gib, vms: []vmMemory{running}, free: plenty}, AnswerNo},
+		{"16 GiB, irgo-win11 running and another vm-create making one", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{running}, pending: []string{"z0"}, free: plenty}, AnswerNo},
 		{"32 GiB, one running", capacityFacts{plan: newClone, host: 32 * gib, vms: []vmMemory{running}, free: plenty}, AnswerYes},
-		{"32 GiB, three running", capacityFacts{plan: newClone, host: 32 * gib, vms: []vmMemory{running, paused, {Name: "b", Status: "started", MiB: 8192}}, free: plenty}, AnswerNo},
+		{"32 GiB, 8 + 8 + 8 + 4 running", capacityFacts{plan: newClone, host: 32 * gib, vms: []vmMemory{running, clone, {Name: "b", Status: "started", MiB: 8192}, {Name: "c", Status: "started", MiB: 8192}}, free: plenty}, AnswerNo},
 		{"memory unreadable", capacityFacts{plan: newClone, hostErr: errors.New("sysctl"), free: plenty}, AnswerCannotTell},
 		{"UTM unreadable", capacityFacts{plan: newClone, host: 64 * gib, vmsErr: errors.New("osascript"), free: plenty}, AnswerCannotTell},
 		{"a running VM UTM will not size", capacityFacts{plan: newClone, host: 64 * gib, vms: []vmMemory{{Name: "x", Status: "started"}}, free: plenty}, AnswerCannotTell},
@@ -51,7 +55,8 @@ func TestDecideCapacity(t *testing.T) {
 		{"-overcommit does not excuse the disk", capacityFacts{plan: CapacityPlan{VM: "z1", Disk: diskForClone, Overcommit: true}, host: 16 * gib, vms: []vmMemory{running}, free: 13 * gib}, AnswerNo},
 		{"-overcommit does not answer what UTM would not", capacityFacts{plan: CapacityPlan{VM: "z1", Disk: diskForClone, Overcommit: true}, host: 16 * gib, vmsErr: errors.New("osascript"), free: plenty}, AnswerCannotTell},
 		{"16 GiB, a 4 GiB VM running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{{Name: "s", Status: "started", MiB: 4096}}, free: plenty}, AnswerYes},
-		{"16 GiB, a 6 GiB VM running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{{Name: "s", Status: "started", MiB: 6144}}, free: plenty}, AnswerNo},
+		{"16 GiB, a 6 GiB VM running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{{Name: "s", Status: "started", MiB: 6144}}, free: plenty}, AnswerYes},
+		{"16 GiB, a 10 GiB VM running", capacityFacts{plan: newClone, host: 16 * gib, vms: []vmMemory{{Name: "s", Status: "started", MiB: 10240}}, free: plenty}, AnswerNo},
 	}
 	for _, c := range cases {
 		got, why := decideCapacity(c.f)
@@ -174,7 +179,7 @@ func TestGatherDiskFacts(t *testing.T) {
 func TestTheRefusalNamesWhoIsRunning(t *testing.T) {
 	_, why := decideCapacity(capacityFacts{
 		plan: CapacityPlan{VM: "z1", Disk: diskForClone}, host: 16 << 30,
-		vms: []vmMemory{{Name: "irgo-win11", Status: "started", MiB: 8192}}, free: 100 << 30,
+		vms: []vmMemory{{Name: "irgo-win11", Status: "started", MiB: 8192}, {Name: "a2", Status: "started", MiB: 4096}}, free: 100 << 30,
 	})
 	if !strings.Contains(why, "irgo-win11") {
 		t.Fatalf("the refusal does not name the running VM: %s", why)

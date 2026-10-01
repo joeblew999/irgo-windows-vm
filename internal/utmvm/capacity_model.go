@@ -20,6 +20,14 @@ import (
 // which was made with this.
 const vmMemoryMiB = 8192
 
+// cloneMemoryMiB is what a clone of the golden image is made with: half the
+// image's, set in UTM's configuration at clone time and read back
+// (cloneVM). irgo-win11 and installs keep vmMemoryMiB. On a 16 GiB Mac that
+// is the difference between no clone while irgo-win11 runs (16 - 8 - 8 = 0
+// left, want 4) and one (16 - 8 - 4 = 4). A 4 GiB clone passed glaze-check
+// -windows and vm-check (docs/RESULTS.md, "VM capacity").
+const cloneMemoryMiB = 4096
+
 // hostMemoryReserveBytes is the memory left for macOS and the owner's own
 // work after every VM has its configured memory. 4 GiB: the system alone sits
 // around 3 GiB, and on 1 Oct 2026 a 16 GiB Mac with one 8 GiB VM running was

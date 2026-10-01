@@ -55,7 +55,8 @@ type CapacityReport struct {
 // CapacityPolicy is the model's numbers, so a reader of the JSON knows what
 // the answers were worked out with.
 type CapacityPolicy struct {
-	VMMemory         int64  `json:"vm_memory_bytes"`
+	VMMemory         int64  `json:"vm_memory_bytes"`    // irgo-win11 and installs
+	CloneMemory      int64  `json:"clone_memory_bytes"` // clones of the golden image
 	MemoryReserve    int64  `json:"memory_reserve_bytes"`
 	DiskReserve      int64  `json:"disk_reserve_bytes"`
 	CloneReserve     int64  `json:"clone_reserve_bytes"`
@@ -104,7 +105,7 @@ type Room struct {
 	Clone       string `json:"clone"` // yes, no or cannot tell, for a caller with no VMs
 	Why         string `json:"why"`
 	MoreClones  int    `json:"more_clones"`  // by disk alone
-	MoreRunning int    `json:"more_running"` // by memory alone
+	MoreRunning int    `json:"more_running"` // clones, by memory alone
 }
 
 // dataBounds says what bounds each part of Root: prune's limits, or the
@@ -136,8 +137,9 @@ var dataBounds = map[string]string{
 func Capacity() CapacityReport {
 	r := CapacityReport{Taken: time.Now().UTC(), VMs: []VMUsage{}, Data: []DataUsage{}, Owners: []OwnerUsage{}}
 	q, qErr := QuotaFromEnv()
-	r.Policy = CapacityPolicy{VMMemory: int64(vmMemoryMiB) << 20, MemoryReserve: hostMemoryReserveBytes,
-		DiskReserve: hostDiskReserveBytes, CloneReserve: cloneReserveBytes, InstallReserve: installReserveBytes,
+	r.Policy = CapacityPolicy{VMMemory: int64(vmMemoryMiB) << 20, CloneMemory: int64(cloneMemoryMiB) << 20,
+		MemoryReserve: hostMemoryReserveBytes,
+		DiskReserve:   hostDiskReserveBytes, CloneReserve: cloneReserveBytes, InstallReserve: installReserveBytes,
 		Quota: q, StaleAfterSecond: int64(reportLease / time.Second)}
 	if qErr != nil {
 		r.Policy.QuotaErr = qErr.Error()
@@ -237,7 +239,7 @@ func Capacity() CapacityReport {
 		r.Room.MoreClones = int(max(0, (f.free-f.promised-hostDiskReserveBytes)/cloneReserveBytes))
 	}
 	if f.hostErr == nil && f.vmsErr == nil {
-		r.Room.MoreRunning = int(max(0, (r.Memory-r.RunningMemory-hostMemoryReserveBytes)/(int64(vmMemoryMiB)<<20)))
+		r.Room.MoreRunning = int(max(0, (r.Memory-r.RunningMemory-hostMemoryReserveBytes)/(int64(cloneMemoryMiB)<<20)))
 	}
 	return r
 }

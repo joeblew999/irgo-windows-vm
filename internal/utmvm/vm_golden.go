@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -293,7 +294,7 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	say("STEP 4/6  cloning it as %s, through UTM, keeping only the system disk", GoldenVMName)
 	t0 := time.Now()
 	reprotect := releaseLegacyMedia(bundle, say)
-	cErr := cloneVM(src.Name, GoldenVMName, randomMAC())
+	cErr := cloneVM(src.Name, GoldenVMName, randomMAC(), 0)
 	reprotect()
 	if cErr != nil {
 		return m, cErr
@@ -429,7 +430,7 @@ func CloneFromGolden(name string, say func(string, ...any)) (bool, error) {
 	}
 	say("… cloning %s as %s", GoldenVMName, name)
 	t0 := time.Now()
-	cErr := cloneVM(GoldenVMName, name, randomMAC())
+	cErr := cloneVM(GoldenVMName, name, randomMAC(), cloneMemoryMiB)
 	release()
 	if cErr != nil {
 		return true, cErr
@@ -444,7 +445,7 @@ func CloneFromGolden(name string, say func(string, ...any)) (bool, error) {
 // cloneAndBoot clones the golden image as name and boots it, for a caller
 // that already holds the machine lock.
 func cloneAndBoot(name string, say func(string, ...any)) (time.Duration, error) {
-	if err := cloneVM(GoldenVMName, name, randomMAC()); err != nil {
+	if err := cloneVM(GoldenVMName, name, randomMAC(), cloneMemoryMiB); err != nil {
 		return 0, err
 	}
 	return bootClone(name, say)
@@ -471,21 +472,27 @@ func bootClone(name string, say func(string, ...any)) (time.Duration, error) {
 	return took, nil
 }
 
-// cloneVM clones src as dst through UTM with a fresh MAC, keeping only the
-// system disk, and checks that the MAC took. See assets/utm-clone.applescript.
-func cloneVM(src, dst, mac string) error {
+// cloneVM clones src as dst through UTM with a fresh MAC and memMiB of memory
+// (0 keeps src's), keeping only the system disk, and checks that the MAC and
+// the memory took. See assets/utm-clone.applescript.
+func cloneVM(src, dst, mac string, memMiB int) error {
 	if _, err := Find(dst); err == nil {
 		return fmt.Errorf("a VM named %q already exists; vm-delete it first or choose another name", dst)
 	} else if !errors.Is(err, ErrNoVM) {
 		return err
 	}
-	out, err := utmScript(fmt.Sprintf(cloneScript, src, dst, mac, dst), 5*time.Minute)
+	out, err := utmScript(fmt.Sprintf(cloneScript, src, memMiB, dst, mac, dst), 5*time.Minute)
 	if err != nil {
 		return fmt.Errorf("cloning %s as %s: %w", src, dst, err)
 	}
-	if got := strings.TrimSpace(out); !strings.EqualFold(got, mac) {
+	gotMAC, gotMem, _ := strings.Cut(strings.TrimSpace(out), "\t")
+	if !strings.EqualFold(gotMAC, mac) {
 		return fmt.Errorf("cloned %s as %s, and its MAC is %q, not the %s asked for; "+
-			"two clones sharing one MAC fight over one DHCP lease", src, dst, got, mac)
+			"two clones sharing one MAC fight over one DHCP lease", src, dst, gotMAC, mac)
+	}
+	if n, err := strconv.Atoi(gotMem); err != nil || n <= 0 || (memMiB != 0 && n != memMiB) {
+		return fmt.Errorf("cloned %s as %s, and UTM says its memory is %q MiB, not the %d asked for; "+
+			"vm-delete -vm %s -force and try again", src, dst, gotMem, memMiB, dst)
 	}
 	e, err := Find(dst)
 	if err != nil {

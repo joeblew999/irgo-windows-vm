@@ -151,6 +151,9 @@ func decideCapacity(f capacityFacts) (Answer, string) {
 	var used int64
 	var running []string
 	need := int64(vmMemoryMiB) << 20
+	if f.plan.Disk == diskForClone {
+		need = int64(cloneMemoryMiB) << 20
+	}
 	found := !f.plan.Exists
 	for _, v := range f.vms {
 		if strings.EqualFold(v.Name, f.plan.VM) {

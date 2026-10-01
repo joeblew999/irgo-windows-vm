@@ -18,7 +18,10 @@ tell application "UTM"
 	set vm to virtual machine id %q
 	set keep to {}
 	set cds to 0
-	repeat with d in (drives of (configuration of vm))
+	-- Fetched into a variable first: "drives of (configuration of vm)" is
+	-- resolved as an object reference and fails with -1700 (measured).
+	set cfg to configuration of vm
+	repeat with d in (drives of cfg)
 		if (interface of d) is NVMe then
 			set end of keep to {id:(id of d)}
 		else

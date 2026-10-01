@@ -24,10 +24,14 @@
 tell application "UTM"
 	set src to virtual machine named %q
 	set keep to {}
-	repeat with d in (drives of (configuration of src))
+	-- Fetched into a variable first: "drives of (configuration of src)" is
+	-- resolved as an object reference and fails with -1700 (measured).
+	set cfg to configuration of src
+	repeat with d in (drives of cfg)
 		if (interface of d) is NVMe then set end of keep to {id:(id of d)}
 	end repeat
 	if (count of keep) is not 1 then error "expected one NVMe system disk on " & (name of src) & ", found " & (count of keep)
 	duplicate src with properties {configuration:{name:%q, drives:keep, network interfaces:{{index:0, address:%q}}}}
-	return address of item 1 of (network interfaces of (configuration of (virtual machine named %q)))
+	set newCfg to configuration of (virtual machine named %q)
+	return address of item 1 of (network interfaces of newCfg)
 end tell

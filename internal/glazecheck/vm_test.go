@@ -183,8 +183,8 @@ func TestVMRecordKeepsEveryVM(t *testing.T) {
 			t.Errorf("VM status file lacks %q:\n%s", want, body)
 		}
 	}
-	if !(strings.Index(body, "## irgo-win11") < strings.Index(body, "## irgo-golden-verify") &&
-		strings.Index(body, "## irgo-golden-verify") < strings.Index(body, "## vc1")) {
+	iWin, iVerify, iVC1 := strings.Index(body, "## irgo-win11"), strings.Index(body, "## irgo-golden-verify"), strings.Index(body, "## vc1")
+	if iWin > iVerify || iVerify > iVC1 {
 		t.Errorf("sections out of order:\n%s", body)
 	}
 

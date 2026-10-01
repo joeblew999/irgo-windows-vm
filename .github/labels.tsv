@@ -1,0 +1,17 @@
+# The issue labels, synced to GitHub by `mise run gh:labels` (gh label create --force).
+# name<TAB>colour (hex, no #)<TAB>description. Tabs, not spaces: a name may hold spaces.
+# Syncing creates or updates these and deletes nothing, so a label removed here
+# must be deleted on GitHub by hand. cmd/irgo-winvm/issue_test.go checks that every
+# label the issue forms, `report -issue` and docs/CONTRIBUTING.md name is here.
+bug	d73a4a	irgo-winvm does the wrong thing
+feature	a2eeef	a calling repository needs something irgo-winvm does not do
+upstream-glaze	5319e7	a bug in crgimenes/glaze: fixed there, recorded in docs/UPSTREAM.md
+upstream-native	5319e7	a bug in crgimenes/native: fixed there, recorded in docs/UPSTREAM.md
+upstream-utm	5319e7	a bug in utmapp/UTM: reported there, recorded in docs/UPSTREAM.md
+needs-triage	fbca04	not looked at yet; every form adds it
+needs-report	e99695	a bug without the irgo-winvm report block; triage waits for it
+triaged	0e8a16	classified and labelled, with the next step named in a comment
+agent-filed	1d76db	filed by an AI agent for a calling repository
+good first issue	7057ff	small, self-contained, and the fix is described
+duplicate	cfd3d7	already filed; a comment links the original
+wontfix	ffffff	will not be changed; a comment says why

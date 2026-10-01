@@ -393,7 +393,8 @@ Once one VM has been installed, **`vm-golden-create`** (undo
 
 Four commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
 reports what is installed and where, **`status`** lists long-running
-[jobs](#jobs), and **`report`** prints the redacted block an issue needs. `doctor` also names the installed UTM, the latest stable and
+[jobs](#jobs), and **`report`** prints the redacted block an issue needs
+([Reporting issues](CONTRIBUTING.md#reporting-issues-for-agents)). `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
 such, and offline it says "cannot tell" rather than failing.

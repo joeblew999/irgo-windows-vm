@@ -28,7 +28,9 @@ rm -f go.work go.work.sum
 # Every module in the repo (site/ was added after these tasks were first
 # written; a hand list goes stale), then the two replaces.
 go work init
-go work use -r .
+# Every tracked module, from git: `go work use -r .` also picked up agent
+# worktrees under .claude/ and stray modules under .plans/ (1 Oct 2026).
+git ls-files '*go.mod' ':!:.claude/**' ':!:.plans/**' | xargs -n1 dirname | xargs go work use
 go work edit -replace "github.com/crgimenes/glaze=$UPSTREAM_DIR/glaze" \
              -replace "github.com/crgimenes/native=$UPSTREAM_DIR/native"
 echo "linked. every module now builds against:"

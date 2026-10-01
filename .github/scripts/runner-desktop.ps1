@@ -71,24 +71,52 @@ function Show($label) {
 Show 'shown windows'
 if (-not $Clear) { exit 0 }
 
-# The sign-in prompt, Start and Search, notification toasts (an uncloaked
-# CoreWindow of ShellExperienceHost), Widgets, OneDrive and Teams: anything
-# that covers the desktop or can take the foreground on its own.
-$covering = 'WWAHost', 'StartMenuExperienceHost', 'SearchHost', 'ShellExperienceHost', 'Widgets', 'WidgetService', 'OneDrive', 'ms-teams', 'msteams'
+# Anything that covers the desktop or can take the foreground on its own: the
+# sign-in prompt, notification toasts (an uncloaked CoreWindow of
+# ShellExperienceHost), Widgets, OneDrive and Teams, and what the image's
+# provisioning leaves open — a "System Properties" (performance options)
+# dialog, and on some runners a wsl.exe console that Windows later hands to a
+# new Windows Terminal window, which takes the foreground mid-run (both
+# measured 1 Oct 2026). Nothing in the job uses WSL. The runner's own
+# hosted-compute-agent console stays.
+$covering = 'WWAHost', 'ShellExperienceHost', 'Widgets', 'WidgetService', 'OneDrive', 'ms-teams', 'msteams',
+  'SystemPropertiesPerformance', 'wsl', 'wslhost', 'WindowsTerminal', 'OpenConsole'
 $session = (Get-Process -Id $PID).SessionId
-$stopped = @(Get-Process -Name $covering -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)
-$stopped | Stop-Process -Force
-if ($stopped) { "stopped: $(($stopped | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ', ')" } else { 'stopped: nothing' }
-Start-Sleep -Seconds 3
+function StopNamed($names) {
+  $p = @(Get-Process -Name $names -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)
+  $p | Stop-Process -Force -ErrorAction SilentlyContinue
+  if ($p) { "stopped: $(($p | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ', ')" } else { "stopped: none of $($names -join ', ')" }
+}
+StopNamed $covering
+Start-Sleep -Seconds 2
+
+# Start and Search: the sign-in prompt sits over an open Start menu, and with
+# the prompt gone Start (or Search) can open again by itself: measured on one
+# runner, both were back 3 s after their hosts were stopped. So close them
+# until they stay closed: Escape, which goes to the pane when it has the
+# foreground (global input, fine on a disposable runner), and stopping the
+# hosts, which start again on demand. Every round is printed.
+function StartPanes {
+  [RunnerDesk]::Shown() | Where-Object {
+    $_.Class -eq 'Windows.UI.Core.CoreWindow' -and ('StartMenuExperienceHost', 'SearchHost' -contains (ProcName $_.Pid))
+  }
+}
+$shell = New-Object -ComObject WScript.Shell
+for ($round = 1; $round -le 5; $round++) {
+  $open = @(StartPanes)
+  if (-not $open) { break }
+  "round ${round}: open: $(($open | ForEach-Object { "'$($_.Title)'" }) -join ', '); Escape, then stopping their hosts"
+  $shell.SendKeys('{ESC}')
+  Start-Sleep -Milliseconds 500
+  StopNamed 'StartMenuExperienceHost', 'SearchHost'
+  Start-Sleep -Seconds 3
+}
 Show 'shown windows after clearing'
 
 # Checked, not assumed: the sign-in prompt and an open Start or Search pane
 # are the ones measured covering the window, so their coming back fails here
 # rather than as a dropped event in a test.
-$back = [RunnerDesk]::Shown() | Where-Object {
-  $n = ProcName $_.Pid
-  $n -eq 'WWAHost' -or ($_.Class -eq 'Windows.UI.Core.CoreWindow' -and ('StartMenuExperienceHost', 'SearchHost' -contains $n))
-}
+$back = @(StartPanes) + @([RunnerDesk]::Shown() | Where-Object { (ProcName $_.Pid) -eq 'WWAHost' })
 if ($back) {
   "still shown after clearing: $(($back | ForEach-Object { "$(ProcName $_.Pid) '$($_.Title)'" }) -join ', ')"
   exit 1

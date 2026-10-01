@@ -44,6 +44,11 @@ type Command struct {
 	// (docs/RESULTS.md) and `-fetch` downloads 4.2 GB first.
 	Detach string
 
+	// MacOnly marks a command that drives UTM, which only macOS has. On
+	// Linux and Windows it refuses before doing anything, and points at
+	// `remote-submit`, which runs the same work on a Mac elsewhere.
+	MacOnly bool
+
 	// OverMCP is false for commands a connected client has no use for:
 	// `commands`, `version` and `help` answer what the protocol already does.
 	OverMCP bool
@@ -73,24 +78,29 @@ const DetachAlways = "(always)"
 // not here does not exist.
 var All = []Command{
 	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, OverMCP: true},
-	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", MacOnly: true, OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, MacOnly: true, OverMCP: true},
 	// Sealing is many minutes even with nothing to decrypt, so it is always a
 	// job over MCP.
-	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, MacOnly: true, OverMCP: true},
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
-	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
-	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	// The remote job queue: from any OS, through the Worker, to a Mac running
+	// serve. Nothing local changes, so no locks; the Mac's own commands take
+	// theirs when it runs the job.
+	{Name: "remote-submit", Summary: "from any OS: run your .exe on a fresh VM on a Mac elsewhere, result back", Undo: "remote-cancel", OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
-	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, OverMCP: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, OverMCP: true},
-	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
+	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, MacOnly: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, OverMCP: true},
+	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
+	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
 
-	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
-	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
+	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, MacOnly: true, OverMCP: true},
+	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	// report gathers what an issue needs, redacted, for pasting into one.
 	{Name: "report", Summary: "a redacted, paste-ready diagnostic block for an issue: versions, doctor, the last errors, glaze", ReadOnly: true, OverMCP: true},
@@ -101,10 +111,16 @@ var All = []Command{
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
 	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
+	{Name: "remote-status", Summary: "a remote job's state and place in the queue; with the admin token and no id, every job", ReadOnly: true, OverMCP: true},
+	{Name: "remote-logs", Summary: "what the Mac said while it ran a remote job", ReadOnly: true, OverMCP: true},
+	{Name: "remote-result", Summary: "download a finished remote job's files: result.json, output, test2json, screenshots", OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},
 	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},
 	{Name: "mcp", Summary: "serve these commands to an agent over MCP, on stdin and stdout"},
+	// serve runs forever, so it is not an MCP tool; each job's steps are
+	// this binary's own commands and take their own locks.
+	{Name: "serve", Summary: "on the Mac: take remote jobs from the Worker, each on a fresh clone; connects out only", MacOnly: true},
 }
 
 // DetachedBy reports whether args include c's Detach flag, in any of the forms

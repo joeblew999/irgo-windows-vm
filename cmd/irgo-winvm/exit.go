@@ -5,6 +5,7 @@ import (
 	"flag"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -23,6 +24,12 @@ var (
 // It matches sentinels, never message text: messages are for people and get
 // reworded.
 func exitCode(err error) command.Code {
+	// A remote job's own code, decided on the Mac and already mapped onto
+	// this table by internal/remote.
+	var je *remote.JobError
+	if errors.As(err, &je) {
+		return je.Code
+	}
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
 		return command.CodeOK

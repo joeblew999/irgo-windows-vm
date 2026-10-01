@@ -72,6 +72,12 @@ func runGlazeCheck(v values, _ []string) error {
 				errUsage, runtime.GOOS)
 		}
 	}
+	if windows && runtime.GOOS != "darwin" {
+		return fmt.Errorf("%w: -windows runs the suite on a UTM VM, which needs macOS; this is %s. "+
+			"Build the suite (go -C examples test -c -o conformance.test.exe ./conformance with GOOS=windows GOARCH=arm64) "+
+			"and run it on a Mac elsewhere: irgo-winvm remote submit -test -gui conformance.test.exe -conformance.shots={out}",
+			errUsage, runtime.GOOS)
+	}
 	if windows {
 		// Resolved before building, so a missing VM fails fast with exit 3
 		// and is never recorded as a glaze verdict.

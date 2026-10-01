@@ -24,6 +24,11 @@ const (
 	// CodeBusy means another mutation holds the lock, so this one was not
 	// started. Retryable once the holder finishes.
 	CodeBusy Code = 6
+
+	// CodeNotRun is a remote job that never ran or never finished: cancelled,
+	// expired in the queue with no Mac to take it, or its Mac stopped
+	// reporting. Retryable: submit it again.
+	CodeNotRun Code = 7
 )
 
 // Outcome describes a code to whoever has to act on it.
@@ -53,6 +58,7 @@ var Outcomes = []Outcome{
 	{CodeNoAgent, "no-agent", "the VM is there, the guest agent is not answering — wait and try again", true},
 	{CodeNeedForce, "need-force", "refused: a destructive command without -force", false},
 	{CodeBusy, "busy", "another mutation is in progress — wait and try again", true},
+	{CodeNotRun, "not-run", "a remote job did not run to the end — cancelled, no Mac took it in time, or its Mac went away; submit it again", true},
 }
 
 // Classify returns the outcome for a code. An undeclared code is reported as

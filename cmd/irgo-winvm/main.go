@@ -10,8 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/remote"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -34,6 +37,7 @@ func run(args []string) error {
 		fmt.Print(command.UsageText())
 		return nil
 	}
+	args = remoteSpelling(args)
 	if _, ok := find(args[0]); !ok {
 		fmt.Fprint(os.Stderr, command.UsageText())
 		return fmt.Errorf("unknown subcommand %q", args[0])
@@ -61,6 +65,9 @@ func runTool(name string, args []string) (err error) {
 	}
 	v, rest, err := c.parse(args)
 	if err != nil {
+		return err
+	}
+	if err := macOnly(c.Command, runtime.GOOS); err != nil {
 		return err
 	}
 	if c.Mutates() {
@@ -168,6 +175,13 @@ func init() {
 		"version":      {run: runVersion},
 		"commands":     {run: runCommands},
 		"mcp":          {flags: mcpFlags, about: mcpAbout, run: runMCP},
+
+		"remote-submit": {flags: remoteSubmitFlags, about: remoteSubmitAbout, run: runRemoteSubmit},
+		"remote-cancel": {flags: remoteIDFlags("remote-cancel"), run: runRemoteCancel},
+		"remote-status": {flags: remoteIDFlags("remote-status"), run: runRemoteStatus},
+		"remote-logs":   {flags: remoteLogsFlags, run: runRemoteLogs},
+		"remote-result": {flags: remoteResultFlags, run: runRemoteResult},
+		"serve":         {flags: serveFlags, about: serveAbout, run: runServe},
 	}
 	var err error
 	if commands, err = join(command.All, impls); err != nil {
@@ -208,4 +222,30 @@ func find(name string) (cmd, bool) {
 		}
 	}
 	return cmd{}, false
+}
+
+// remoteSpelling lets `irgo-winvm remote submit ...` mean `remote-submit
+// ...`, the spelling a person reaches for; the commands themselves, and the
+// MCP tools, are the hyphenated names. Only the remote-* commands, so
+// `remote` alone still prints the usage as unknown.
+func remoteSpelling(args []string) []string {
+	if len(args) >= 2 && args[0] == "remote" && !strings.HasPrefix(args[1], "-") {
+		if _, ok := find("remote-" + args[1]); ok {
+			return append([]string{"remote-" + args[1]}, args[2:]...)
+		}
+	}
+	return args
+}
+
+// macOnly refuses a command that drives UTM anywhere but macOS, after its
+// flags parse (so -h still answers) and before it touches anything. It says
+// what to do instead, because the person on Linux or Windows who typed it
+// wants the work done, not a lecture on UTM.
+func macOnly(c command.Command, goos string) error {
+	if !c.MacOnly || goos == "darwin" {
+		return nil
+	}
+	return fmt.Errorf("%w: %s drives UTM, which needs macOS on Apple Silicon, and this is %s. "+
+		"To run a Windows binary from here on a Mac elsewhere: irgo-winvm remote submit [-gui] <app.exe> [args...] "+
+		"(with %s and %s set; irgo-winvm remote-submit -h)", errUsage, c.Name, goos, remote.EnvURL, remote.EnvToken)
 }

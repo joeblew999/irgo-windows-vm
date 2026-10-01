@@ -72,9 +72,9 @@ const DetachAlways = "(always)"
 // All is every command, in the order the usage prints them. A command that is
 // not here does not exist.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer, from Microsoft with -fetch", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a Windows VM, cloned from the golden image or -install", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed into that VM and run, output back", Undo: "app-delete", Locks: LockVM, OverMCP: true},
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, OverMCP: true},
 	// Sealing is many minutes even with nothing to decrypt, so it is always a
 	// job over MCP.
@@ -82,7 +82,7 @@ var All = []Command{
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
 	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
-	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-pull", Summary: "pull the golden image from your private R2 bucket", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, OverMCP: true},
@@ -99,8 +99,8 @@ var All = []Command{
 	// glaze-check takes no lock here: the Mac run touches no VM, and a lock
 	// would block it for the whole of an install. -windows takes that VM's lock
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
-	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
-	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
+	{Name: "glaze-check", Summary: "does glaze work? its conformance suite, here or -windows (needs the source checkout)", Detach: "-windows", OverMCP: true},
+	{Name: "glaze-status", Summary: "the recorded glaze verdict and whether it still holds (needs the source checkout)", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},
 	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},
@@ -162,6 +162,7 @@ func UsageText() string {
 		}
 		fmt.Fprintf(&b, "  %-*s %s\n", name, c.Name, c.Summary)
 	}
-	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
+	b.WriteString("\nNew here? Run `irgo-winvm doctor`: it says what to do next, in order.\n" +
+		"`irgo-winvm help` explains the steps, and every command takes -h for its flags.\n")
 	return b.String()
 }

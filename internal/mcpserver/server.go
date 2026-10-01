@@ -174,7 +174,7 @@ func New(d Deps) *mcp.Server {
 		Description: "Build a Go program on a Mac and run it on real Windows. " +
 			"Answers whether a desktop build actually works on Windows, which cannot be " +
 			"determined by reading the code from macOS.",
-	}, nil)
+	}, &mcp.ServerOptions{Instructions: Instructions})
 
 	for _, c := range command.All {
 		if !c.OverMCP {
@@ -209,10 +209,31 @@ func tool(c command.Command, fs *flag.FlagSet) *mcp.Tool {
 	}
 	return &mcp.Tool{
 		Name:        c.Name,
-		Description: c.Summary,
+		Description: describe(c),
 		Annotations: a,
 		InputSchema: argsSchema(c.Name, fs),
 	}
+}
+
+// describe is a tool's description: the command's summary, then what an agent
+// must know before calling it, all from the declaration, so it cannot claim
+// what the command does not do.
+func describe(c command.Command) string {
+	d := c.Summary + "."
+	switch c.Detach {
+	case "":
+	case command.DetachAlways:
+		d += " Long: it returns a job id at once; call status with that id."
+	default:
+		d += " With " + c.Detach + " it is long: it returns a job id at once; call status with that id."
+	}
+	if c.Destructive {
+		d += " Destructive: without -force it only lists what it would remove."
+	}
+	if c.Undo != "" {
+		d += " Undo: " + c.Undo + "."
+	}
+	return d
 }
 
 // handler runs one command and returns what it printed.

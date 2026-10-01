@@ -104,18 +104,44 @@ func R2ConfigFromEnv(write bool) (R2Config, error) {
 			need("IRGO_R2_ACCOUNT_ID", &c.AccountID)
 			need("IRGO_R2_BUCKET", &c.Bucket)
 		}
+	} else if strings.TrimSpace(os.Getenv("IRGO_GOLDEN_TOKEN")) != "" || strings.TrimSpace(os.Getenv("IRGO_GOLDEN_PUSH_TOKEN")) != "" {
+		// A Worker token and no Worker: the URL is what is missing, not S3 keys.
+		missing = append(missing, "IRGO_GOLDEN_URL")
 	} else {
 		for _, e := range r2Env {
 			need(e.name, e.field(&c))
 		}
 	}
 	if len(missing) > 0 {
-		return c, fmt.Errorf("%w: %s not set.\n"+
-			"  Put them in .env.r2 at the repository root (gitignored, loaded by mise);\n"+
-			"  docs/DEVELOPMENT.md, \"The private R2 cache\", says how to get each one",
-			ErrR2NotConfigured, strings.Join(missing, ", "))
+		what := strings.Join(missing, ", ") + " not set"
+		if !GoldenCacheEnvSet() {
+			// Nothing at all: name the simple way first, not five S3 variables.
+			what = "set IRGO_GOLDEN_URL and IRGO_GOLDEN_TOKEN (through the Worker), " +
+				"or IRGO_R2_ACCOUNT_ID, IRGO_R2_BUCKET, IRGO_R2_ACCESS_KEY_ID, " +
+				"IRGO_R2_SECRET_ACCESS_KEY and IRGO_R2_API_TOKEN (R2's S3 API)"
+		}
+		return c, fmt.Errorf("%w: %s.\n"+
+			"  Export them in your shell; in a checkout, .env.r2 at the root is loaded by mise.\n"+
+			"  How to get each one: %s",
+			ErrR2NotConfigured, what, SiteURL+"development.html#the-private-r2-cache")
 	}
 	return c, nil
+}
+
+// GoldenCacheEnvSet reports whether any of the private cache's variables is
+// set, which is whether the user meant to use it: vm-create then pulls the
+// golden image, or says what is missing, rather than quietly installing.
+func GoldenCacheEnvSet() bool {
+	names := []string{"IRGO_GOLDEN_URL", "IRGO_GOLDEN_TOKEN"}
+	for _, e := range r2Env {
+		names = append(names, e.name)
+	}
+	for _, n := range names {
+		if strings.TrimSpace(os.Getenv(n)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // checkWorkerURL refuses a Worker URL that would send the tokens in clear:

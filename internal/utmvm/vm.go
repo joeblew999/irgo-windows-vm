@@ -401,6 +401,12 @@ func registerBundle(staged, name string) error {
 	// success, and a half-registered nothing on failure. Removed through
 	// removeStaged, which clears the immutable flag first.
 	defer removeStaged(staged)
+	return importBundle(staged, name)
+}
+
+// importBundle has UTM import the bundle at staged, leaving staged where it
+// is, and checks it registered as name with every file at its staged length.
+func importBundle(staged, name string) error {
 	// Every file UTM is about to copy, and its length, so the copy can be
 	// checked file by file afterwards (stat works in UTM's folder).
 	want := map[string]int64{}

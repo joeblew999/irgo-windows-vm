@@ -12,6 +12,8 @@ import (
 
 	"github.com/syumai/workers-go/cloudflare"
 	"github.com/syumai/workers-go/cloudflare/r2"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // getenv reads a var or secret of the current request's environment.
@@ -69,15 +71,10 @@ type (
 	rawJSBodyWriter interface{ WriteRawJSBody(body js.Value) }
 )
 
-// metaSHA256 is the custom metadata that holds an object's SHA-256. The S3
-// path in vm_golden_cache.go writes the same name (x-amz-meta-zsha256), so
-// objects pushed either way read the same.
-const metaSHA256 = "zsha256"
-
 func blobInfo(o js.Value) BlobInfo {
 	info := BlobInfo{Key: o.Get("key").String(), Size: int64(o.Get("size").Float())}
 	if m := o.Get("customMetadata"); m.Truthy() {
-		if v := m.Get(metaSHA256); v.Type() == js.TypeString {
+		if v := m.Get(wire.MetaSHA256); v.Type() == js.TypeString {
 			info.SHA256 = v.String()
 		}
 	}
@@ -115,7 +112,7 @@ func (s jsBlobs) Put(key string, body io.Reader, size int64, sum string) (BlobIn
 	opts := js.Global().Get("Object").New()
 	opts.Set("sha256", sum) // R2 hashes what arrives and refuses the put on a mismatch
 	meta := js.Global().Get("Object").New()
-	meta.Set(metaSHA256, sum)
+	meta.Set(wire.MetaSHA256, sum)
 	opts.Set("customMetadata", meta)
 	o, err := await(s.b.Call("put", key, raw.GetRawJSBody(), opts))
 	if err != nil {

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 var goldenVars = map[string]string{varGoldenToken: "gold", varGoldenPushToken: "push"}
@@ -26,7 +28,7 @@ func put(h http.Handler, key, token string, body []byte, sum string) *httptest.R
 	}
 	r := httptest.NewRequest("PUT", "/api/golden/"+key, bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+token)
-	r.Header.Set(hdrSHA256, sum)
+	r.Header.Set(wire.HeaderSHA256, sum)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
@@ -48,9 +50,9 @@ func get(h http.Handler, method, path, token, rng string) *httptest.ResponseReco
 // Every route refuses without its own token, the read token cannot write,
 // and nothing but the cache's own keys is reachable with any token.
 //
-// Negative control (by hand, 1 Oct 2026): authorizing PUT and DELETE with
-// varGoldenToken instead of varGoldenPushToken fails the three "read token
-// cannot write" cases; restored.
+// Negative control (by hand, 1 Oct 2026): giving golden-put and
+// golden-delete ScopeGoldenRead in wire.Routes fails the "read token cannot
+// write" cases; restored.
 func TestGoldenRefusals(t *testing.T) {
 	env, _, gb := testEnvGolden(goldenVars)
 	h := Handler(env)
@@ -110,7 +112,7 @@ func TestGoldenRoundTrip(t *testing.T) {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
 	w := get(h, "HEAD", path, "gold", "")
-	if w.Code != 200 || w.Header().Get(hdrSize) != "10000" || w.Header().Get(hdrSHA256) != hexSum(body) {
+	if w.Code != 200 || w.Header().Get(wire.HeaderSize) != "10000" || w.Header().Get(wire.HeaderSHA256) != hexSum(body) {
 		t.Errorf("head: %d %v", w.Code, w.Header())
 	}
 	w = get(h, "GET", path, "gold", "")
@@ -175,7 +177,7 @@ func TestGoldenPutRefusals(t *testing.T) {
 
 	r := httptest.NewRequest("PUT", "/api/golden/"+chunk, bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer push")
-	r.Header.Set(hdrSHA256, hexSum(body))
+	r.Header.Set(wire.HeaderSHA256, hexSum(body))
 	r.Header.Del("Content-Length")
 	r.ContentLength = -1
 	w := httptest.NewRecorder()
@@ -186,9 +188,9 @@ func TestGoldenPutRefusals(t *testing.T) {
 
 	r = httptest.NewRequest("PUT", "/api/golden/"+chunk, bytes.NewReader(nil))
 	r.Header.Set("Authorization", "Bearer push")
-	r.Header.Set(hdrSHA256, hexSum(nil))
-	r.Header.Set("Content-Length", strconv.Itoa(maxGoldenPut+1))
-	r.ContentLength = maxGoldenPut + 1
+	r.Header.Set(wire.HeaderSHA256, hexSum(nil))
+	r.Header.Set("Content-Length", strconv.Itoa(wire.MaxGoldenPut+1))
+	r.ContentLength = wire.MaxGoldenPut + 1
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 413 {

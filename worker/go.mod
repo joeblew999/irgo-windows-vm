@@ -6,6 +6,11 @@ module github.com/joeblew999/irgo-windows-vm/worker
 
 go 1.27.1
 
-require github.com/syumai/workers-go v0.36.0
+require (
+	github.com/joeblew999/irgo-windows-vm v0.0.0
+	github.com/syumai/workers-go v0.36.0
+)
 
 tool github.com/syumai/workers-go/cmd/workers-assets-gen
+
+replace github.com/joeblew999/irgo-windows-vm => ../

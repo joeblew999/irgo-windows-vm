@@ -17,6 +17,11 @@ set -euo pipefail
 # it TinyGo 0.42 fails with "no usable wasm-opt found".
 run() { echo "\$ $*"; "$@"; }
 cd "$MISE_PROJECT_ROOT/worker"
+# The OpenAPI document the Worker serves at /api/openapi.json, generated from
+# wire's route table on the host (it reflects over the types, which the Wasm
+# build does without) and embedded. worker's TestOpenAPIIsCurrent fails in
+# go:check while the committed file is stale.
+run go run ./cmd/openapi openapi.json
 run go tool workers-assets-gen -mode=tinygo -o build
 run tinygo build -o build/app.wasm -target wasm -no-debug .
 ls -l build/app.wasm

@@ -65,8 +65,8 @@ func mcpDeps() mcpserver.Deps {
 			}
 			return nil
 		},
-		Run: func(_ context.Context, name string, args []string) (string, error) {
-			return utmvm.Capture(func() error { return runTool(name, args) })
+		Run: func(ctx context.Context, name string, args []string) (string, error) {
+			return utmvm.Capture(func() error { return runToolAs(mcpserver.ClientName(ctx), name, args) })
 		},
 		StartJob: func(name string, args []string) (string, error) {
 			// Asked at call time so a second mutation hears "busy" now rather

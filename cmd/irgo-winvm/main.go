@@ -10,8 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -20,7 +22,13 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	// The ledger (docs/DEVELOPMENT.md, "The ledger"): off unless
+	// IRGO_LEDGER_URL and IRGO_LEDGER_TOKEN are set. At exit it gets at most
+	// 2 s to send; what it cannot send stays spooled for the next run.
+	ledger.Configure(ledger.FromEnv(utmvm.Root(), version))
+	err := run(os.Args[1:])
+	ledger.DrainDefault(2 * time.Second)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(int(exitCode(err)))
 	}
@@ -49,7 +57,11 @@ func run(args []string) error {
 // state on disk takes its mutation locks after its flags parse, so -h is
 // answered even while another mutation holds them; a second mutation is
 // refused, never queued.
-func runTool(name string, args []string) error {
+func runTool(name string, args []string) error { return runToolAs("", name, args) }
+
+// runToolAs is runTool for a caller with a name, the MCP client's, which the
+// ledger records beside the command.
+func runToolAs(client, name string, args []string) (err error) {
 	c, ok := find(name)
 	if !ok {
 		return fmt.Errorf("%w: no such command %q", errUsage, name)
@@ -58,6 +70,8 @@ func runTool(name string, args []string) error {
 	if err != nil {
 		return err
 	}
+	ended := recordCommand(client, c.Command, v)
+	defer func() { ended(err) }()
 	if c.Mutates() {
 		release, err := utmvm.Acquire(locksFor(c.Command, v)...)
 		if err != nil {

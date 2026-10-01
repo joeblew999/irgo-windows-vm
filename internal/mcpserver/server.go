@@ -245,7 +245,7 @@ func handler(name string, d Deps) mcp.ToolHandler {
 			return r, nil
 		}
 
-		out, rErr := d.Run(ctx, name, args)
+		out, rErr := d.Run(withClient(ctx, req), name, args)
 		if rErr != nil {
 			// The output is returned alongside the error, not instead of it.
 			// What a command printed before it failed is usually the answer to
@@ -254,6 +254,27 @@ func handler(name string, d Deps) mcp.ToolHandler {
 		}
 		return textResult(out), nil
 	}
+}
+
+type clientKey struct{}
+
+// withClient carries the calling client's name, from its initialize request,
+// to Run, so the tool can say who asked (the ledger records it).
+func withClient(ctx context.Context, req *mcp.CallToolRequest) context.Context {
+	if req == nil {
+		return ctx
+	}
+	if info := req.ClientInfo(); info != nil && info.Name != "" {
+		return context.WithValue(ctx, clientKey{}, info.Name)
+	}
+	return ctx
+}
+
+// ClientName is the MCP client a tool call came from, as it named itself, or
+// empty when the call did not come through the server.
+func ClientName(ctx context.Context) string {
+	s, _ := ctx.Value(clientKey{}).(string)
+	return s
 }
 
 // screenCommand is the one command whose result is a picture.

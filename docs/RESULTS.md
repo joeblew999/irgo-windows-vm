@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
 | 1 Oct 2026 | [a VM of your own in 23 s: install 12 min 24 s once, seal 2 min 49 s, then `vm-create` clones and boots](#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
 | 1 Oct 2026 | [a glaze app driven by real OS input in the background: type, click, click-at, scroll, all `isTrusted`, frontmost app unchanged](#a-glaze-app-driven-by-real-os-input--measured-1-oct-2026) |
 | 30 Sep 2026 | [pushes go over SMB: 49 MB in 1.6 s instead of 1 min 17 s; `glaze:windows` 31 s → 24 s](#pushes-go-over-smb--measured-30-sep-2026) |
@@ -28,6 +29,22 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## The real golden image through the private R2 cache — measured 1 Oct 2026
+
+**Result:** the sealed golden image (Windows 11 Pro 26100.4349) went up to the
+private bucket `irgo-golden` through the Worker and came back **byte-identical**:
+SHA-256 of `Data/disk.img`, `efi_vars.fd`, `tpmdata` and `config.plist` equal to
+the UTM export. A machine without a golden image gets one in under 5 minutes
+instead of a 12-minute install plus a 3-minute seal.
+
+| step | measured |
+|---|---|
+| UTM export of `irgo-golden` (AppleScript `export`) | 0.3 s (APFS clone; no extra disk) |
+| privacy check before push | r2.dev off, 0 custom domains |
+| push, 4 at a time, from this Mac | 64 GB of files, 19.1 GB of data → **310 chunks, 8.4 GB** zstd, 9 min 14 s |
+| pull, 4 at a time | **8.4 GB in 3 min 13 s**, rebuild 1 min 20 s, total **4 min 37 s** |
+| compare | all four files' SHA-256 identical |
 
 ## A VM of your own in 23 s — measured 1 Oct 2026
 

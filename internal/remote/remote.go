@@ -20,8 +20,10 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 )
 
-// The environment the client and the Mac read. docs/DEVELOPMENT.md, "Driving
-// a Mac from anywhere", says how each is set.
+// GuideURL is the page that says how to set the remote up and use it.
+const GuideURL = "https://joeblew999.github.io/irgo-windows-vm/agents.html#from-another-machine-linux-windows-github"
+
+// The environment the client and the Mac read. GuideURL says how each is set.
 const (
 	EnvURL         = "IRGO_REMOTE_URL"          // the Worker, e.g. https://irgo-windows-vm.<you>.workers.dev
 	EnvToken       = "IRGO_REMOTE_TOKEN"        // a caller's token (JOBS_TOKENS), or the admin token

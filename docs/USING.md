@@ -87,6 +87,7 @@ thing:
 | **5** | refused — a destructive command without `-force` |
 | **6** | refused — another mutation is in progress |
 | **7** | refused — another VM would leave this Mac too little memory or disk, or that could not be determined |
+| **8** | a remote job did not run to the end — cancelled, no Mac took it in time, or its Mac went away |
 
 **1 is your program, not this tool.** The guest's exit code is *not* passed
 through: a binary exiting 3 makes `app-create` exit **1**, and the message names
@@ -100,6 +101,11 @@ recover before giving up, which is why it can take several minutes to return 4.
 this one needs, and the message names which; the holder finishes on its own
 schedule. **7 is worth retrying once a VM stops**: the message gives the
 numbers and names the running VMs, and `status` says whose they are.
+
+**8 is worth submitting again.** A [remote job](FOR-AGENTS.md#from-another-machine-linux-windows-github)
+that ran exits with the code its Mac's command exited with, on this same
+table, and a code this build does not declare is 1. 8 is the job that never
+ran to the end: cancelled, expired in the queue, or its Mac stopped reporting.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.

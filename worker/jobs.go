@@ -47,7 +47,7 @@ import (
 	"time"
 )
 
-// The secrets the queue reads. docs/DEVELOPMENT.md, "The remote job queue".
+// The secrets the queue reads. docs/WORKER.md, "The remote job queue".
 const (
 	varJobTokens      = "JOBS_TOKENS"       // name=token,name=token: one per caller
 	varJobAdminToken  = "JOBS_ADMIN_TOKEN"  // every job, and the list

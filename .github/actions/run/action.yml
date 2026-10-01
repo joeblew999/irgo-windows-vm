@@ -2,7 +2,7 @@
 # workflow: the binary goes through the irgo-windows-vm Worker to a Mac
 # running `irgo-winvm serve`, which runs it on a fresh clone of its golden
 # image and deletes the clone. The step passes or fails on the job's exit code
-# (docs/DEVELOPMENT.md, "What it exits with"), and the result files —
+# (https://joeblew999.github.io/irgo-windows-vm/using.html#what-it-exits-with), and the result files —
 # result.json, stdout.txt, test2json.json, the desktop and any screenshots —
 # are uploaded as an artifact.
 #
@@ -12,7 +12,7 @@
 #       gui: true
 #       token: ${{ secrets.IRGO_REMOTE_TOKEN }}
 #
-# The whole example is in docs/DEVELOPMENT.md, "From GitHub Actions".
+# The whole example: https://joeblew999.github.io/irgo-windows-vm/agents.html#from-another-machine-linux-windows-github
 name: irgo-windows-vm run
 description: Run a Windows ARM64 binary or go test -c binary on a fresh Windows 11 VM on a Mac, and pass or fail on its exit code.
 branding:
@@ -151,7 +151,7 @@ runs:
         CODE: ${{ steps.run.outputs.exit-code }}
       run: |
         if [ "${CODE:-1}" != 0 ]; then
-          echo "::error::the job exited ${CODE:-unknown} (docs/DEVELOPMENT.md, \"What it exits with\"; 8 means it never ran to the end and is worth retrying)"
+          echo "::error::the job exited ${CODE:-unknown} (https://joeblew999.github.io/irgo-windows-vm/using.html#what-it-exits-with; 8 means it never ran to the end and is worth retrying)"
           exit "${CODE:-1}"
         fi
         echo "the job exited 0"

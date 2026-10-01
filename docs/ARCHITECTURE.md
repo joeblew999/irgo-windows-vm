@@ -114,6 +114,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
+| `internal/remote` | the client of the Worker's job queue, and the loop `serve` runs, behind an `Executor` the CLI supplies; knows nothing of UTM, so it builds and is tested on every OS ([Remote jobs](#remote-jobs)) |
 | `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
@@ -218,6 +219,58 @@ resolved to the name, so every spelling lands on one lock. A lock is released
 when its holder dies (flock on macOS; nothing to lock elsewhere, hence
 `lock_darwin.go` and `lock_other.go`), and its file is never deleted: unlinking
 a flock file someone holds lets a third process lock a new file of that name.
+
+## Remote jobs
+
+How a binary from another machine is run here; how to send one is in
+[For agents](FOR-AGENTS.md#from-another-machine-linux-windows-github), and the
+queue it comes through in [the Worker](WORKER.md#the-remote-job-queue).
+
+```
+ client (any OS, MCP, GitHub)          Worker (/api/jobs, R2 irgo-jobs)          Mac (irgo-winvm serve)
+ remote-submit app.exe ──── POST spec ──▶ job: uploading
+                       ──── PUT bytes ──▶ R2 checks SHA-256 → queued
+                                          ◀──── POST /api/runner/claim, every 3 s ──
+                                          running, 90 s lease ── binary, heartbeats ─▶ clone job-<id>
+                                                                                       app-create [-gui]
+                                                                                       screenshots
+                       ◀── log, status ── ◀──────────── log, files, finish ─────────── delete the clone
+ exits with the job's code, files saved
+```
+
+`internal/remote` is the client (one method per endpoint) and the loop
+(`Serve`, `RunJob`): claim, download and check the binary's SHA-256, run the
+`Executor` under a heartbeat every 20 s (which also carries cancellation),
+upload the log every 3 s and the files, then finish. It knows nothing of UTM,
+so it builds and is tested on every OS against a fake Worker. The `Executor`
+is `macExecutor` in `cmd/irgo-winvm/serve.go`:
+
+1. **Admit**: `BeginCreate`, the shared Mac's room check and owner record, the
+   owner being `remote:<caller>/<job>`. No room is exit 7.
+2. **Clone**: `CloneFromGolden` as `job-<first 12 of the id>`. No golden image
+   means the job is not run; `serve` refuses to start without one, and never
+   installs Windows for a job.
+3. **Run** with app-create's library call, as `glaze-check -windows` does: the
+   job's `-gui` and timeout, `{out}` replaced by `C:\Users\Public\irgo-job-out`,
+   and for a test binary `-test.v=test2json` and a `-test.timeout` 30 s inside
+   the job's.
+4. **Collect** `stdout.txt`, `test2json.json` (`go tool test2json` on the
+   Mac), `desktop.png` (UTM's window) and every `screenshot: <path>` the
+   program logged, relative to `{out}` (`shotPaths`: plain relative `.png`
+   paths only, at most 32).
+5. **Delete** the clone whatever happened, check UTM no longer lists it, and
+   forget its owner record. A clone that survives is said loudly, with the
+   command that removes it.
+
+Every line printed meanwhile is teed into the job's log (`utmvm.Tee`).
+Cancelling stops a job at its next step: a program already running in the
+guest finishes or reaches its timeout, because `utmctl` cannot interrupt it.
+One job at a time, because a clone is 8 GiB and a 16 GiB Mac holds one.
+Nothing the job sent runs on the Mac: it is pushed into a guest made for it.
+Each clone is a running copy of Windows and needs its own licence; `serve`
+says so when it starts. A command that drives UTM is declared `MacOnly`, and
+`runTool` refuses it on Linux and Windows after its flags parse (so `-h`
+still answers), pointing at `remote-submit`.
 
 ## The ledger client
 

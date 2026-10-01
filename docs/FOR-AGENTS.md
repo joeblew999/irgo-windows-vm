@@ -30,7 +30,8 @@ registers the server.
 - **Match on the exit code or its `status` name**, never on the wording. The
   codes are in [What it exits with](USING.md#what-it-exits-with): 1 is your
   program failing, with its real code in the message; 4 (`no-agent`) and 6
-  (`busy`) are worth retrying, and so is 7 (no room) once a VM stops.
+  (`busy`) are worth retrying, and so is 7 (no room) once a VM stops, and 8
+  (`not-run`), a [remote job](#from-another-machine-linux-windows-github) that never ran to the end.
 - **`vm-screen` returns the picture itself.** Use it whenever an answer is a
   timeout: from the host, a hung program and a slow one look the same.
 - **Long calls return a job.** Ask `status` with the id; asking the same command
@@ -71,6 +72,98 @@ for example `-http 127.0.0.1:8129`. A bare `:port` means loopback.
 > Anyone who can call `app-create` can run code of their choice on your Mac's
 > VM. Read the [threat model](THREAT-MODEL.md) before enabling `-http`, and
 > prefer no inbound listener at all.
+
+## From another machine: Linux, Windows, GitHub
+
+UTM runs only on a Mac, but you do not need to be on one. The same binary,
+built for Linux or Windows, sends your `.exe` through the project's Worker to
+a Mac running `irgo-winvm serve`; the Mac runs it on a fresh clone of its
+golden image, deletes the clone, and sends back what it printed, its exit
+code, a picture of the desktop and any screenshots it took.
+
+```sh
+export IRGO_REMOTE_URL=https://irgo-windows-vm.gedw99.workers.dev
+export IRGO_REMOTE_TOKEN=<your caller token, from the Mac's owner>
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o app.exe .
+irgo-winvm remote-submit -gui app.exe --flag value
+```
+
+| command | what it does | undo |
+|---|---|---|
+| **`remote-submit`** `[-gui] [-test] [-timeout 10m] [-wait=false] <app.exe> [args...]` | uploads, queues, follows the Mac's log, prints the program's output, saves the files under `irgo-remote/<job id>/`, exits with the job's code | `remote-cancel` |
+| **`remote-status`** `[<id>]` | state, place in the queue, exit code, files | |
+| **`remote-logs`** `[-f] <id>` | what the Mac said; `-f` follows it and exits with the job's code | |
+| **`remote-result`** `[-o dir] <id>` | downloads a finished job's files and exits with its code | |
+| **`remote-cancel`** `<id>` | at once if it is queued; a running job stops at its next step | |
+
+`irgo-winvm remote-submit` can also be typed as two words, `remote submit`.
+
+- **The exit code is the job's**, on the same [table](USING.md#what-it-exits-with)
+  as everything else: 0 your program succeeded, 1 it failed (its own code is in
+  the message), 7 the Mac had no room, and **8 it never ran to the end**:
+  cancelled, no Mac took it within 2 hours, or its Mac went away. 4, 6, 7 and
+  8 are worth retrying.
+- **Files that come back**: `result.json`, `stdout.txt` (the raw output),
+  `desktop.png` (the guest's screen as the program left it), and for a test
+  binary (`-test`, built with `go test -c`) `test2json.json`, Go's own events.
+  In your arguments `{out}` names a directory in the guest: a picture your
+  program writes there and names in a `screenshot: <path>` line comes back as
+  `shot-<path>.png`. The conformance suite does exactly that with
+  `-conformance.shots={out}`.
+- **One job at a time per Mac.** `remote-submit` says how many are ahead of
+  yours. The program may run for `-timeout` (at most 1 h); the binary may be up
+  to 95 MiB.
+- **On Linux and Windows, everything that drives UTM refuses** with exit 2 and
+  the `remote-submit` line to use instead.
+- **Your token is yours.** You see only your own jobs; the owner can revoke it
+  without touching anyone else's.
+
+**Over MCP**, the `remote-*` commands are tools like every other, so
+`irgo-winvm mcp` on any OS lets an agent submit and read jobs. With **no
+binary at all**, the Worker is itself a remote MCP server, with your token as
+the bearer:
+
+```sh
+claude mcp add --transport http irgo-remote https://irgo-windows-vm.gedw99.workers.dev/api/mcp \
+  --header "Authorization: Bearer $IRGO_REMOTE_TOKEN"
+```
+
+Its tools are `submit_job` (the binary as `data_base64`, up to 16 MiB),
+`job_status`, `job_log`, `job_result` (the files, screenshots as images) and
+`cancel_job`.
+
+**From GitHub Actions**, in any repository: build your binary on any runner and
+hand it to the action, which fails the step unless the job exited 0 and
+uploads the result files as an artifact. Keep the token as a repository
+secret.
+
+```yaml
+jobs:
+  windows-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with: { go-version-file: go.mod }
+      - run: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go test -c -o suite.test.exe ./mysuite
+      - uses: joeblew999/irgo-windows-vm/.github/actions/run@main
+        with:
+          binary: suite.test.exe
+          test: true
+          gui: true
+          args: |
+            -test.run
+            TestWindow
+            -shots={out}
+          token: ${{ secrets.IRGO_REMOTE_TOKEN }}
+```
+
+Inputs: `binary`, `args` (one per line), `gui`, `test`, `timeout`, `token`,
+`url`, `version`, `artifact`; outputs `job-id`, `exit-code`, `dir`. This
+repository's own `.github/workflows/remote.yml` runs it from Linux and Windows
+runners. How the queue works and what it accepts is in
+[the Worker](WORKER.md#the-remote-job-queue); what the Mac does with a job is
+in [Architecture](ARCHITECTURE.md#remote-jobs).
 
 ## Reporting issues
 

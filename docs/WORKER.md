@@ -8,7 +8,7 @@ in [Using it](USING.md#the-private-r2-cache).
 
 ## The API
 
-It serves four things. GitHub Pages (`pages.yml`) keeps publishing the site as
+It serves five things. GitHub Pages (`pages.yml`) keeps publishing the site as
 before until the owner switches.
 
 - **The site.** `site/dist`, from `mise run site:build`, as Workers static
@@ -36,6 +36,8 @@ before until the owner switches.
   `<key>` is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
+- **The remote job queue** (`worker/jobs.go`), in the private bucket bound
+  as `JOBS`: see [The remote job queue](#the-remote-job-queue).
 - **The ledger** (`worker/ledger.go`), who used which VM where, in the D1
   database bound as `LEDGER`: see [The ledger](#the-ledger).
 
@@ -118,13 +120,13 @@ to HEAD keeps no `Content-Length` on Workers, hence `X-Golden-Size`.
 
 ## Traps
 
-TinyGo cost two traps, both found under `wrangler dev` and both invisible to
-`go test` on the host:
+TinyGo cost three traps, all invisible to `go test` on the host:
 
 | trap | symptom | what to do |
 |---|---|---|
 | `http.ServeMux` patterns such as `"GET /api/health"` under TinyGo 0.42 | never match: a mux holding only that pattern answered that path with 404 | route by hand (`Handler` in `api.go`) |
 | `regexp.MustCompile` of `[0-9a-f]{64}` at package level under TinyGo | `fatal error: stack overflow` before `main`; every request then fails with "Go program has already exited" or hangs | plain loops (`isHex`, `isPicture`, `isGoldenKey`) |
+| `time.Sleep` in a request under TinyGo | never returns: twelve of twenty parallel submits that backed off in `mutate` hung until the client gave up, while the host tests and a single request passed (measured live, 1 Oct 2026) | wait on the runtime's `setTimeout` (`jsPause` in `jobs_js.go`) |
 
 Three more, about the tools rather than the code:
 
@@ -217,6 +219,9 @@ Done on 1 Oct 2026 by these steps. In order:
    | `GOLDEN_PUSH_TOKEN` | writing and deleting it (`IRGO_GOLDEN_PUSH_TOKEN`) |
    | `LEDGER_TOKEN` | the tool posting to [the ledger](#the-ledger) (`IRGO_LEDGER_TOKEN`) |
    | `LEDGER_READ_TOKEN` | reading the ledger: its page and JSON (`IRGO_LEDGER_READ_TOKEN`) |
+   | `JOBS_TOKENS` | [the job queue](#the-remote-job-queue)'s callers, `name=token,…` (`IRGO_REMOTE_TOKEN`) |
+   | `JOBS_ADMIN_TOKEN` | every job, and the list |
+   | `JOBS_RUNNER_TOKEN` | the Mac running `serve` (`IRGO_REMOTE_RUNNER_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
    [Setting up the bucket](USING.md#setting-up-the-bucket)).
@@ -234,6 +239,70 @@ Done on 1 Oct 2026 by these steps. In order:
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part
 of these steps.
+
+## The remote job queue
+
+`worker/jobs.go`: how a developer, an agent or a workflow on any OS hands a
+Windows binary to a Mac running `irgo-winvm serve`
+([how to use it](FOR-AGENTS.md#from-another-machine-linux-windows-github),
+[what the Mac does](ARCHITECTURE.md#remote-jobs)). The Mac accepts no
+connection, so the queue lives here and the Mac polls for work.
+
+| request | token | does |
+|---|---|---|
+| `POST /api/jobs` | caller | a spec: `kind` (`app`, `test`), `name`, `size`, `sha256`, `gui`, `args`, `timeout_s`; answers the job and its upload path |
+| `PUT /api/jobs/<id>/input` | the job's caller | the binary, at most 95 MiB, refused unless R2 finds it hashes to the spec; then queued |
+| `GET /api/jobs/<id>` | the job's caller, admin | the job, its place in the queue, how many are running |
+| `GET /api/jobs/<id>/log?offset=N` | the job's caller, admin | the log from byte N; `X-Log-Size` is the next offset |
+| `GET /api/jobs/<id>/files/<name>` | the job's caller, admin | one result file, with `X-Job-Sha256` |
+| `POST /api/jobs/<id>/cancel` | the job's caller, admin | queued: cancelled; running: the Mac stops it |
+| `GET /api/jobs` | admin | every job in the index |
+| `POST /api/runner/claim` | runner | the oldest queued job, now running with a 90 s lease; 204 when none |
+| `POST /api/runner/jobs/<id>/heartbeat`, `GET …/input`, `PUT …/log`, `PUT …/files/<name>`, `POST …/finish` | runner | the Mac's side; 409 once the job is not running, which stops the Mac |
+| `POST /api/mcp` | caller, admin | the same operations as a remote MCP server (`jobs_mcp.go`) |
+
+**One object, changed by compare-and-swap.** Every live job is in
+`jobs/index.json` in the private bucket bound as `JOBS` (`irgo-jobs`), and
+every change is a conditional put: `onlyIf: {etagMatches}` to replace,
+`etagDoesNotMatch: "*"` to create. R2 stores nothing and answers null when
+another writer got there first, and `mutate` reads again and reapplies, after a
+jittered pause, up to 16 times. Measured live on 1 Oct 2026: 15 submits at
+once, all 15 in the index and none refused; without the pause, 12 at once lost
+one to ten immediate retries (503, which the client retries). Each job's
+binary, log and results are objects beside it under `jobs/<id>/`, streamed as
+the golden image is. Not a Durable Object, the natural queue: workers-go can
+call one but not define one, so its class would be JavaScript outside
+`go test` (the ledger chose D1 for the same reason). Not a WebSocket: the Mac
+polls every 3 s, one class B read, nothing when idle.
+
+**Time is part of every read** (`sweep`): no binary after 30 min, or queued
+2 h with no Mac, is `expired`; a lease that runs out is `lost`; running past
+its timeout plus 20 min is `timed-out`. Each ends at its deadline, not when it
+was noticed, so a read's answer and the next write's agree. A day after it
+ends a job leaves the index and its record is written beside its files; a
+lifecycle rule deletes `jobs/` after 7 days.
+
+**Tokens and limits.** `JOBS_TOKENS` is `name=token,name=token`, one per
+caller, so one can be revoked alone and every job records its caller's name.
+A caller sees only its own jobs: another caller's id answers 404, as one that
+does not exist, and there is no listing. `JOBS_ADMIN_TOKEN` sees, lists and
+cancels every job. `JOBS_RUNNER_TOKEN` is the Mac's and can do nothing a
+caller does, nor a caller anything it does. Limits: the binary 95 MiB, a result
+file 32 MiB and 64 of them, the log 2 MiB, 64 arguments of 4 KiB, a timeout of
+at most 1 h (default 10 min), 20 live jobs per caller, 500 in the index.
+
+**The MCP server** (`POST /api/mcp`) is the Streamable HTTP transport in its
+stateless form: one JSON-RPC request per POST, one JSON answer, no session, no
+event stream. Each tool is one request to the table above, made in-process
+with the caller's own token, so a tool can do nothing the token cannot do by
+curl, and there is one implementation of each operation.
+
+**Set up on 1 Oct 2026**: `wrangler r2 bucket create irgo-jobs` (no public
+access), `wrangler r2 bucket lifecycle add irgo-jobs expire-jobs jobs/
+--expire-days 7`, the three secrets, a deploy. `.env.r2` on the owner's Mac
+holds `IRGO_REMOTE_URL`, `IRGO_REMOTE_TOKEN` (the owner's caller token),
+`IRGO_REMOTE_LINUX_TOKEN` and `IRGO_REMOTE_CI_TOKEN` (two more callers),
+`IRGO_REMOTE_ADMIN_TOKEN` and `IRGO_REMOTE_RUNNER_TOKEN`.
 
 ## The ledger
 

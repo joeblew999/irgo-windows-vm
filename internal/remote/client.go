@@ -38,7 +38,7 @@ func FromEnv(tokenVar string) (*Client, error) {
 		missing = append(missing, tokenVar)
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("%w: set %s (docs/DEVELOPMENT.md, \"Driving a Mac from anywhere\")", ErrConfig, strings.Join(missing, " and "))
+		return nil, fmt.Errorf("%w: set %s (%s)", ErrConfig, strings.Join(missing, " and "), GuideURL)
 	}
 	return c, nil
 }

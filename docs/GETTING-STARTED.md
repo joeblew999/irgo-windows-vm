@@ -60,6 +60,12 @@ project does not have.
 `irgo-winvm version` prints the version stamped in at build time, or `dev` when
 built by hand.
 
+**On Linux or Windows** the same binary is the client for a Mac elsewhere:
+`go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest`, then
+`irgo-winvm remote-submit app.exe` with the Mac owner's URL and a token
+([how](FOR-AGENTS.md#from-another-machine-linux-windows-github)). The commands
+that drive UTM refuse there and say so.
+
 ## Your first VM
 
 ```sh

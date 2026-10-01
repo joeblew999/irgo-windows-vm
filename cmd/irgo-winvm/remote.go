@@ -28,8 +28,8 @@ const remoteSubmitAbout = `  Sends a Windows binary to a Mac running irgo-winvm 
 
   It waits, printing the Mac's log, then prints the program's output, saves
   the result files under -o, and exits with the job's exit code on the
-  table in docs/DEVELOPMENT.md ("What it exits with"); 7 means it never ran
-  to the end. In args, {out} is a directory in the guest: a file a test
+  tool's table (` + utmvm.SiteURL + `using.html#what-it-exits-with); 8 means
+  it never ran to the end. In args, {out} is a directory in the guest: a file a test
   writes there and names in a "screenshot: <path>" line comes back.
 `
 

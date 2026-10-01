@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"syscall/js"
+	"time"
 
 	"github.com/syumai/workers-go/cloudflare"
 )
@@ -58,6 +59,24 @@ func (s jsJobs) Swap(key string, body []byte, etag string) (bool, error) {
 		return false, err
 	}
 	return !o.IsNull(), nil
+}
+
+func init() { pause = jsPause }
+
+// jsPause waits on the runtime's setTimeout. time.Sleep under TinyGo on
+// Workers never returned: every request that backed off in mutate hung
+// until the client gave up (measured live, 1 Oct 2026, 12 of 20 parallel
+// submits), while host tests and single requests passed.
+func jsPause(d time.Duration) {
+	var cb js.Func
+	p := js.Global().Get("Promise").New(js.FuncOf(func(_ js.Value, args []js.Value) any {
+		resolve := args[0]
+		cb = js.FuncOf(func(js.Value, []js.Value) any { resolve.Invoke(); return nil })
+		js.Global().Call("setTimeout", cb, d.Milliseconds())
+		return nil
+	}))
+	_, _ = await(p)
+	cb.Release()
 }
 
 // GetRawJSBody hands a body already in Go memory to R2 as a Uint8Array.

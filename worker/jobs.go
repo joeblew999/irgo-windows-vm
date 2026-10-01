@@ -39,6 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -245,7 +246,12 @@ func loadIndex(b JobBucket, now time.Time) (jobIndex, string, bool, error) {
 // again from a fresh read whenever another writer got there first. Jobs the
 // sweep retires are archived beside their files before they leave the index.
 func (env Env) mutate(b JobBucket, fn func(ix *jobIndex, now time.Time) error) (jobIndex, error) {
-	for range 10 {
+	for attempt := range 16 {
+		if attempt > 0 {
+			// Jittered, growing: twelve submits at once on R2 lost one after
+			// ten immediate retries (measured live, 1 Oct 2026).
+			pause(time.Duration(attempt*attempt*5+mrand.IntN(20)) * time.Millisecond)
+		}
 		now := env.Now().UTC()
 		var ix jobIndex
 		body, etag, ok, err := b.Load(jobIndexKey)

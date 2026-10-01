@@ -60,6 +60,11 @@ type apiError struct {
 
 func (e *apiError) Error() string { return fmt.Sprintf("the Worker answered %d: %s", e.Status, e.Msg) }
 
+func isStatus(err error, code int) bool {
+	var ae *apiError
+	return errors.As(err, &ae) && ae.Status == code
+}
+
 // call makes one request and returns the response, which the caller closes,
 // or an error classified by status: ErrAuth, ErrNotFound, ErrGone, or the
 // Worker's own message.
@@ -121,6 +126,16 @@ func (c *Client) callJSON(ctx context.Context, method, path string, in, out any)
 		body, size = bytes.NewReader(b), int64(len(b))
 	}
 	res, err := c.call(ctx, method, path, body, size, map[string]string{"Content-Type": "application/json"})
+	// 503 is the Worker losing its compare-and-swap on the queue to other
+	// writers every time, which stored nothing: ask again, a few times.
+	for try := 1; try <= 4 && isStatus(err, http.StatusServiceUnavailable) && ctx.Err() == nil; try++ {
+		time.Sleep(time.Duration(try) * 500 * time.Millisecond)
+		if in != nil {
+			b, _ := json.Marshal(in)
+			body = bytes.NewReader(b)
+		}
+		res, err = c.call(ctx, method, path, body, size, map[string]string{"Content-Type": "application/json"})
+	}
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"sync"
+	"time"
 )
 
 // CAS is a compare-and-swap over one small object: the job queue's index
@@ -38,6 +39,10 @@ type memJobs struct {
 	// writes there to lose the race on purpose.
 	beforeSwap func()
 }
+
+// pause is how mutate backs off between attempts: time.Sleep on the host,
+// setTimeout on Workers (jobs_js.go).
+var pause = time.Sleep
 
 func newMemJobs() *memJobs { return &memJobs{memBlobs: newMemBlobs(), small: map[string][]byte{}} }
 

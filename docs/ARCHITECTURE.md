@@ -85,17 +85,20 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
 ```
 ~/Library/Application Support/irgo-winvm/
   media/    the ISO, the .esd it was built from, and scratch
-  bin/      binaries staged into a VM
+  bin/      binaries staged into a VM, one directory per caller
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
   vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
   golden.json            what is known about the golden image
-  mutation*.lock         the mutation locks, one machine-wide, one per VM, one for bin/
+  vms/      who made each VM and when it was last used, one record per VM
+  mutation*.lock         the mutation locks: one machine-wide, one per VM, one per
+                         caller's part of bin/, and the capacity check's
   net/      the guest address the last SMB push reached, one file per VM
   utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
                 manifest.json once finished, .parts/ while it is not
+  ledger/   events not yet sent to the ledger, and this machine's random id
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -110,8 +113,9 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
+| `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
 | `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
-| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
 
@@ -193,13 +197,17 @@ stranger's process as a job: accepted, and documented where the check lives, in
 ## The mutation locks
 
 Every command that changes state takes the locks it declares in
-`command.All` (`Locks`), from three kinds (`internal/utmvm/lock.go`):
+`command.All` (`Locks`), from these kinds (`internal/utmvm/lock.go`):
 
 | lock | guards | taken by |
 |---|---|---|
 | machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
 | per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
-| stage (`mutation-stage.lock`) | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+| stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
+| capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
+
+`vm-reap` takes each VM's lock itself, one at a time, without waiting, and
+keeps a VM whose lock is held: that VM is in use.
 
 So `app-create` on two VMs runs side by side, and a second mutation of the same
 VM is **refused, not queued**, with exit code 6 and a message naming the busy
@@ -210,6 +218,53 @@ resolved to the name, so every spelling lands on one lock. A lock is released
 when its holder dies (flock on macOS; nothing to lock elsewhere, hence
 `lock_darwin.go` and `lock_other.go`), and its file is never deleted: unlinking
 a flock file someone holds lets a third process lock a new file of that name.
+
+## The ledger client
+
+Several repositories' agents share one Mac's VMs, and there is more than one
+Mac. The mutation locks and leases on each machine are the authority: local,
+instant, offline. The ledger is the record of them that outlives a machine and
+can be read from anywhere: which agent used which VM, on which machine, doing
+what, and what was started and never finished. It decides nothing. Where it is
+stored and how it is read is in [the Worker](WORKER.md#the-ledger).
+
+**The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
+the start and end of every command (exit code, duration, the error text)
+except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build
+runs it as `glaze-status -h` a dozen times). Over MCP it records the client's
+name from its `initialize`. Each event carries a machine id, the hostname, the
+owner (`IRGO_WINVM_OWNER`, else the login name), the repository
+(`IRGO_WINVM_REPO`, else the checkout it runs in, read from its git config),
+the VM and the tool version. It is **off** unless `IRGO_LEDGER_URL` and
+`IRGO_LEDGER_TOKEN` are both set; on this Mac they are in `.env.r2`, with
+`IRGO_LEDGER_READ_TOKEN`.
+
+- **It never blocks or fails a command.** An event is appended to
+  `ledger/spool.jsonl` (instant, works offline) and sent in the background.
+  At exit, `main` gives it at most 2 s; what is not sent stays spooled and
+  goes with the next command. After a failed send nothing is tried for a
+  minute, so an offline machine pays nothing per command.
+  `TestWorkerOutageNeverChangesTheExitCode` runs commands against a hanging,
+  a failing and an unreachable Worker and compares each exit code with the
+  ledger off.
+- **Nothing is lost or doubled.** A flush renames the spool to
+  `inflight.jsonl` under `spool.lock`, so no append lands in a file already
+  read, and `flush.lock` lets one process flush at a time. Events go in
+  batches of 25; a 2xx, 400 or 413 removes a batch, anything else (a 401
+  included) keeps it. Every event has a random id and the Worker stores each
+  id once, so a batch sent twice is harmless. Past 4 MiB of spool, new events
+  are dropped.
+- **Redacted before it is written.** The home directory becomes `~`;
+  credentials in URLs, values after words such as `token` or `password`, and
+  any run of 32 or more key-like characters become `[redacted]`. The machine
+  id is 16 random hex digits kept in `ledger/machine-id`, not derived from
+  anything about the machine.
+
+For the lease code: `ledger.Emit(ledger.Event{...})` from anywhere, a no-op
+until `main` configures it. `Op` pairs an event that opens work with the one
+that closes it: `start`/`end`, `lease-acquire`/`lease-release`; `reap` closes
+the op it names and, like `vm-delete`, marks the VM deleted; `vm-create`
+marks it created. A lease sets `Expires` and is stale once past it.
 
 ## Every command logs its exit
 

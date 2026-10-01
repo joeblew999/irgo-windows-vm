@@ -30,14 +30,27 @@ registers the server.
 - **Match on the exit code or its `status` name**, never on the wording. The
   codes are in [What it exits with](USING.md#what-it-exits-with): 1 is your
   program failing, with its real code in the message; 4 (`no-agent`) and 6
-  (`busy`) are worth retrying.
-- **Take a VM of your own** with `-vm <name>`, so you never wait on another
-  agent's VM. With a [golden image](USING.md#the-golden-image) that is a clone
-  in about 23 seconds.
+  (`busy`) are worth retrying, and so is 7 (no room) once a VM stops.
 - **`vm-screen` returns the picture itself.** Use it whenever an answer is a
   timeout: from the host, a hung program and a slow one look the same.
 - **Long calls return a job.** Ask `status` with the id; asking the same command
   again returns the job already running rather than starting a second.
+
+## Sharing the Mac
+
+The Mac is shared: the owner, agents in this repository and agents from other
+repositories all use it at once ([how](USING.md#sharing-one-mac)). The whole
+contract for an agent from another repository:
+
+1. Set `IRGO_WINVM_OWNER` (or pass `-owner`) to something that names you, or
+   rely on the MCP client name.
+2. `irgo-winvm vm-create -vm <name>`: with a
+   [golden image](USING.md#the-golden-image), a clone in about 23 seconds.
+   Exit 7 means no room: wait, or ask whoever `status` names.
+3. Pass `-vm <name>` to `app-create`, `vm-screen` and the rest. Leaving it out
+   is refused with exit 2: the default VM is the machine owner's.
+4. `irgo-winvm vm-delete -vm <name> -force` when done. If you go away, a clone
+   idle for a day is removed by whoever runs `vm-reap -force`.
 
 ## Over HTTP
 
@@ -46,9 +59,10 @@ for example `-http 127.0.0.1:8129`. A bare `:port` means loopback.
 
 - **Uploads.** An agent with no shared filesystem sends a cross-compiled `.exe`
   in base64 chunks with `app-upload` (up to 2 MiB per call). It is staged
-  content-addressed as `bin/<sha256>.exe` under the runtime data, verified by
+  content-addressed as `bin/<caller>/<sha256>.exe` under the runtime data, verified by
   SHA-256 before it is committed, and then passed to `app-create` by path. An
-  unchanged binary transfers nothing; `app-delete` clears the stage.
+  unchanged binary transfers nothing; `app-delete` clears that caller's stage
+  and nobody else's.
 - **Remote access.** Binding wider than loopback requires `-allow-remote` and a
   bearer token in `IRGO_WINVM_TOKEN`, compared in constant time. A server that
   would start unauthenticated off loopback is refused outright.

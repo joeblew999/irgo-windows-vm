@@ -9,6 +9,7 @@ package main
 //	POST /api/glaze-status/{target}               a run: shots.json and its pictures (token)
 //	GET  /api/glaze-status/{target}/runs/{id}/{f} one stored file of a run
 //	*    /api/golden/{key}, /api/golden-list/{kind}  the private golden image (golden.go)
+//	*    /api/ledger/...                          who used which VM, where (ledger.go)
 //
 // Everything here is plain Go behind small interfaces (Env, Store, Blobs), so
 // it is tested with `go test` on the host; platform_js.go binds them to R2 and
@@ -18,6 +19,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -42,6 +44,7 @@ type Env struct {
 	Var    func(name string) string // vars and secrets from wrangler.toml / wrangler secret
 	Site   func() (Store, error)    // the SITE bucket: glaze status, public data
 	Golden func() (Blobs, error)    // the GOLDEN bucket: the private golden image
+	Ledger func() (*sql.DB, error)  // the LEDGER D1 database (ledger.go)
 	Now    func() time.Time
 }
 
@@ -150,6 +153,16 @@ func Handler(env Env) http.Handler {
 		case get && len(p) == 2 && p[0] == "golden-list":
 			env.goldenList(w, r, p[1])
 			return
+		case len(p) >= 2 && p[0] == "ledger":
+			env.ledger(w, r, strings.TrimPrefix(r.URL.Path, "/api/ledger/"))
+			return
+		case len(p) == 1 && p[0] == "ledger":
+			// The page is /api/ledger/; send a bare /api/ledger there, after
+			// the token check, like every other ledger path.
+			if env.authorizedPage(w, r, varLedgerReadToken) {
+				http.Redirect(w, r, "/api/ledger/", http.StatusFound)
+			}
+			return
 		}
 		fail(w, http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)
 	})
@@ -166,13 +179,41 @@ func (env Env) authorized(w http.ResponseWriter, r *http.Request, v string) bool
 		return false
 	}
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	g, h := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
-	if !ok || got == "" || subtle.ConstantTimeCompare(g[:], h[:]) != 1 {
+	if !ok || !tokenMatches(got, want) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="irgo-windows-vm"`)
 		fail(w, http.StatusUnauthorized, "refused: no valid bearer token")
 		return false
 	}
 	return true
+}
+
+// authorizedPage is authorized for a page a browser opens: it also takes the
+// secret as the password of HTTP Basic (any user name), and a refusal asks
+// for Basic, so the browser prompts. A browser cannot send a bearer token on
+// a navigation, and a token in the URL would land in history and logs.
+func (env Env) authorizedPage(w http.ResponseWriter, r *http.Request, v string) bool {
+	want := env.Var(v)
+	if want == "" {
+		fail(w, http.StatusServiceUnavailable, "refused: %s is not set on this Worker", v)
+		return false
+	}
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		_, got, ok = r.BasicAuth()
+	}
+	if !ok || !tokenMatches(got, want) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="irgo-windows-vm ledger", charset="UTF-8"`)
+		fail(w, http.StatusUnauthorized, "refused: no valid token")
+		return false
+	}
+	return true
+}
+
+// tokenMatches compares as SHA-256 digests, so the comparison does not depend
+// on the length of either. An empty token never matches.
+func tokenMatches(got, want string) bool {
+	g, h := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return got != "" && subtle.ConstantTimeCompare(g[:], h[:]) == 1
 }
 
 // latest is glaze/<target>/latest.json: which run is newest. It is written

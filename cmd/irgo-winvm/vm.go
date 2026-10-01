@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"time"
@@ -11,9 +12,11 @@ import (
 func vmCreateFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
+	fs.Bool("overcommit", false, "start the VM even when the running VMs' configured memory leaves this Mac too little; they will swap")
 	return fs
 }
 
@@ -30,6 +33,13 @@ func runVMCreate(v values, _ []string) error {
 	say("vm:     %s", name)
 	say("bundle: %s", utmvm.Home(bundle))
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
+
+	// Room for it, and whose it is, before anything is made or started.
+	finish, err := utmvm.BeginCreate(name, v.caller, !v.Bool("golden"), v.Bool("overcommit"), say)
+	if err != nil {
+		return err
+	}
+	defer finish()
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
 		VMName:   name,
@@ -51,12 +61,14 @@ func runVMCreate(v values, _ []string) error {
 func vmDeleteFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-delete", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.Bool("force", false, "actually delete; without this it only lists")
 	return fs
 }
 
 // runVMDelete removes a VM. Without -force it lists what would go and refuses.
-// A VM that does not exist is nothing to undo, which is success.
+// A VM UTM says does not exist is nothing to undo, which is success; UTM not
+// answering is not the same thing, and is an error.
 func runVMDelete(v values, _ []string) error {
 	name, force := v.String("vm"), v.Bool("force")
 	say := utmvm.Printer("vm-delete")
@@ -68,9 +80,15 @@ func runVMDelete(v values, _ []string) error {
 	say("STEP 1/2  the VM")
 	say("          %s", utmvm.Home(bundle))
 
-	e, err := utmvm.Find(name)
+	e, found, err := findForUndo(name)
 	if err != nil {
+		return err
+	}
+	if !found {
 		say("          UTM knows no VM %q; nothing to delete", name)
+		if force {
+			return utmvm.ForgetVM(name)
+		}
 		return nil
 	}
 	r, err := utmvm.InspectRemoval(name)
@@ -96,12 +114,85 @@ func runVMDelete(v values, _ []string) error {
 		return err
 	}
 	say("removed %s — %s reclaimed", utmvm.Home(out.Path), utmvm.HumanBytes(out.TotalBytes))
+	return utmvm.ForgetVM(e.Name)
+}
+
+// findVM is utmvm.Find, a variable so tests can have UTM answer either way
+// without UTM.
+var findVM = utmvm.Find
+
+// findForUndo is Find for an undo, which must tell "UTM answered: there is no
+// such VM" (found is false, and the undo has nothing to do) from "UTM could
+// not be asked" (an error). Treating both as nothing to delete made vm-delete
+// and app-delete exit 0 when utmctl itself had failed, so a caller believed a
+// VM gone that was still there.
+func findForUndo(name string) (e utmvm.Entry, found bool, err error) {
+	e, err = findVM(name)
+	switch {
+	case err == nil:
+		return e, true, nil
+	case errors.Is(err, utmvm.ErrNoVM):
+		return utmvm.Entry{}, false, nil
+	}
+	return utmvm.Entry{}, false, fmt.Errorf("cannot tell whether VM %q exists, so nothing was deleted: %w", name, err)
+}
+
+func vmReapFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-reap", flag.ContinueOnError)
+	fs.Duration("stale", 24*time.Hour, "the lease: a clone nobody has used for longer than this is removed")
+	fs.Bool("force", false, "actually delete; without this it only lists")
+	return fs
+}
+
+// runVMReap removes the clones callers made and left: every VM with an owner
+// record whose lease has run out and that no command is using. irgo-win11,
+// the golden image and any VM without a record are never touched. Without
+// -force it lists what would go and refuses, like every destructive command.
+func runVMReap(v values, _ []string) error {
+	lease, force := v.Duration("stale"), v.Bool("force")
+	if lease <= 0 {
+		return fmt.Errorf("%w: -stale must be positive, got %s", errUsage, lease)
+	}
+	say := utmvm.Printer("vm-reap")
+	say("records: %s", utmvm.Home(utmvm.RecordsDir()))
+	say("lease:   %s", lease)
+	decisions, bad, err := utmvm.Reap(lease, force, func(f string, a ...any) { say("          "+f, a...) })
+	for _, b := range bad {
+		say("  unreadable record, kept: %s", b)
+	}
+	var acting int
+	for _, d := range decisions {
+		verb := "keep  "
+		switch d.Action {
+		case utmvm.ReapDelete:
+			verb, acting = "delete", acting+1
+		case utmvm.ReapForget:
+			verb, acting = "forget", acting+1
+		}
+		say("  %s %-20s owner %s — %s", verb, d.Record.Name, d.Record.Owner, d.Why)
+	}
+	if err != nil {
+		return err
+	}
+	if len(decisions) == 0 {
+		say("no VM records; nothing to reap")
+		return nil
+	}
+	if acting == 0 {
+		say("nothing to reap")
+		return nil
+	}
+	if !force {
+		return fmt.Errorf("%d to delete or forget. Pass -force to do it (%w)", acting, errRefused)
+	}
+	say("reaped %d", acting)
 	return nil
 }
 
 func vmRepairFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-repair", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.String("user", "dev", "the AutoLogon user whose password must never expire")
 	fs.Bool("reboot", false, "restart the VM afterwards so AutoLogon runs again")
 	fs.Bool("share", true, "open the guest's SMB share that pushes go through at network speed; -share=false removes it")
@@ -144,6 +235,7 @@ func ensureAgent(e utmvm.Entry, say func(string, ...any)) error {
 func vmScreenFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.String("o", "", "where to write the PNG (default: the shots directory)")
 	fs.String("promote", "", "copy the newest shot of each stage into this directory, named for the stage")
 	return fs

@@ -8,7 +8,7 @@ in [Using it](USING.md#the-private-r2-cache).
 
 ## The API
 
-It serves three things. GitHub Pages (`pages.yml`) keeps publishing the site as
+It serves four things. GitHub Pages (`pages.yml`) keeps publishing the site as
 before until the owner switches.
 
 - **The site.** `site/dist`, from `mise run site:build`, as Workers static
@@ -36,6 +36,8 @@ before until the owner switches.
   `<key>` is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
+- **The ledger** (`worker/ledger.go`), who used which VM where, in the D1
+  database bound as `LEDGER`: see [The ledger](#the-ledger).
 
 All of the handler is plain Go behind two small interfaces (`worker/api.go`).
 `go:check` builds and tests it for the host, where `workers.Serve` is an
@@ -204,7 +206,7 @@ Done on 1 Oct 2026 by these steps. In order:
    `cd worker && wrangler deploy`. The deploy runs `mise run worker:wasm` and
    uploads `site/dist` as the Worker's assets. Its output names the URL,
    `https://irgo-windows-vm.<subdomain>.workers.dev`, and `startup_time_ms`.
-5. **Set the three secrets** from `worker/`, one `wrangler secret put <NAME>`
+5. **Set the secrets** from `worker/`, one `wrangler secret put <NAME>`
    each, each a different `openssl rand -hex 32`. Until one is set, its
    endpoints answer 503.
 
@@ -213,6 +215,8 @@ Done on 1 Oct 2026 by these steps. In order:
    | `GLAZE_STATUS_TOKEN` | CI posting glaze runs |
    | `GOLDEN_TOKEN` | reading the golden image (`IRGO_GOLDEN_TOKEN`) |
    | `GOLDEN_PUSH_TOKEN` | writing and deleting it (`IRGO_GOLDEN_PUSH_TOKEN`) |
+   | `LEDGER_TOKEN` | the tool posting to [the ledger](#the-ledger) (`IRGO_LEDGER_TOKEN`) |
+   | `LEDGER_READ_TOKEN` | reading the ledger: its page and JSON (`IRGO_LEDGER_READ_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
    [Setting up the bucket](USING.md#setting-up-the-bucket)).
@@ -230,3 +234,47 @@ Done on 1 Oct 2026 by these steps. In order:
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part
 of these steps.
+
+## The ledger
+
+Who used which VM, on which machine, doing what, and what was started and never
+finished, kept where any machine can read it. The events come from every
+command the tool runs; what they carry, and why sending them can never fail a
+command, is in [Architecture](ARCHITECTURE.md#the-ledger-client).
+
+It stores events in the D1 database `irgo-ledger`, schema in
+`worker/migrations/`. D1 rather than a Durable Object: workers-go opens a D1
+database as `database/sql` but cannot define a Durable Object class, and the
+questions asked are queries. On the host and in the tests the same migration
+runs on SQLite (modernc.org/sqlite, in the worker module only), so the tests
+run the real SQL. The d1 driver under TinyGo was measured with `wrangler dev`
+before it was used: inserts, nulls, `RowsAffected` for duplicates.
+
+| request | token | does |
+|---|---|---|
+| `POST /api/ledger/events` | `LEDGER_TOKEN` | `{"events":[...]}`, 1 to 25; answers `accepted`, `duplicates`, `rejected` |
+| `GET /api/ledger/events` | `LEDGER_READ_TOKEN` | history, newest first, filtered by `owner`, `vm`, `machine`, `host`, `type`, `op`, `repo`, `client`; `since` is RFC 3339 or a duration (default 7 days); `limit` up to 1000 |
+| `GET /api/ledger/vms` | `LEDGER_READ_TOKEN` | now: machines, VMs (`in-use`, `stale`, `idle`, `deleted`), open work, recent events; `since`, `stale` |
+| `GET /api/ledger/` | `LEDGER_READ_TOKEN`, as bearer or as the Basic password | the same, as a page |
+
+- **Stale** is open work never closed: a start with no end, or a lease with
+  no release, older than `stale` (3 h by default), or a lease past its
+  `Expires`. The view reads the last 14 days, at most 5,000 events, and says
+  when it was truncated. A start and an end in the same millisecond count as
+  closed whichever id sorts first; live, a refused `app-create` once showed as
+  in use.
+- **Never public.** It names hosts, users and repositories. The page is
+  rendered by the Worker, not a page of the site, because static assets are
+  served to anyone before the Worker runs. A browser cannot send a bearer
+  token on a navigation, so the page also takes the read token as an HTTP
+  Basic password and asks for one. The two tokens each do one job.
+- **Limits** are D1's on the Free plan: 50 queries per invocation (hence 25
+  events, one statement each) and a daily row budget, which the indexes on
+  `ts`, `op`, `(machine, vm, ts)` and `(owner, ts)` keep small.
+
+Set up on 1 Oct 2026: `wrangler d1 create irgo-ledger` (its id is in
+`wrangler.toml`), `wrangler d1 migrations apply irgo-ledger --remote`, the two
+secrets, then a deploy. Locally: `wrangler d1 migrations apply irgo-ledger
+--local`, then `wrangler dev --local --var LEDGER_TOKEN:local-lw --var
+LEDGER_READ_TOKEN:local-lr`. A schema change is a new numbered file in
+`worker/migrations/`, applied the same way.

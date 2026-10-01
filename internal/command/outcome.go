@@ -24,6 +24,11 @@ const (
 	// CodeBusy means another mutation holds the lock, so this one was not
 	// started. Retryable once the holder finishes.
 	CodeBusy Code = 6
+
+	// CodeNoRoom means vm-create did not start another VM because it would
+	// leave the Mac too little memory or disk, or because it could not find
+	// out. Retryable once a VM stops.
+	CodeNoRoom Code = 7
 )
 
 // Outcome describes a code to whoever has to act on it.
@@ -53,6 +58,7 @@ var Outcomes = []Outcome{
 	{CodeNoAgent, "no-agent", "the VM is there, the guest agent is not answering — wait and try again", true},
 	{CodeNeedForce, "need-force", "refused: a destructive command without -force", false},
 	{CodeBusy, "busy", "another mutation is in progress — wait and try again", true},
+	{CodeNoRoom, "no-room", "refused: another VM would leave this Mac too little memory or disk, or that could not be determined — try again once a VM stops", true},
 }
 
 // Classify returns the outcome for a code. An undeclared code is reported as

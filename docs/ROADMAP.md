@@ -258,7 +258,7 @@ what it explains:
 | `internal/mcpserver/resource.go` | why the documentation is generated rather than embedded, and every option that was rejected |
 | `internal/job/doc.go` | why long work is its own package, and why reporting a *dead* process is the constraint that decides the design |
 | `cmd/irgo-winvm/flags.go` | why the `FlagSet` is the source and the schema is derived from it |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | how the code is organised, and every trap that cost hours |
+| [Architecture](ARCHITECTURE.md), [Conventions](CONVENTIONS.md), [Known traps](TRAPS.md) | how the code is organised, how it is written, and every trap that cost hours |
 
 ## Why the docs test skips this page
 

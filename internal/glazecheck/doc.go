@@ -29,7 +29,7 @@
 // user who downloaded irgo-winvm to run their own .exe has neither of. It is
 // here anyway, for three reasons:
 //
-//   - docs/DEVELOPMENT.md: logic belongs in the binary, not in mise.toml. The
+//   - docs/CONVENTIONS.md: logic belongs in the binary, not in mise.toml. The
 //     check was two shell scripts in the task file, and recording a verdict
 //     with versions and first-failure lines is not a job for shell.
 //   - An MCP tool is a command — mcpserver generates its tools from

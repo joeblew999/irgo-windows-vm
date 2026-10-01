@@ -9,7 +9,7 @@ package utmvm
 //
 // The identity is a label, not an authentication: anyone can claim any name
 // with -owner. It exists so callers who mean well do not collide, and so a
-// person can see whose VM is whose. docs/DEVELOPMENT.md, "Sharing one Mac".
+// person can see whose VM is whose. docs/USING.md, "Sharing one Mac".
 
 import (
 	"crypto/sha256"

@@ -6,7 +6,7 @@
 # maintainer cannot run.
 #
 # The site is GENERATED from the repository's markdown and is never committed.
-# README, RESULTS, UPSTREAM, AGENTS and CONTRIBUTING are each the source of
+# README and every page in docs/ are each the source of
 # truth for their subject, and the site renders them. If a page is wrong, the
 # markdown is wrong; there is no second copy to fix.
 name: pages

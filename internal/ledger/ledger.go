@@ -1,6 +1,6 @@
 // Package ledger reports what the tool does to the Worker's ledger: which
-// agent used which VM, on which machine, doing what (docs/DEVELOPMENT.md, "The
-// ledger"). The local lock files stay the authority; this is the durable,
+// agent used which VM, on which machine, doing what (docs/ARCHITECTURE.md, "The
+// ledger client"). The local lock files stay the authority; this is the durable,
 // cross-machine record of them.
 //
 // It never decides anything and never fails a command. An event is appended

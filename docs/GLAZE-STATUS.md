@@ -6,7 +6,7 @@ written by `irgo-winvm glaze-check` (`mise run glaze:mac` and
 which also says whether it still describes the tree. Generated: do not edit it by
 hand. Each run replaces only its own section. Every row is one test of
 `examples/conformance`, from its test2json events; what each checks is in its
-comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
+comment, and how the suite runs is in [TESTING.md](TESTING.md#does-glaze-work).
 
 <!-- glaze-status:mac commit=55a25b05f1a6d79775f5a5a2adf90378d7b28a68 examples-dirty=true glaze=v0.0.61 native=github.com/joeblew999/native@v0.1.16-0.20261001015633-2fbbf2d09e65 -->
 ## On the Mac — YES: 40 passed, 1 skipped

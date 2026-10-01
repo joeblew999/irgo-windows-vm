@@ -175,7 +175,7 @@ var ghLabel = regexp.MustCompile(`--label[ =]"?([a-z0-9 ,-]+[a-z0-9])"?`)
 // sync never creates it and gh refuses the issue.
 //
 // Negative control: removing needs-triage from labels.tsv fails this for all
-// three forms; misspelling agent-filed in CONTRIBUTING.md fails it for the
+// three forms; misspelling agent-filed in FOR-AGENTS.md fails it for the
 // docs.
 func TestEveryLabelNamedIsDefined(t *testing.T) {
 	defined := labelsFile(t)
@@ -188,19 +188,19 @@ func TestEveryLabelNamedIsDefined(t *testing.T) {
 			named[l] = append(named[l], "report -issue "+name)
 		}
 	}
-	contributing, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "CONTRIBUTING.md"))
+	contributing, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "FOR-AGENTS.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := 0
 	for _, m := range ghLabel.FindAllStringSubmatch(string(contributing), -1) {
 		for _, l := range strings.Split(m[1], ",") {
-			named[strings.TrimSpace(l)] = append(named[strings.TrimSpace(l)], "docs/CONTRIBUTING.md")
+			named[strings.TrimSpace(l)] = append(named[strings.TrimSpace(l)], "docs/FOR-AGENTS.md")
 			found++
 		}
 	}
 	if found == 0 {
-		t.Error("docs/CONTRIBUTING.md shows no gh --label; the agent instructions moved and this half of the test is vacuous")
+		t.Error("docs/FOR-AGENTS.md shows no gh --label; the agent instructions moved and this half of the test is vacuous")
 	}
 	var missing []string
 	for l, where := range named {

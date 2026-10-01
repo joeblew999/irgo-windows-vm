@@ -4,19 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
 
-// Where the verdict is written, and how two runs share one file.
+// Where the verdict is written, and how runs share one file.
 //
-// One file, two sections — the Mac and Windows — each between its own markers.
-// A run replaces its own section and copies the other through untouched, so
+// One file per suite, one section per target — for glaze the Mac and
+// Windows, for the VM suite each VM checked — each between its own markers.
+// A run replaces its own section and copies the others through untouched, so
 // checking the Mac after Windows does not erase what Windows said. The markers
-// carry the facts glaze-status needs to decide whether a verdict still
+// carry the facts the status command needs to decide whether a verdict still
 // describes the tree, as key=value pairs, so nothing parses the prose.
 
 // Targets, in the order the file lists them.
@@ -53,6 +52,10 @@ type Result struct {
 
 func (r Result) failed() bool { return r.Outcome == Fail || r.Outcome == Unfinished }
 
+// Fact is something a run found out and the record keeps, such as the
+// Windows build a VM runs. A test logs it as "fact: key=value".
+type Fact struct{ Key, Value string }
+
 // Section is one run, as recorded.
 type Section struct {
 	Target   string
@@ -73,18 +76,25 @@ type Section struct {
 	NotRun string
 
 	Results []Result
+	Facts   []Fact
 	Log     string
 	JSON    string // the test2json events, beside the log
 
 	// RunURL is the GitHub Actions run this was recorded in, when it was.
 	RunURL string
+
+	suite *Suite // nil is Glaze
 }
 
-// Verdict is one line: YES, KNOWN BUGS ONLY, NO, UNEXPECTED PASS, or CANNOT
-// TELL, with the names behind anything but YES.
+// Suite is the suite this section is a run of.
+func (s Section) Suite() *Suite { return s.suite.orDefault() }
+
+// Verdict is one line: YES, KNOWN BUGS ONLY (KNOWN ISSUES ONLY for the VM),
+// NO, UNEXPECTED PASS, or CANNOT TELL, with the names behind anything but YES.
 func (s Section) Verdict() string {
+	su := s.Suite()
 	if s.BuildError != "" {
-		return "NO: the conformance suite did not build"
+		return "NO: the " + su.Thing + " did not build"
 	}
 	if s.NotRun != "" {
 		return "CANNOT TELL: the suite did not run: " + s.NotRun
@@ -112,10 +122,9 @@ func (s Section) Verdict() string {
 	case len(failed) > 0:
 		return "NO: failed: " + strings.Join(failed, " ")
 	case len(xpass) > 0:
-		return "UNEXPECTED PASS: known upstream failure now passes: " + strings.Join(xpass, " ") +
-			" — if the fix is released, remove it from glazecheck.KnownUpstream and update docs/UPSTREAM.md"
+		return "UNEXPECTED PASS: " + su.KnownLabel + " failure now passes: " + strings.Join(xpass, " ") + su.XPassTail
 	case len(known) > 0:
-		return "KNOWN BUGS ONLY: " + strings.Join(known, " ") + " fail, known upstream bugs listed in docs/UPSTREAM.md; nothing else did"
+		return su.KnownVerdict + ": " + strings.Join(known, " ") + su.KnownTail
 	case len(s.Results) == 0:
 		return "CANNOT TELL: nothing ran"
 	default:
@@ -124,34 +133,18 @@ func (s Section) Verdict() string {
 }
 
 // Passed reports whether the verdict should let a gate through: YES, or
-// only the known upstream failures.
+// only the known failures.
 func (s Section) Passed() bool {
 	v := s.Verdict()
-	return strings.HasPrefix(v, "YES") || strings.HasPrefix(v, "KNOWN BUGS ONLY")
+	return strings.HasPrefix(v, "YES") || strings.HasPrefix(v, s.Suite().KnownVerdict)
 }
-
-func title(target string) string {
-	if target == TargetMac {
-		return "On the Mac"
-	}
-	return "On Windows"
-}
-
-func openMarker(target string) string  { return "<!-- glaze-status:" + target }
-func closeMarker(target string) string { return "<!-- /glaze-status:" + target + " -->" }
 
 // markdown renders one section, markers included.
 func (s Section) markdown() string {
+	su := s.Suite()
 	var b strings.Builder
-	fields := []string{
-		"commit=" + s.Tree.Commit,
-		fmt.Sprintf("examples-dirty=%t", s.Tree.ExamplesDirty),
-	}
-	for _, d := range s.Deps {
-		fields = append(fields, filepath.Base(d.Path)+"="+d.Key())
-	}
-	fmt.Fprintf(&b, "%s %s -->\n", openMarker(s.Target), strings.Join(fields, " "))
-	fmt.Fprintf(&b, "## %s — %s\n\n", title(s.Target), s.Verdict())
+	fmt.Fprintf(&b, "%s %s -->\n", su.openMarker(s.Target), strings.Join(su.Marker(s), " "))
+	fmt.Fprintf(&b, "## %s — %s\n\n", su.Title(s.Target), s.Verdict())
 
 	dirty := ""
 	if s.Tree.Dirty {
@@ -162,6 +155,9 @@ func (s Section) markdown() string {
 	fmt.Fprintf(&b, "- this repository: commit `%s`%s\n", short(s.Tree.Commit), dirty)
 	for _, d := range s.Deps {
 		fmt.Fprintf(&b, "- %s\n", d.String())
+	}
+	for _, f := range s.Facts {
+		fmt.Fprintf(&b, "- %s: %s\n", f.Key, f.Value)
 	}
 	if s.GoWork != "" {
 		fmt.Fprintf(&b, "- workspace: `%s` (go.work — `mise run upstream:unlink` removes it)\n", s.GoWork)
@@ -174,7 +170,7 @@ func (s Section) markdown() string {
 		fmt.Fprintf(&b, "- CI run: %s\n", s.RunURL)
 	}
 	if taken, tried := s.shotCounts(); tried > 0 {
-		fmt.Fprintf(&b, "- screenshots: %d of the %d tests that open a window took one — see [Screenshots](#screenshots)\n", taken, tried)
+		fmt.Fprintf(&b, su.ShotsBullet, taken, tried)
 	}
 	b.WriteString("\n")
 
@@ -182,24 +178,24 @@ func (s Section) markdown() string {
 	case s.BuildError != "":
 		fmt.Fprintf(&b, "The suite did not build, so nothing ran:\n\n```\n%s\n```\n", s.BuildError)
 	case s.NotRun != "":
-		fmt.Fprintf(&b, "The suite did not run, which says nothing about glaze:\n\n```\n%s\n```\n", s.NotRun)
+		fmt.Fprintf(&b, "The suite did not run, which says nothing about %s:\n\n```\n%s\n```\n", su.Subject, s.NotRun)
 	default:
 		b.WriteString("| test | result | first message |\n|---|---|---|\n")
 		for _, r := range s.Results {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(), cell(r.Detail))
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(su), cell(r.Detail))
 		}
 	}
-	b.WriteString(closeMarker(s.Target) + "\n")
+	b.WriteString(su.closeMarker(s.Target) + "\n")
 	return b.String()
 }
 
 // label is how the tables word a result.
-func (r Result) label() string {
+func (r Result) label(su *Suite) string {
 	switch {
 	case r.Inherited:
 		return "fail (a subtest failed)"
 	case r.failed() && r.Known != "":
-		return "**FAIL** — known upstream: " + r.Known
+		return "**FAIL** — " + su.KnownLabel + ": " + r.Known
 	case r.Outcome == Unfinished:
 		return "**UNFINISHED**"
 	case r.failed():
@@ -244,35 +240,24 @@ func short(commit string) string {
 	return commit
 }
 
-const header = `# Glaze status
-
-Does glaze work on the Mac and on Windows? The last recorded answer for each,
-written by ` + "`irgo-winvm glaze-check`" + ` (` + "`mise run glaze:mac`" + ` and
-` + "`mise run glaze:windows`" + `) and read back by ` + "`irgo-winvm glaze-status`" + `,
-which also says whether it still describes the tree. Generated: do not edit it by
-hand. Each run replaces only its own section. Every row is one test of
-` + "`examples/conformance`" + `, from its test2json events; what each checks is in its
-comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
-
-`
-
 // placeholder is a section nobody has run yet.
-func placeholder(target string) string {
-	return fmt.Sprintf("%s -->\n## %s — not recorded yet\n\nRun `irgo-winvm glaze-check%s`.\n%s\n",
-		openMarker(target), title(target), map[string]string{TargetMac: "", TargetWindows: " -windows"}[target], closeMarker(target))
+func (s *Suite) placeholder(target string) string {
+	return fmt.Sprintf("%s -->\n## %s — not recorded yet\n\n%s\n%s\n",
+		s.openMarker(target), s.Title(target), s.Placeholder(target), s.closeMarker(target))
 }
 
 // sections splits an existing file into its recorded sections, by target.
 // A file that is missing or has no markers yields none, and the missing
-// sections are then written as placeholders.
-func sections(body string) map[string]string {
+// fixed sections are then written as placeholders.
+func (s *Suite) sections(body string) map[string]string {
 	out := map[string]string{}
-	for _, t := range targets {
-		i := strings.Index(body, openMarker(t)+" ")
-		if i < 0 {
+	for _, m := range s.anyMarkerRE().FindAllStringSubmatchIndex(body, -1) {
+		t := body[m[2]:m[3]]
+		if _, dup := out[t]; dup || !s.accepts(t) {
 			continue
 		}
-		end := closeMarker(t)
+		i := m[0]
+		end := s.closeMarker(t)
 		j := strings.Index(body[i:], end)
 		if j < 0 {
 			continue
@@ -282,42 +267,50 @@ func sections(body string) map[string]string {
 	return out
 }
 
-// Record writes s into the status file under root, keeping the other target's
-// section as it was.
+// sections is the glaze file's sections.
+func sections(body string) map[string]string { return Glaze.sections(body) }
+
+// Record writes sec into its suite's status file under root, keeping the
+// other targets' sections as they were.
 //
 // Written whole to a temporary file and renamed, and the close checked: this
 // is the file both an owner and an agent will trust, and a half-written one
 // would be believed.
-func Record(root string, s Section) (string, error) {
-	return record(root, s.Target, s.markdown())
+func Record(root string, sec Section) (string, error) {
+	su := sec.Suite()
+	if !su.accepts(sec.Target) {
+		return "", fmt.Errorf("%q is not a target of the %s suite", sec.Target, su.Name)
+	}
+	return su.record(root, sec.Target, sec.markdown())
 }
 
 // record writes one target's section, already rendered, into the status file
-// under root, keeps the other's, and redraws the Screenshots table from both
-// targets' manifests. Import calls it with a section read from a CI run's
+// under root, keeps the others, and redraws the Screenshots table from every
+// target's manifest. Import calls it with a section read from a CI run's
 // file.
-func record(root, target, section string) (string, error) {
-	path := filepath.Join(root, StatusFile)
+func (s *Suite) record(root, target, section string) (string, error) {
+	path := filepath.Join(root, s.StatusFile)
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	have := sections(string(old))
+	have := s.sections(string(old))
 	have[target] = section
 
 	var b strings.Builder
-	b.WriteString(header)
-	for i, t := range targets {
+	b.WriteString(s.Header)
+	order := s.order(have)
+	for i, t := range order {
 		if i > 0 {
 			b.WriteString("\n")
 		}
 		sec, ok := have[t]
 		if !ok {
-			sec = placeholder(t)
+			sec = s.placeholder(t)
 		}
 		b.WriteString(sec)
 	}
-	shots, err := gallery(root)
+	shots, err := s.gallery(root, order)
 	if err != nil {
 		return "", err
 	}
@@ -325,7 +318,7 @@ func record(root, target, section string) (string, error) {
 		b.WriteString("\n" + shots)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".glaze-status-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+s.Name+"-status-*")
 	if err != nil {
 		return "", err
 	}
@@ -346,81 +339,42 @@ func record(root, target, section string) (string, error) {
 	return path, nil
 }
 
-// Read returns the status file under root.
-func Read(root string) (string, error) {
-	path := filepath.Join(root, StatusFile)
+// Read returns the glaze status file under root.
+func Read(root string) (string, error) { return Glaze.Read(root) }
+
+// Read returns the suite's status file under root.
+func (s *Suite) Read(root string) (string, error) {
+	path := filepath.Join(root, s.StatusFile)
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("no glaze check has been recorded: %s does not exist. Run irgo-winvm glaze-check", path)
+		return "", fmt.Errorf("no %s check has been recorded: %s does not exist. Run irgo-winvm %s", s.Name, path, s.Command)
 	}
 	return string(b), err
 }
 
-// markerLine is a section's opening marker, holding its key=value pairs.
-var markerLine = regexp.MustCompile(`<!-- glaze-status:([a-z]+) ([^>]*?) -->`)
+// Freshness says, for each recorded glaze section, whether it still
+// describes the tree: yes, no, or cannot tell.
+func Freshness(root, body string) []string { return Glaze.Freshness(root, body) }
 
-// Freshness says, for each recorded section, whether it still describes the
-// tree: yes, no, or cannot tell.
-//
-// "Still describes" means the two inputs that decide the result are unchanged —
-// examples/ (compared by git against the recorded commit, working tree
-// included) and the glaze and native the examples resolve to now. It does not
-// compare the whole commit, because committing the status file is itself a new
-// commit, and a check that called every verdict stale the moment it was
-// committed would be one nobody reads. It also does not see a change to the
-// VM, or to app-create itself — say so rather than claim more.
-func Freshness(root, body string) []string {
+// Freshness says, for each recorded section of the suite's file, whether it
+// still describes the tree, as the suite's Fresh decides.
+func (s *Suite) Freshness(root, body string) []string {
 	var lines []string
-	deps, _, depErr := ReadDeps(root)
-	now := map[string]string{}
-	for _, d := range deps {
-		now[filepath.Base(d.Path)] = d.Key()
-	}
-	for _, m := range markerLine.FindAllStringSubmatch(body, -1) {
+	var check func(map[string]string) string
+	for _, m := range s.markerRE().FindAllStringSubmatch(body, -1) {
 		target, rec := m[1], map[string]string{}
 		for _, f := range strings.Fields(m[2]) {
 			if k, v, ok := strings.Cut(f, "="); ok {
 				rec[k] = v
 			}
 		}
-		lines = append(lines, target+": "+fresh(root, rec, now, depErr))
+		if check == nil {
+			check = s.Fresh(root)
+		}
+		lines = append(lines, target+": "+check(rec))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, "nothing recorded yet: run irgo-winvm glaze-check")
+		lines = append(lines, "nothing recorded yet: run irgo-winvm "+s.Command)
 	}
 	return lines
-}
-
-func fresh(root string, rec, now map[string]string, depErr error) string {
-	commit := rec["commit"]
-	if commit == "" {
-		return "CANNOT TELL — the section names no commit"
-	}
-	if rec["examples-dirty"] == "true" {
-		return "CANNOT TELL — it was recorded with uncommitted changes in examples/, which git cannot compare against"
-	}
-	var why []string
-	c := exec.Command("git", "diff", "--quiet", commit, "--", "examples")
-	c.Dir = root
-	err := c.Run()
-	var exit *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.As(err, &exit) && exit.ExitCode() == 1:
-		why = append(why, "examples/ has changed since "+short(commit))
-	default:
-		return fmt.Sprintf("CANNOT TELL — git could not compare examples/ with %s: %v", short(commit), err)
-	}
-	if depErr != nil {
-		return fmt.Sprintf("CANNOT TELL — could not ask go what examples/ builds against now: %v", depErr)
-	}
-	for _, lib := range []string{"glaze", "native"} {
-		if rec[lib] != now[lib] {
-			why = append(why, fmt.Sprintf("%s was %s and is now %s", lib, rec[lib], now[lib]))
-		}
-	}
-	if len(why) > 0 {
-		return "STALE — " + strings.Join(why, "; ")
-	}
-	return "current — examples/, glaze and native are what they were when it ran (the VM and the tool itself are not compared)"
 }

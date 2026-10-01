@@ -18,8 +18,11 @@ import (
 
 // Options is one check.
 type Options struct {
+	// Suite is what is checked; nil is Glaze.
+	Suite *Suite
+
 	Root   string
-	Target string // TargetMac or TargetWindows
+	Target string // TargetMac or TargetWindows; for the VM suite, the VM
 
 	// Platform is what the record says it ran on — for Windows, which VM or
 	// which runner.
@@ -35,10 +38,29 @@ type Options struct {
 	// or exited non-zero. Nil means run it natively on this machine.
 	Run func(exe string, args []string) (string, error)
 
+	// Parts, when set, run the binary more than once, each part with its own
+	// extra arguments and runner, and Run is not used. The VM suite runs once
+	// as SYSTEM and once in the desktop session, because what it checks needs
+	// both. Each part's output is converted on its own and the results are
+	// listed in order; a part that ran no test at all is a failure named
+	// "(<part>)".
+	Parts []Part
+
 	// NotRun reports an error that means the binary never got to run — the
 	// guest agent gone, the lock held — rather than that it ran and failed.
 	// Such a run is recorded as CANNOT TELL, never as a failure.
 	NotRun func(error) bool
+
+	// Before runs after the build and before the suite, on this machine, and
+	// returns results of its own, listed first: checks only the host can
+	// make, such as whether the guest agent answers. An error means the suite
+	// cannot run, and is recorded as CANNOT TELL.
+	Before func() ([]Result, error)
+
+	// After runs once the suite has run, and returns results listed last.
+	// A result may carry a Shot, which Fetch reads like any other: the VM
+	// suite photographs the desktop here.
+	After func() []Result
 
 	// ResetDesktop, when set, is run before the suite and after it, so the
 	// suite starts on a clean desktop and the run leaves one. What it closed
@@ -59,8 +81,17 @@ type Options struct {
 	Say func(string, ...any)
 }
 
+// Part is one run of the binary in a check of several: a name for the
+// record, the arguments added for this run, and how it is run.
+type Part struct {
+	Name string
+	Args []string
+	Run  func(exe string, args []string) (string, error)
+}
+
 // ErrFailed is a check that ran and found glaze or native broken in a way
-// not already known upstream.
+// not already known upstream — or, for the VM suite, a VM missing a property
+// not already known.
 var ErrFailed = errors.New("glaze check failed")
 
 // SuiteTimeout bounds one run of the suite, and is passed to the binary as
@@ -86,7 +117,11 @@ var TestArgs = []string{"-test.v=test2json", "-test.timeout=" + SuiteTimeout.Str
 func Check(o Options) (Section, error) {
 	start := time.Now()
 	say := o.Say
-	sec := Section{Target: o.Target, When: start, Platform: o.Platform, RunURL: runURL()}
+	su := o.Suite.orDefault()
+	sec := Section{Target: o.Target, When: start, Platform: o.Platform, RunURL: runURL(), suite: su}
+	if !su.accepts(o.Target) {
+		return sec, fmt.Errorf("%q is not a target of the %s suite", o.Target, su.Name)
+	}
 
 	if o.ShotsDir == "" {
 		dir, err := os.MkdirTemp("", "glaze-shots-")
@@ -98,7 +133,7 @@ func Check(o Options) (Section, error) {
 		o.Fetch = func(rel string) ([]byte, error) { return os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel))) }
 	}
 
-	logPath, logFile, err := openLog(o.Target, start)
+	logPath, logFile, err := openLog(su.Name, o.Target, start)
 	if err != nil {
 		return sec, err
 	}
@@ -111,11 +146,13 @@ func Check(o Options) (Section, error) {
 		say("checkout: %s", o.Root)
 		say("target:   %s", o.Platform)
 		var err error
-		if sec.Tree, err = ReadTree(o.Root); err != nil {
+		if sec.Tree, err = readTree(o.Root, su.Source, su.StatusFile); err != nil {
 			return err
 		}
-		if sec.Deps, sec.GoWork, err = ReadDeps(o.Root); err != nil {
-			return err
+		if su.Deps != nil {
+			if sec.Deps, sec.GoWork, err = su.Deps(o.Root); err != nil {
+				return err
+			}
 		}
 		dirty := ""
 		if sec.Tree.Dirty {
@@ -136,17 +173,32 @@ func Check(o Options) (Section, error) {
 			// straight after linking a clone mid-edit.
 			sec.BuildError = bErr.Error()
 		} else {
-			args := append(append([]string{}, TestArgs...), ShotsFlag+o.ShotsDir)
-			say("running: %s %s", exe, strings.Join(args, " "))
-			var raw []byte
-			var runErr error
-			resetErr = resetAround(o.ResetDesktop, say, func() { raw, runErr = runSuite(o, exe, args) })
-			switch {
-			case runErr != nil && o.NotRun != nil && o.NotRun(runErr):
-				sec.NotRun, notRun = runErr.Error(), runErr
-			default:
-				if err := convert(o.Target, raw, jsonPath, &sec, runErr, say); err != nil {
-					return err
+			var before []Result
+			var bErr error
+			if o.Before != nil {
+				before, bErr = o.Before()
+			}
+			if bErr != nil {
+				sec.NotRun, notRun = bErr.Error(), bErr
+			} else {
+				sec.Results = append(sec.Results, before...)
+				var events []byte
+				var cErr error
+				resetErr = resetAround(o.ResetDesktop, say, func() {
+					events, notRun, cErr = runParts(o, su, exe, &sec, say)
+				})
+				if cErr != nil {
+					return cErr
+				}
+				if notRun != nil {
+					sec.NotRun, sec.Results = notRun.Error(), nil
+				} else {
+					if err := writeFile(jsonPath, events); err != nil {
+						return err
+					}
+					if o.After != nil {
+						sec.Results = append(sec.Results, o.After()...)
+					}
 				}
 			}
 		}
@@ -184,7 +236,7 @@ func Check(o Options) (Section, error) {
 		return sec, fmt.Errorf("%s: %w", sec.Verdict(), notRun)
 	case !sec.Passed():
 		return sec, fmt.Errorf("%w: %s — each test's first message is in %s, everything in %s",
-			ErrFailed, sec.Verdict(), StatusFile, sec.Log)
+			ErrFailed, sec.Verdict(), su.StatusFile, sec.Log)
 	case resetErr != nil:
 		// The verdict stands and is recorded; the desktop is a separate
 		// failure, returned so the run does not exit 0 over a mess.
@@ -217,20 +269,60 @@ func resetAround(reset func() error, say func(string, ...any), run func()) error
 	return before
 }
 
-// convert turns the raw output into test2json events, keeps them beside the
-// log, and fills in the section's results.
-func convert(target string, raw []byte, jsonPath string, sec *Section, runErr error, say func(string, ...any)) error {
-	events, err := toJSON(raw)
+// runParts runs the binary once, or once per part, and adds each run's
+// results to sec. It returns the test2json events of every run, one after
+// the other; notRun is a run's error that means the suite never got to run
+// (o.NotRun), which ends the check there; err is anything that stops the
+// check being recorded at all.
+func runParts(o Options, su *Suite, exe string, sec *Section, say func(string, ...any)) (events []byte, notRun, err error) {
+	parts := o.Parts
+	if len(parts) == 0 {
+		parts = []Part{{Run: o.Run}}
+	}
+	for _, p := range parts {
+		args := append([]string{}, TestArgs...)
+		if su.ShotsFlag != "" {
+			args = append(args, su.ShotsFlag+o.ShotsDir)
+		}
+		args = append(args, p.Args...)
+		if p.Name != "" {
+			say("running, %s: %s %s", p.Name, exe, strings.Join(args, " "))
+		} else {
+			say("running: %s %s", exe, strings.Join(args, " "))
+		}
+		raw, runErr := runSuite(p.Run, exe, args)
+		if runErr != nil && o.NotRun != nil && o.NotRun(runErr) {
+			return events, runErr, nil
+		}
+		ev, rs, facts, cErr := su.convert(o.Target, p.Name, raw, runErr)
+		if cErr != nil {
+			return events, nil, cErr
+		}
+		events = append(events, ev...)
+		sec.Results = append(sec.Results, rs...)
+		for _, f := range facts {
+			sec.Facts = setFact(sec.Facts, f.Key, f.Value)
+		}
+		for _, r := range rs {
+			if !r.Inherited && r.failed() {
+				say("%s %s: %s", strings.ToUpper(r.Outcome), r.Name, r.Detail)
+			}
+		}
+	}
+	return events, nil, nil
+}
+
+// convert turns one run's raw output into test2json events and its results.
+func (s *Suite) convert(target, part string, raw []byte, runErr error) ([]byte, []Result, []Fact, error) {
+	events, err := s.toJSON(raw)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	if err := writeFile(jsonPath, events); err != nil {
-		return err
+	rs, facts, err := s.parse(target, events)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if sec.Results, err = parseEvents(target, events); err != nil {
-		return err
-	}
-	if len(sec.Results) == 0 {
+	if len(rs) == 0 {
 		// The binary printed nothing test2json could attribute to a test: it
 		// never got as far as running one. The error and its last words are
 		// the answer.
@@ -238,22 +330,21 @@ func convert(target string, raw []byte, jsonPath string, sec *Section, runErr er
 		if runErr != nil {
 			detail = strings.TrimSpace(runErr.Error() + " / " + detail)
 		}
-		sec.Results = []Result{{Name: "(package)", Outcome: Fail, Detail: detail}}
-	}
-	for _, r := range sec.Results {
-		if !r.Inherited && r.failed() {
-			say("%s %s: %s", strings.ToUpper(r.Outcome), r.Name, r.Detail)
+		name := "(package)"
+		if part != "" {
+			name = "(" + part + ")"
 		}
+		rs = []Result{{Name: name, Outcome: Fail, Detail: detail}}
 	}
-	return nil
+	return events, rs, facts, nil
 }
 
 // openLog creates the check's own log, beside the tool's log file.
-func openLog(target string, t time.Time) (string, *os.File, error) {
+func openLog(suite, target string, t time.Time) (string, *os.File, error) {
 	if err := os.MkdirAll(utmvm.LogDir(), 0o755); err != nil {
 		return "", nil, err
 	}
-	path := filepath.Join(utmvm.LogDir(), fmt.Sprintf("glaze-%s-%s.log", target, t.Format("20060102-150405")))
+	path := filepath.Join(utmvm.LogDir(), fmt.Sprintf("%s-%s-%s.log", suite, target, t.Format("20060102-150405")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		return "", nil, err
@@ -274,7 +365,8 @@ func writeFile(path string, b []byte) error {
 }
 
 // build compiles the suite into one test binary, .bin/mac/conformance.test or
-// .bin/win/conformance.test.exe, and returns its path.
+// .bin/win/conformance.test.exe for glaze, and returns its path. The
+// operating system is BuildEnv's GOOS, else this machine's.
 //
 // For the VM: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 (BuildEnv), stripped
 // (-s -w). utmctl file push moves ~0.4 MB/s, so size is time, and Push zips
@@ -282,9 +374,16 @@ func writeFile(path string, b []byte) error {
 // suite ever needs a C toolchain to cross-compile, something has taken a cgo
 // dependency.
 func build(o Options, say func(string, ...any)) (string, error) {
-	dir, exe := filepath.Join(o.Root, ".bin", "mac"), "conformance.test"
-	if o.Target == TargetWindows {
-		dir, exe = filepath.Join(o.Root, ".bin", "win"), "conformance.test.exe"
+	su := o.Suite.orDefault()
+	goos := runtime.GOOS
+	for _, e := range o.BuildEnv {
+		if v, ok := strings.CutPrefix(e, "GOOS="); ok {
+			goos = v
+		}
+	}
+	dir, exe := filepath.Join(o.Root, ".bin", "mac"), su.exeName(goos)
+	if goos == "windows" {
+		dir = filepath.Join(o.Root, ".bin", "win")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -295,7 +394,7 @@ func build(o Options, say func(string, ...any)) (string, error) {
 	if err := os.Remove(out); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	args := []string{"-C", filepath.Join(o.Root, "examples"), "test", "-c", "-trimpath", "-ldflags=-s -w", "-o", out, SuiteDir}
+	args := []string{"-C", filepath.Join(o.Root, "examples"), "test", "-c", "-trimpath", "-ldflags=-s -w", "-o", out, su.Dir}
 	say("building: %sgo %s", envPrefix(o.BuildEnv), strings.Join(args, " "))
 	c := exec.Command("go", args...)
 	c.Env = append(os.Environ(), o.BuildEnv...)
@@ -324,11 +423,11 @@ func envPrefix(env []string) string {
 	return strings.Join(env, " ") + " "
 }
 
-// runSuite runs the binary through o.Run, or natively, and copies what it printed
-// to the log.
-func runSuite(o Options, exe string, args []string) ([]byte, error) {
-	if o.Run != nil {
-		out, err := o.Run(exe, args)
+// runSuite runs the binary through run, or natively when run is nil, and
+// copies what it printed to the log.
+func runSuite(run func(string, []string) (string, error), exe string, args []string) ([]byte, error) {
+	if run != nil {
+		out, err := run(exe, args)
 		_, _ = io.WriteString(unframed{utmvm.Out}, out)
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			_, _ = io.WriteString(utmvm.Out, "\n")

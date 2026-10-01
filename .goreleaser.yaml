@@ -52,6 +52,23 @@ builds:
     # commit are identical on disk as well as in content.
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+  # docsite: the docs site generator, its own module (docsite/), for any
+  # project with a docs/ folder. Pure Go, so every OS.
+  - id: docsite
+    dir: docsite
+    main: ./cmd/docsite
+    binary: docsite
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [arm64, amd64]
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
 archives:
   # The binary itself, not a tarball of it. A user who downloads one thing
   # should be able to run that thing: `tar xzf` before you can try a CLI is a
@@ -62,8 +79,14 @@ archives:
   #
   # Named as every release before GoReleaser named them -- irgo-winvm-darwin-arm64
   # -- so the README's download and releases/latest links keep working.
-  - formats: [binary]
+  - id: irgo-winvm
+    ids: [irgo-winvm]
+    formats: [binary]
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+  - id: docsite
+    ids: [docsite]
+    formats: [binary]
+    name_template: "docsite-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: SHA256SUMS
@@ -74,6 +97,7 @@ checksum:
 # with the checksum GoReleaser computed.
 homebrew_casks:
   - name: irgo-winvm
+    ids: [irgo-winvm]
     # The cask lives in this repository (Casks/), pushed with the release
     # workflow's own GITHUB_TOKEN: no second repository and no extra token.
     # Users tap it once by URL (the repository is not named homebrew-*).
@@ -164,6 +188,10 @@ release:
     below: the same binary as a client. `irgo-winvm remote-submit` sends a Windows build to a Mac
     running `irgo-winvm serve` and brings back its output, test results and screenshots. A GitHub
     workflow can do the same with the action in `.github/actions/run`.
+
+    **New: `docsite`**, the generator behind this project's docs site, for any project with a
+    `docs/` folder: download `docsite-<os>-<arch>` below and run `docsite build` (no config needed;
+    `docsite check` fails on broken links and anchors). See docsite/README.md.
 
     Or download `irgo-winvm-darwin-arm64` (Apple Silicon) below, then:
 

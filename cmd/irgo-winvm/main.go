@@ -10,6 +10,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
+	"runtime/debug"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
@@ -18,6 +20,25 @@ import (
 // version is set at build time by .goreleaser.yaml: the tag for a release,
 // "dev" otherwise.
 var version = "dev"
+
+func init() { version = moduleVersion(version, debug.ReadBuildInfo) }
+
+// moduleVersion is the tag `go install ...@v0.5.0` records in the binary, for
+// a build GoReleaser did not stamp. A local build's VCS pseudo-version is not
+// a release and stays "dev", as CONTRIBUTING.md says it does.
+func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string {
+	if stamped != "dev" {
+		return stamped
+	}
+	bi, ok := read()
+	if !ok || !releaseTag.MatchString(bi.Main.Version) {
+		return stamped
+	}
+	return bi.Main.Version
+}
+
+// releaseTag is a plain vX.Y.Z: not a pseudo-version, not +dirty.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

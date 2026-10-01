@@ -174,7 +174,7 @@ func New(d Deps) *mcp.Server {
 		Description: "Build a Go program on a Mac and run it on real Windows. " +
 			"Answers whether a desktop build actually works on Windows, which cannot be " +
 			"determined by reading the code from macOS.",
-	}, nil)
+	}, &mcp.ServerOptions{Instructions: Instructions})
 
 	for _, c := range command.All {
 		if !c.OverMCP {

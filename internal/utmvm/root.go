@@ -106,3 +106,6 @@ const SiteURL = "https://joeblew999.github.io/irgo-windows-vm/"
 
 // RepoURL is the source repository, for what needs a checkout.
 const RepoURL = "https://github.com/joeblew999/irgo-windows-vm"
+
+// ThreatModelURL is what to read before serving MCP over HTTP.
+const ThreatModelURL = SiteURL + "threat-model.html"

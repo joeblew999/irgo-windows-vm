@@ -160,6 +160,7 @@ func UsageText() string {
 		}
 		fmt.Fprintf(&b, "  %-*s %s\n", name, c.Name, c.Summary)
 	}
-	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
+	b.WriteString("\nNew here? Run `irgo-winvm doctor`: it says what to do next, in order.\n" +
+		"`irgo-winvm help` explains the steps, and every command takes -h for its flags.\n")
 	return b.String()
 }

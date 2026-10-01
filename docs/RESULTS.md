@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; APFS private size is what deleting it frees; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
 | 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
 | 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
 | 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
@@ -31,6 +32,54 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## VM capacity: what a clone really costs — measured 1 Oct 2026
+
+**Result:** a clone of the golden image writes very little of its own: 0.28 GiB
+after a boot, a full `glaze-check -windows`, twenty `app-create`s and 90 idle
+minutes, flat for the last hour. APFS's private size, read with `getattrlist`
+on the disk image in UTM's container (where `ls` is refused and this call is
+not), is what deleting a VM gives back. M2 Pro, 16 GiB, 460 GiB volume, UTM
+4.7.5, `irgo-win11` running throughout and never touched; one disposable clone,
+`cap1`, made by `vm-create -vm cap1` and deleted after. Sampled every 30 s
+(`ATTR_CMNEXT_PRIVATESIZE`, `st_blocks`, `df`, `vm.swapusage`).
+
+| when | cap1's own bytes | `st_blocks` | notes |
+|---|---|---|---|
+| cloned and booted, 24.5 s | 0.03 GiB | 10.06 GiB | `df` used +36 MB across the create |
+| after `glaze-check -windows` (45 s, KNOWN BUGS ONLY) | 0.10 GiB | 10.08 GiB | |
+| after 20 `app-create`s of a 19 MB binary (28 s each, 10 min) | 0.26 GiB | 10.12 GiB | about 8 MB per run, the pushed binary and Windows' own writes |
+| 60 and 90 minutes later, idle | 0.27, 0.28 GiB | 10.13 GiB | flat |
+| `vm-delete -vm cap1 -force` | — | — | `df` free went up **0.29 GiB**: the private size, not `st_blocks` |
+
+- **`st_blocks` and `du` overcount clones.** A clone reads 10 GiB from the
+  moment it exists, because it counts the blocks it shares with the golden
+  image. `golden-export/`, a copy of the golden image made by hand, read
+  10.1 GB to `du` and has a private size of **0**: the golden image's disk and
+  it share every block. Summing `du` over the runtime folder and the VMs counts
+  those 10 GB twice.
+- **The clone id does not name a family.** `ATTR_CMNEXT_CLONEID` was equal for
+  the golden image and `golden-export` and different for `cap1`, cloned by UTM
+  from the same image. So `capacity` counts shared blocks once, as the most any
+  one file shares (there is one golden image), rather than per family.
+- **Memory, not disk, is what limits this Mac.** With `cap1` and `irgo-win11`
+  both running (16 GiB configured on 16 GiB), swap went from 7.5 GB to between
+  9.6 and 10.6 GB and stayed there; every run still passed.
+- **What it changed:** `cloneReserveBytes`, the space a clone is promised, is
+  4 GiB, fourteen times the measured growth, in place of the 10 GiB guess
+  (`cloneHeadroomBytes`); and space promised to existing VMs now counts against
+  a new one. A Windows cumulative update on a clone was not seen in this session
+  and is the reason for the margin.
+- **The machine on the day**, from `irgo-winvm capacity`: 38.2 GiB free of
+  460 GiB; `irgo-win11` 20.6 GiB of its own (it was installed, not cloned);
+  the golden image 10.1 GiB, shared; media 9.1 GiB; `shots/` 0.3 GiB; the VMs
+  and the tool's data 40.2 GiB of the 422 GiB in use on the volume. Room for 7
+  more clones by disk, none by memory while `irgo-win11` runs.
+- **prune**, first run: 32 runtime screenshots from 13 to 15 Aug, past 14 days,
+  **103 MB** by APFS's count; `du` of `shots/` fell from 270,236 KB to
+  164,868 KB, 103 MB.
+- **vm-delete** had reported "— reclaimed" for every VM: it walked the bundle,
+  which macOS refuses in UTM's container. It now reports the private size.
 
 ## Several callers on one Mac — measured 1 Oct 2026
 
@@ -56,7 +105,8 @@ running throughout and never touched; one disposable clone, `z1`.
 
 Not measured: how much a clone grows over a working day. `df` fell by about
 1.1 GiB across z1's clone, boot, one run and a `vm-repair`, with the rest of the
-Mac writing too, so `cloneHeadroomBytes` stays an estimate.
+Mac writing too, so `cloneHeadroomBytes` stayed an estimate (measured since:
+[VM capacity](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)).
 
 ## The drive tests on GitHub's Windows ARM64 runner — measured 1 Oct 2026
 

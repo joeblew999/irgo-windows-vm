@@ -219,6 +219,67 @@ when its holder dies (flock on macOS; nothing to lock elsewhere, hence
 `lock_darwin.go` and `lock_other.go`), and its file is never deleted: unlinking
 a flock file someone holds lets a third process lock a new file of that name.
 
+## The capacity model
+
+What a VM costs the Mac, and how many are allowed, is one model in
+`internal/utmvm/capacity_model.go`: the per-VM memory, the memory and disk kept
+for macOS, the reserve each clone may grow into, the install reserve, and the
+per-owner quota. Three readers, one answer: `vm-create`'s guard
+(`vm_capacity.go`, three-way, cannot tell refuses with exit 7), `capacity`
+(`capacity.go`, which runs the same `decideCapacity` for a clone with no owner),
+and `doctor`'s summary row. What a user sees is in
+[Is there room?](USING.md#is-there-room).
+
+**Disk is measured the way APFS counts it** (`apfsUsage`, `sysfile_darwin.go`):
+`getattrlist` with `ATTR_CMNEXT_PRIVATESIZE`, the bytes a file shares with no
+other, beside `st_blocks`. It works on a known path in UTM's container, which
+refuses `ls`; so each VM's `Data/disk.img` is measured where UTM keeps it, with
+no Full Disk Access. A clone's `st_blocks` includes the golden image's blocks,
+so `du` counts the image once per clone; the private size is what deleting it
+frees (a clone at 0.28 GiB private freed 0.29 GiB of `df`). APFS does not say
+*which* file a clone shares with (the clone id differs between the golden image
+and UTM's clone of it), so shared blocks are counted once as the most any file
+shares, which is right while there is one golden image. Off macOS `apfsUsage`
+errors, and a VM that cannot be measured makes the guard's answer cannot tell.
+
+**What a VM holds** is its private bytes or its reserve (`cloneReserveBytes`,
+4 GiB), whichever is more; the golden image holds only its private bytes, since
+it stays stopped. **Promised** is held minus private: free space that must stay
+free for VMs already here. The guard's disk test is
+
+    free >= new VM's reserve + Σ promised (every listed VM, and 4 GiB for each VM
+            another vm-create is making that UTM does not list yet) + 10 GiB
+
+and the quota test, for a new VM, is the owner's VMs + 1 against
+`IRGO_WINVM_QUOTA_VMS` and its held bytes + the new reserve against
+`IRGO_WINVM_QUOTA_GIB`, both from the VM records. The memory test is
+[the one users see](USING.md#is-there-room). `capacity`'s "more clones fit" is
+`(free - promised - 10 GiB) / 4 GiB`, and "more can run" is
+`(memory - configured for running VMs - 4 GiB) / 8 GiB`.
+
+**Retention** (`prune.go`) is a pure selection, `selectByBounds` (older than
+the age, or past the size counting from the newest, never the newest of a
+group), over what `PrunePlan` lists; `Prune` removes each item under its lock
+taken without waiting and checks it is gone. `vm-create` calls it before the
+guard, so the tool's own files are never what refuses a VM.
+
+**Hooks for the rest of the system:**
+
+- *Reaping when space is short* is `vm-reap`'s `Reap`, unchanged, called by
+  `vm-create` only when `IRGO_WINVM_AUTO_REAP` is set, then the guard asked
+  again (`beginCreateReaping`, `cmd/irgo-winvm/capacity.go`).
+- *The ledger*: `capacity`, and the end of `vm-create`, `vm-delete`, `vm-reap`
+  and `prune -force`, emit a `capacity` event whose `detail` is a compact JSON
+  snapshot (free and total disk, memory and running memory, VMs, running, stale,
+  promised, the tool's bytes, the clone verdict, more clones, more running),
+  only when the ledger is on, because gathering it asks UTM. The Worker's view
+  keeps the newest per machine ([the Worker](WORKER.md#capacity)).
+- *Remote jobs through the Worker* (planned, `.plans/`): admission on a Mac is
+  `utmvm.BeginCreate` for a job that makes a VM, which is this guard with the
+  job's owner, and for any other job the three-way answer `utmvm.Capacity()`
+  reports in `Room.Clone`. A job is queued only on yes; no and cannot tell
+  refuse with the reason. Nothing else is needed from this model.
+
 ## The ledger client
 
 Several repositories' agents share one Mac's VMs, and there is more than one

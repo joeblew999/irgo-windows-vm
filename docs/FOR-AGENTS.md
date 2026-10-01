@@ -46,7 +46,9 @@ contract for an agent from another repository:
    rely on the MCP client name.
 2. `irgo-winvm vm-create -vm <name>`: with a
    [golden image](USING.md#the-golden-image), a clone in about 23 seconds.
-   Exit 7 means no room: wait, or ask whoever `status` names.
+   Exit 7 means no room: wait, or ask whoever `status` names. `capacity` says
+   what holds the disk and memory, and how many more VMs fit; each owner may
+   have 2 VMs holding 16 GiB unless the machine says otherwise.
 3. Pass `-vm <name>` to `app-create`, `vm-screen` and the rest. Leaving it out
    is refused with exit 2: the default VM is the machine owner's.
 4. `irgo-winvm vm-delete -vm <name> -force` when done. If you go away, a clone

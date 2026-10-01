@@ -1,11 +1,14 @@
-# Upstream reports, drafted and waiting for the owner
+# Upstream reports: drafted, then sent
 
-Status: drafted, **nothing filed** · 2026-09-30
+Status: **SENT** 1 Oct 2026 (owner's go-ahead: "Send what you want. I trust you.") · drafted 2026-09-30
 
-Every finding in [docs/UPSTREAM.md](../docs/UPSTREAM.md) that upstream does not
-know about, written out ready to send. Nothing here goes out without the owner's
-go-ahead (standing rule). §1b is agent B's and is not drafted here; glaze#34 is
-already filed.
+Every finding in [docs/UPSTREAM.md](../docs/UPSTREAM.md) that upstream did not
+know about, written out ready to send. Sent on 1 Oct 2026; see "What was sent"
+below. The bodies further down are the 30 Sep drafts. What went out was
+tightened and updated to current trunk, and in two cases differs in substance
+(§4 not sent, §6 rewritten around the measured cause). §1b has its own plan
+(`2026-09-30_1745_glaze-1b-upstream.md`) and went out as glaze#39. glaze#34 was
+filed on 30 Sep, and its PR is glaze#40.
 
 ## What was checked first (30 Sep 2026)
 
@@ -22,6 +25,61 @@ already filed.
   locate causes where it can be done without a debugger. Nothing below claims a
   cause that was not read in the source or measured.
 
+## What was sent (1 Oct 2026)
+
+**Checked again first.** On crgimenes/glaze, crgimenes/native and utmapp/UTM
+(issues and PRs, all states, several searches per finding), nothing duplicated
+any report. glaze trunk had moved to `be1017e` (after v0.0.65). None of its
+seven commits touches the `ErrUnsupported` sentinels, the `isRunning` bootstrap
+check or `webview2_scheme_windows.go`. native trunk was still v0.1.15. UTM's
+latest is 5.0.6 beta; utmctl on main still has both bugs.
+
+**glaze/native PRs.** Both CONTRIBUTING files welcome small fixes as direct PRs
+and ask for an issue first only for features, APIs and backends. So §1–§3 went
+as issue + PR, and §1b (a large COM change with a behaviour choice) went as an
+issue only. Before pushing, the two glaze branches were rebased onto `be1017e`
+and re-checked: `go fix`, `gofmt`, `go vet`, `go test -short`, golangci-lint for
+darwin/linux/windows, six cross-builds, and the examples module. The nsapp test
+was re-run with trunk's `webview_darwin.go` (hangs) and with the fix (passes).
+native: the same checks plus `make cross`. The fork `joeblew999/native` already
+existed (made for the input/screen work), so a `fork` remote was added to the
+clone; no new fork was created.
+
+**glaze#34.** No comment or objection by 1 Oct, so the branch was opened as PR
+[glaze#40](https://github.com/crgimenes/glaze/pull/40). Merged onto `be1017e` it is clean: lint for three OSes,
+Windows builds, vet and test compile.
+
+**§4 not sent.** native#8 (closed, shipped in v0.1.11) gave `tray.Config.OnReady`
+for exactly "open a window once the tray is up". glaze#31 (v0.0.48) made
+`glaze.New` work from a tray callback. That is the maintainer's supported tray +
+window pattern, documented in the tray README and run in CI. The question
+as drafted asked about the opposite order, which is a choice made in
+`examples/glaze-all`. Asking would cost the maintainer time for an answer he
+has already given.
+
+**§6 re-run, then rewritten.** I ran the repro against irgo-win11 (read-only;
+the VM was not stopped). `utmctl exec irgo-win11 --cmd cmd.exe /c echo hello`
+printed nothing and exited 0, and `... /c exit 3` exited 0. Then I isolated it:
+
+- AppleScript `execute … with output capturing`, `get result`, `delay 3`,
+  `get result`: the first poll gave `exited:false`, the second `exited:true,
+  exit code:3, output text:"hello \n", output data:"aGVsbG8gDQo="`. The guest
+  agent and UTM's scripting layer are fine.
+- A Swift `SBApplication` probe made the same `executeAt:…outputCapturing:` and
+  `getResult` calls utmctl makes. The dictionary keys were `exited, exitCode,
+  signalCode, outputText, outputData, errorText, errorData`, and
+  `result["hasExited"]` was `nil`.
+- utmctl (`UTMCtl.swift:469` in v4.7.5, `:584` on main) loops
+  `while result["hasExited"] as? Bool == false`. `nil == false` is false, so
+  the loop stops after the first poll. A utmctl bug, so it was filed as a bug
+  with the one-word fix. The "one-argument command line" quirk was dropped: it
+  is the agent correctly reporting that no executable has that name.
+
+**Wording changes from the drafts.** Versions now say "v0.0.61 through trunk
+be1017e". The UTM reports cross-link #7933 for the exit status. §7 names the
+VM's `-gl` display and NVMe disk instead of attaching config.plist. §9 cites
+the `try? VMData` lines.
+
 ## How to send one
 
 The bodies are between markers in this file. From the repo root:
@@ -35,17 +93,17 @@ U="$HOME/workspace/go/src/github.com/crgimenes"   # $UPSTREAM_DIR
 Each item gives the exact commands. An issue is filed first and its URL is
 substituted into the PR body (`ISSUE_URL`).
 
-| # | where | what | branch ready | filed |
+| # | where | what | branch | filed |
 |---|---|---|---|---|
-| 1 | glaze | `New` hangs after a run loop has *stopped* (the case #31's fix does not cover) | `fix/nsapp-first` 8623e26 | no |
-| 2 | glaze | `ErrIconUnsupported`, `menu.ErrUnsupported` do not wrap `errors.ErrUnsupported` | `fix/errunsupported-wrap` 50cc331 | no |
-| 3 | native | ten `ErrUnsupported` sentinels do not wrap `errors.ErrUnsupported` | `fix/errunsupported-wrap` 854cdb9 | no |
-| 4 | native | no supported way to have a tray *and* a window | — (question, no patch) | no |
-| 5 | UTM | `utmctl` reports failure and exits 0 | — (fix sketched, not built) | no |
-| 6 | UTM | `utmctl exec` returns no output from a Windows ARM64 guest | — | no |
-| 7 | UTM | `suspend --save-state` reports success and power-cuts the guest | — | no |
-| 8 | UTM | `ip-address` blocks indefinitely with no guest agent | — | no |
-| 9 | UTM | a rejected `config.plist` names no field | — | no |
+| 1 | glaze | `New` hangs after a run loop has *stopped* (the case #31's fix does not cover) | `fix/nsapp-first` a13b3c8 (rebased on be1017e) | [glaze#35](https://github.com/crgimenes/glaze/issues/35) + PR [#36](https://github.com/crgimenes/glaze/pull/36) |
+| 2 | glaze | `ErrIconUnsupported`, `menu.ErrUnsupported` do not wrap `errors.ErrUnsupported` | `fix/errunsupported-wrap` 02dfa99 (rebased on be1017e) | [glaze#37](https://github.com/crgimenes/glaze/issues/37) + PR [#38](https://github.com/crgimenes/glaze/pull/38) |
+| 3 | native | ten `ErrUnsupported` sentinels do not wrap `errors.ErrUnsupported` | `fix/errunsupported-wrap` 854cdb9 | [native#9](https://github.com/crgimenes/native/issues/9) + PR [#10](https://github.com/crgimenes/native/pull/10) |
+| 4 | native | no supported way to have a tray *and* a window | — | **not sent**: answered by native#8 / glaze#31 |
+| 5 | UTM | `utmctl` reports failure and exits 0 | — | [UTM#7933](https://github.com/utmapp/UTM/issues/7933) |
+| 6 | UTM | `utmctl exec` returns no output | — | [UTM#7932](https://github.com/utmapp/UTM/issues/7932), cause measured |
+| 7 | UTM | `suspend --save-state` reports success and power-cuts the guest | — | [UTM#7934](https://github.com/utmapp/UTM/issues/7934) |
+| 8 | UTM | `ip-address` blocks indefinitely with no guest agent | — | [UTM#7935](https://github.com/utmapp/UTM/issues/7935) |
+| 9 | UTM | a rejected `config.plist` names no field | — | [UTM#7936](https://github.com/utmapp/UTM/issues/7936) |
 
 The glaze and native branches live in the clones at `$U/{glaze,native}` (made
 in worktrees under `/tmp/claude-501/upstream-wt/`, so the refs are in the
@@ -475,7 +533,9 @@ log) would turn each of these from an import-bisect cycle into a one-line fix.
 
 ## Verify
 
-After sending: set each row's status in docs/UPSTREAM.md to `FILED` with the
-link, move this plan to `.plans/done/`, and remove the old
-`patch/*` branches in the clones once the PRs exist (they are superseded — see
-docs/UPSTREAM.md).
+Done 1 Oct 2026: docs/UPSTREAM.md rows set to `FILED` with links, and the
+`patch/*` branches deleted from both clones. Not done: moving this plan to
+`.plans/done/`, because `.plans/README.md` had another session's uncommitted
+edits at the time. Move it, with its index row, when that file is free.
+Next: watch the issues and PRs, and when a release contains a fix, bump
+`examples/go.mod` and act on the "Removed when" notes in docs/UPSTREAM.md.

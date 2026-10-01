@@ -1,6 +1,6 @@
-# glaze §1b: register custom schemes on Windows (upstream issue + fix, ready to send)
+# glaze §1b: register custom schemes on Windows (upstream issue + fix)
 
-Status: PATCHED LOCALLY, not verified on Windows, not filed · 2026-09-30 · item B of
+Status: **VERIFIED ON WINDOWS and FILED** as [glaze#39](https://github.com/crgimenes/glaze/issues/39) on 1 Oct 2026, patch offered and no PR · patched 2026-09-30 · item B of
 [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md)
 
 The bug is [docs/UPSTREAM.md §1b](../docs/UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows).
@@ -69,7 +69,52 @@ survives if `/private/tmp` is cleared (then `git worktree prune`).
 | `GOOS={darwin,linux,windows} golangci-lint run ./...` (v2.14.0; their CI pins 2.13.1) | 0 issues each |
 | `examples/` module: `go build`, `GOOS=windows go build`, `go vet` | ok |
 | gosec (`golangci-lint --no-config -E gosec --new-from-rev origin/trunk`, windows) | new non-test code clean (audited `#nosec` with reasons); 3 G103 in the new test's `unsafe` COM calls, like the existing darwin tests; their CI does not run gosec |
-| **Runs on Windows** | **NOT RUN.** The VM belongs to item A. Nothing above executes the COM path. |
+| **Runs on Windows** | **PASS, 1 Oct 2026**: see "Windows result" below. |
+
+## Windows result (1 Oct 2026)
+
+Run as written in (a), with two deviations:
+
+- After `mise run upstream:link`, the native replace was dropped from `go.work`
+  (`go work edit -dropreplace github.com/crgimenes/native`). The native clone is
+  at trunk v0.1.15, which lacks the `input`/`screen` packages that
+  `examples/conformance/drive_test.go` imports, so the linked build could not
+  compile. native stayed at the `examples/go.mod` pin (fork
+  `v0.1.16-0.20261001015633-2fbbf2d09e65`), so glaze was the only variable.
+- `upstream:link`'s `go work use -r .` also picked up
+  `.claude/worktrees/agent-a414363253bdf9d18/**` and
+  `.plans/2026-10-01_1520_device-schema`, giving "module appears multiple
+  times". Those `use` lines were dropped by hand for the run. That is a bug in
+  `mise-tasks/upstream/link`, which should skip `.claude/` and `.plans/`. Not
+  fixed here.
+
+`mise run glaze:windows` on irgo-win11 (Windows 11 ARM64): **40 PASS, 0 FAIL**,
+`TestAppScheme/absolute_subresources` **PASS** (`relative_subresources`,
+`js_calls_go` and `origin_capabilities` also PASS). The tool ended with
+`UNEXPECTED PASS: known upstream failure now passes:
+TestAppScheme/absolute_subresources` and exit 1. That is the designed signal,
+not a failure. Log:
+`~/Library/Application Support/irgo-winvm/logs/glaze-windows-20261001-152024.log`.
+The origin value is not asserted by the suite, so the issue does not claim it.
+`mise run upstream:test:windows` (glaze's own suite on the VM) was **not** run.
+
+Afterwards: `upstream:unlink`; the clone was switched back to
+`fix/webview2-stale-registration`; the GLAZE-STATUS.md and screenshot changes
+from the linked run were reverted, not committed. The worktree at
+`/private/tmp/claude-501/upstream-wt/glaze-windows-custom-scheme` was removed
+(the branch stays in the clone).
+
+## Sent (1 Oct 2026)
+
+- Branch `fix/windows-custom-scheme` (`75f3ea1`) pushed to `joeblew999/glaze`.
+  It merges cleanly into trunk `be1017e`; the Windows backend has not changed
+  since v0.0.61.
+- Issue [glaze#39](https://github.com/crgimenes/glaze/issues/39), using the
+  text below, with: the version range "v0.0.61 through trunk be1017e"; the
+  Windows result; the user-data-folder split stated as a choice for the
+  maintainer; and an offer to open the PR. **No PR opened**, per CONTRIBUTING
+  ("anything larger: open an issue first"). The PR text below waits for his
+  answer. Fill in `Run on Windows 11 ARM64` from the result above.
 
 ## (a) Verify on Windows: the VM owner runs this
 

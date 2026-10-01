@@ -234,7 +234,9 @@ func shotCell(m Manifest, test string) string {
 	if len(m.Tests) == 0 {
 		return "—"
 	}
-	return "no picture: the test ended before it took one"
+	// The manifest lists only tests that tried to take a picture, so absence
+	// cannot tell a test that stopped first from one that was not in the run.
+	return "no picture in this run: the test skipped or failed first, or was not in it"
 }
 
 func titleShort(target string) string {

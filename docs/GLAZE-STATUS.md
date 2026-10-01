@@ -8,20 +8,32 @@ hand. Each run replaces only its own section. Every row is one test of
 `examples/conformance`, from its test2json events; what each checks is in its
 comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
 
-<!-- glaze-status:mac commit=22166ad28ddd6e17676efd93eb0e0d77e5a27013 examples-dirty=false glaze=v0.0.61 native=v0.1.15 -->
-## On the Mac — YES: 28 passed, 1 skipped
+<!-- glaze-status:mac commit=d9e99a8bb5feba64cc04d051b986563301971db0 examples-dirty=false glaze=v0.0.61 native=github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e -->
+## On the Mac — YES: 40 passed, 1 skipped
 
-- when: 2026-09-30 15:33 +0700, took 11s
+- when: 2026-10-01 07:43 +0700, took 20s
 - platform: darwin/arm64 (this machine, natively)
-- this repository: commit `22166ad28ddd`
+- this repository: commit `d9e99a8bb5fe`
 - glaze v0.0.61 (released)
-- native v0.1.15 (released)
-- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-153349.log`
-- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20260930-153349.json`
-- screenshots: 7 of the 7 tests that open a window took one — see [Screenshots](#screenshots)
+- native from the fork github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e (go.mod requires v0.1.15 and replaces it)
+- full log: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074308.log`
+- test2json events: `~/Library/Application Support/irgo-winvm/logs/glaze-mac-20261001-074308.json`
+- screenshots: 14 of the 14 tests that open a window took one — see [Screenshots](#screenshots)
 
 | test | result | first message |
 |---|---|---|
+| TestDriveType | PASS |  |
+| TestDriveType/before | PASS |  |
+| TestDriveType/after | PASS |  |
+| TestDriveClick | PASS |  |
+| TestDriveClick/before | PASS |  |
+| TestDriveClick/after | PASS |  |
+| TestDriveClick/script_click_is_untrusted | PASS |  |
+| TestDriveClickAt | PASS |  |
+| TestDriveClickAt/clicked | PASS |  |
+| TestDriveScroll | PASS |  |
+| TestDriveScroll/before | PASS |  |
+| TestDriveScroll/after | PASS |  |
 | TestEvents | PASS |  |
 | TestEvents/js_to_go | PASS |  |
 | TestEvents/go_to_js_unsolicited | PASS |  |
@@ -102,11 +114,18 @@ comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-gla
 
 Every test that opens a window photographs it at the moment that shows what it checked — the page loaded, the tray up, the menu installed, the dialog open — and the picture is recorded with the run it came from. A capture that failed says why instead of showing a picture; a black or one-colour frame counts as failed. How each is taken is in `examples/conformance/shots_test.go`.
 
-- Mac: 2026-09-30 15:33 +0700, commit `22166ad28ddd`, darwin/arm64 (this machine, natively)
+- Mac: 2026-10-01 07:43 +0700, commit `d9e99a8bb5fe`, darwin/arm64 (this machine, natively)
 - Windows: 2026-09-30 15:43 +0700, commit `f16189091b5e`, windows/arm64, VM irgo-win11 (through app-create -gui)
 
 | test | Mac | Windows |
 |---|---|---|
+| TestDriveType/before | PASS<br><a href="screens/conformance/mac/TestDriveType_before.png"><img src="screens/conformance/mac/TestDriveType_before.png" width="280" alt="TestDriveType/before on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveType/after | PASS<br><a href="screens/conformance/mac/TestDriveType_after.png"><img src="screens/conformance/mac/TestDriveType_after.png" width="280" alt="TestDriveType/after on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveClick/before | PASS<br><a href="screens/conformance/mac/TestDriveClick_before.png"><img src="screens/conformance/mac/TestDriveClick_before.png" width="280" alt="TestDriveClick/before on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveClick/after | PASS<br><a href="screens/conformance/mac/TestDriveClick_after.png"><img src="screens/conformance/mac/TestDriveClick_after.png" width="280" alt="TestDriveClick/after on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveClickAt/clicked | PASS<br><a href="screens/conformance/mac/TestDriveClickAt_clicked.png"><img src="screens/conformance/mac/TestDriveClickAt_clicked.png" width="280" alt="TestDriveClickAt/clicked on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveScroll/before | PASS<br><a href="screens/conformance/mac/TestDriveScroll_before.png"><img src="screens/conformance/mac/TestDriveScroll_before.png" width="280" alt="TestDriveScroll/before on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
+| TestDriveScroll/after | PASS<br><a href="screens/conformance/mac/TestDriveScroll_after.png"><img src="screens/conformance/mac/TestDriveScroll_after.png" width="280" alt="TestDriveScroll/after on Mac"></a> | no picture in this run: the test skipped or failed first, or was not in it |
 | TestEvents | PASS<br><a href="screens/conformance/mac/TestEvents.png"><img src="screens/conformance/mac/TestEvents.png" width="280" alt="TestEvents on Mac"></a> | PASS<br><a href="screens/conformance/windows/TestEvents.png"><img src="screens/conformance/windows/TestEvents.png" width="280" alt="TestEvents on Windows"></a> |
 | TestAppScheme | PASS<br><a href="screens/conformance/mac/TestAppScheme.png"><img src="screens/conformance/mac/TestAppScheme.png" width="280" alt="TestAppScheme on Mac"></a> | fail (a subtest failed)<br><a href="screens/conformance/windows/TestAppScheme.png"><img src="screens/conformance/windows/TestAppScheme.png" width="280" alt="TestAppScheme on Windows"></a> |
 | TestTray/running | PASS<br><a href="screens/conformance/mac/TestTray_running.png"><img src="screens/conformance/mac/TestTray_running.png" width="280" alt="TestTray/running on Mac"></a><br><sub>the window the tray was started beside; the status item is drawn outside this process and its window could not be captured: screencapture -o -l 4294967296: exit status 1: could not create image from window</sub> | PASS<br><a href="screens/conformance/windows/TestTray_running.png"><img src="screens/conformance/windows/TestTray_running.png" width="280" alt="TestTray/running on Windows"></a> |

@@ -139,6 +139,12 @@ type Dep struct {
 	Branch string
 	Commit string
 	Dirty  bool
+
+	// Fork is set when go.mod replaces the module with another published
+	// module — examples/go.mod takes native from the joeblew999 fork until
+	// its input and screen packages are released — as path@version. Then
+	// that, not Version, is what was built.
+	Fork string
 }
 
 // Linked reports whether the build used a local clone.
@@ -147,6 +153,9 @@ func (d Dep) Linked() bool { return d.Dir != "" }
 // Key is the one-token form recorded in the status file's marker, compared by
 // glaze-status to decide whether a verdict still describes this tree.
 func (d Dep) Key() string {
+	if d.Fork != "" && !d.Linked() {
+		return d.Fork
+	}
 	if !d.Linked() {
 		return d.Version
 	}
@@ -160,6 +169,9 @@ func (d Dep) Key() string {
 // String is the form a person reads.
 func (d Dep) String() string {
 	name := filepath.Base(d.Path)
+	if d.Fork != "" && !d.Linked() {
+		return fmt.Sprintf("%s from the fork %s (go.mod requires %s and replaces it)", name, d.Fork, d.Version)
+	}
 	if !d.Linked() {
 		return fmt.Sprintf("%s %s (released)", name, d.Version)
 	}
@@ -204,7 +216,10 @@ func ReadDeps(root string) (deps []Dep, gowork string, err error) {
 		}
 		d := Dep{Path: m.Path, Version: m.Version}
 		// A directory replacement has no version; a module replacement has one
-		// and is still a released module, just a different one.
+		// and is a published module, just a different one.
+		if m.Replace != nil && m.Replace.Version != "" {
+			d.Fork = m.Replace.Path + "@" + m.Replace.Version
+		}
 		if m.Replace != nil && m.Replace.Version == "" {
 			d.Dir = m.Replace.Dir
 			if d.Dir == "" {

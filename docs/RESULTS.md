@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [a glaze app driven by real OS input in the background: type, click, click-at, scroll, all `isTrusted`, frontmost app unchanged](#a-glaze-app-driven-by-real-os-input--measured-1-oct-2026) |
 | 30 Sep 2026 | [pushes go over SMB: 49 MB in 1.6 s instead of 1 min 17 s; `glaze:windows` 31 s → 24 s](#pushes-go-over-smb--measured-30-sep-2026) |
 | 30 Sep 2026 | [GoReleaser rebuilds v0.4.1 byte for byte](#goreleaser-reproduces-the-published-v041-byte-for-byte--verified-30-sep-2026) |
 | 16 Aug 2026 | [an agent uploaded and ran a binary over HTTP](#an-agent-uploaded-pushed-and-ran-a-binary-over-http--verified-16-aug-2026) |
@@ -26,6 +27,29 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## A glaze app driven by real OS input — measured 1 Oct 2026
+
+macOS 27 arm64, the owner's Mac while in use, `examples/drive` with native
+from the fork (`feat/input-screen-darwin`, `93363eb`). The four
+`TestDrive*` tests of the conformance suite: a glaze app in its own process,
+Prohibited activation policy, window behind every other window.
+
+| interaction | real OS input? | measured |
+|---|---|---|
+| `Click("#name")`, then `Type("héllo wörld 👋!")` | yes (`CGEventPostToPid`) | `mousedown` on `input#name` and every `input` event `isTrusted`; the field holds the text exactly, emoji included |
+| `Press(KeyBackspace)` | yes | trusted `keydown` `Backspace`; the `!` removed |
+| `Click("#inc")` ×3 | yes | three trusted `click` events on `button#inc`; label `count: 3` |
+| the same click by script (`.click()` through `Eval`) | no, on purpose | arrives with `isTrusted` false: the control |
+| `ClickAt` 17,23 into `#pad` | yes | `mousedown` on `div#pad` at exactly that point; with the 32-point title-bar offset dropped it lands 32 points higher, on `body` |
+| `Scroll(0, -5)` | yes | trusted `wheel`, `deltaY` positive, `scrollY` > 0 — on the first post in `glaze:mac`, on the second when run straight after another test's input ([UPSTREAM §6](UPSTREAM.md#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped)) |
+| element lookup, `WaitFor*`, reading values | no: the JavaScript bridge | — |
+| `Screenshot` | `screen.CaptureWindow` (ScreenCaptureKit) | the window's content while it sits behind other windows |
+
+Each test about 1 s. The frontmost app (System Events) was the same before and
+after every test that nobody else interrupted; twice during this work it
+changed mid-run to UTM and to VS Code, both brought forward by other programs
+on the machine, and the check failed the test as it should.
 
 ## Pushes go over SMB — measured 30 Sep 2026
 

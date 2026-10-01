@@ -95,3 +95,24 @@ func TestVerdictNeverCallsNotRunAFailure(t *testing.T) {
 		}
 	}
 }
+
+// TestForkIsNamed: a module replaced by another published module — native
+// from the joeblew999 fork — must be recorded as the fork, not as the version
+// go.mod requires, which is not what was built.
+//
+// Negative control, run by hand: dropping the Fork case from Dep.String and
+// Dep.Key fails this — the record says "native v0.1.15 (released)".
+func TestForkIsNamed(t *testing.T) {
+	d := Dep{Path: "github.com/crgimenes/native", Version: "v0.1.15", Fork: "github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e"}
+	if got, want := d.Key(), "github.com/joeblew999/native@v0.1.16-0.20260930085437-93363ebf8e8e"; got != want {
+		t.Errorf("Key = %q, want %q", got, want)
+	}
+	if got := d.String(); !strings.Contains(got, "joeblew999/native@v0.1.16") || strings.Contains(got, "(released)") {
+		t.Errorf("String = %q: it must name the fork and must not say released", got)
+	}
+	// A go.work link overrides the fork, and then the clone is what was built.
+	d.Dir, d.Commit = "/src/native", "58f48b7c6ef9"
+	if got := d.Key(); got != "linked@58f48b7c6ef9" {
+		t.Errorf("linked Key = %q, want linked@58f48b7c6ef9", got)
+	}
+}

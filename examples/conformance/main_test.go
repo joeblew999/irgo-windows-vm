@@ -19,6 +19,7 @@ import (
 	"github.com/crgimenes/native/power"
 	"github.com/crgimenes/native/singleinstance"
 	"github.com/crgimenes/native/tray"
+	"github.com/joeblew999/irgo-windows-vm/examples/drive"
 )
 
 // The main thread.
@@ -49,6 +50,9 @@ func init() { runtime.LockOSThread() }
 var mainQueue = make(chan func())
 
 func TestMain(m *testing.M) {
+	if name := drive.AppName(); name != "" {
+		serveApp(name) // this process is an app a drive test launched; never returns
+	}
 	code := make(chan int, 1)
 	go func() { code <- m.Run() }()
 	for {

@@ -11,6 +11,18 @@ for repo in glaze native; do
     exit 1
   fi
 done
+# examples/drive needs native's input and screen packages, which examples/go.mod
+# takes from the joeblew999/native fork until crgimenes releases them. The
+# go.work replace below overrides that, so a clone without them cannot build
+# examples. Said here, before the build fails with "no required module
+# provides package github.com/crgimenes/native/input".
+for pkg in input screen; do
+  if [ ! -d "$UPSTREAM_DIR/native/$pkg" ]; then
+    echo "warning: $UPSTREAM_DIR/native has no $pkg/ — examples will not build linked until it does:" >&2
+    echo "  git -C $UPSTREAM_DIR/native fetch https://github.com/joeblew999/native feat/input-screen-darwin && git -C $UPSTREAM_DIR/native merge FETCH_HEAD" >&2
+    break
+  fi
+done
 cd "$MISE_PROJECT_ROOT"
 rm -f go.work go.work.sum
 # Every module in the repo (site/ was added after these tasks were first

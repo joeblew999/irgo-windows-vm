@@ -398,8 +398,11 @@ goroutine.
 
 [utmapp/UTM](https://github.com/utmapp/UTM), Apache-2.0. This repository
 verifies its config schema against **4.7.5**, recorded as
-`utmvm.VerifiedVersion`. 4.7.5 is the current release, so everything below is a
-live defect, not an artefact of running something old.
+`utmvm.VerifiedVersion`. 4.7.5 is the current stable release, so everything
+below is a live defect, not an artefact of running something old. 5.0.0–5.0.6
+are pre-releases; each finding below was checked against the v5.0.6 source on
+30 Sep 2026, and none is fixed there (`.plans/2026-09-30_2000_utm-5.md`).
+`irgo-winvm doctor` says when a newer stable release exists.
 
 These were long treated as local traps to work around — the opposite of the rule
 applied to glaze and native. They are listed here so that is visible. None has
@@ -421,13 +424,17 @@ worked.
   error text is mistaken for one — which made a status check here report a
   working agent on a VM that had none.
 
-**Cause.** In `utmctl`'s source, the event error handler prints and returns;
-only `snapshot create` checks the failure it records.
+**Cause.** In `utmctl/UTMCtl.swift`, `EventErrorHandler.eventDidFail` prints to
+stderr and returns `nil`, and the command returns normally. 4.7.5 records
+nothing; 5.x records `hasFailed`, and only `snapshot create` checks it.
 
 **In this repository.** After `delete`, the tool checks whether the bundle still
 exists rather than trusting the status. This defect is also why this tool's own
 [exit codes](DEVELOPMENT.md#what-it-exits-with) exist and are documented: they
 are the only reliable signal a caller gets.
+
+**UTM 5.** Not fixed in v5.0.6: `hasFailed` is read only at `UTMCtl.swift:853`
+(`snapshot create`).
 
 **Status.** `FOUND HERE` — not reported; drafted.
 
@@ -452,6 +459,12 @@ Two related quirks, same call:
 redirects to a file in the guest, runs it by path, and pulls the file back.
 That machinery exists solely because of this.
 
+**UTM 5.** Not fixed in v5.0.6: the `exec` code is identical to 4.7.5, and no
+flag was added. It already asks for `outputCapturing: true` and polls
+`hasExited`; if the result record comes back without that key, the loop stops
+after one poll and the exit code falls back to 0 with no output. That fits
+what is seen here, and is unverified.
+
 **Status.** `FOUND HERE` — not reported; drafted.
 
 ### `utmctl suspend --save-state` reports success and power-cuts the guest
@@ -463,8 +476,19 @@ unclean shutdown.
 **Summary.** It either refuses (naming GPU acceleration, then NVMe) or does the
 above.
 
+**Cause, from the source.** `determineSnapshotSupport()` in
+`Services/UTMQemuVirtualMachine.swift` refuses any VM with a `-gl` display
+("GPU acceleration") and then any with NVMe, so this tool's VM
+(`virtio-ramfb-gl`, NVMe) can never save state. The script handler pauses,
+the save throws, the error goes to stderr and utmctl exits 0 (the finding
+above). The exact sequence that leaves the guest powered off is unverified.
+
 **In this repository.** Plain `suspend` works and is what the tool uses;
 `--save-state` must never be called.
+
+**UTM 5.** Not fixed in v5.0.6: `determineSnapshotSupport()` is unchanged
+(lines 289 and 294). 5.x adds offline disk snapshots taken while the VM is
+stopped, which do not go through this check; live snapshots still do.
 
 **Status.** `FOUND HERE` — not reported; drafted.
 
@@ -479,6 +503,10 @@ with no output, because everything that asks "is this VM usable" is built on
 
 **In this repository.** Every `utmctl` call is wrapped in a deadline.
 
+**UTM 5.** Not fixed in v5.0.6: the QEMU path is unchanged. 5.0.3 added an
+ARP lookup for the Apple backend only. Open issue UTM#7799 (RPC timeout,
+Windows 11, 5.0.3) is related.
+
 **Status.** `FOUND HERE` — not reported; drafted.
 
 ### A rejected config names no field
@@ -487,11 +515,15 @@ with no output, because everything that asks "is this VM usable" is built on
 import this VM"*, with no indication of which field is wrong.
 
 **Cause.** UTM decodes `config.plist` with Swift `Codable` and non-optional
-fields.
+fields, and `Platform/UTMData.swift` discards the decoding error:
+`guard let _ = try? VMData(url: url) else { throw UTMDataError.importFailed }`.
 
 **Reproduction.** Six distinct config mistakes were found by bisection because
 of it, each costing an import cycle to identify. They are listed in
 [DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
+
+**UTM 5.** Not fixed in v5.0.6: the same `try?` (lines 690, 724, 747; 677,
+711, 734 in 4.7.5).
 
 **Status.** `FOUND HERE` — not reported; drafted.
 

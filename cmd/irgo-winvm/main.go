@@ -10,6 +10,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
+	"runtime/debug"
 	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
@@ -20,6 +22,25 @@ import (
 // version is set at build time by .goreleaser.yaml: the tag for a release,
 // "dev" otherwise.
 var version = "dev"
+
+func init() { version = moduleVersion(version, debug.ReadBuildInfo) }
+
+// moduleVersion is the tag `go install ...@v0.5.0` records in the binary, for
+// a build GoReleaser did not stamp. A local build's VCS pseudo-version is not
+// a release and stays "dev", as CONTRIBUTING.md says it does.
+func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string {
+	if stamped != "dev" {
+		return stamped
+	}
+	bi, ok := read()
+	if !ok || !releaseTag.MatchString(bi.Main.Version) {
+		return stamped
+	}
+	return bi.Main.Version
+}
+
+// releaseTag is a plain vX.Y.Z: not a pseudo-version, not +dirty.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 func main() {
 	// The ledger (docs/DEVELOPMENT.md, "The ledger"): off unless
@@ -65,6 +86,11 @@ func runToolAs(client, name string, args []string) (err error) {
 	c, ok := find(name)
 	if !ok {
 		return fmt.Errorf("%w: no such command %q", errUsage, name)
+	}
+	if c.OverMCP && recordExits {
+		// Recorded for `report`, which names the last commands and how they
+		// ended. Before this, an error reached stderr and nowhere else.
+		defer func() { logExit(utmvm.Logger(), name, args, err) }()
 	}
 	v, rest, err := c.parse(args)
 	if err != nil {
@@ -169,6 +195,7 @@ func init() {
 		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
 		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},
 		"doctor":       {flags: doctorFlags, run: runDoctor},
+		"report":       {flags: reportFlags, about: reportAbout, run: runReport},
 		"status":       {flags: statusFlags, about: statusAbout, run: runStatus},
 		"glaze-check":  {flags: glazeCheckFlags, run: runGlazeCheck},
 		"glaze-status": {run: runGlazeStatus},

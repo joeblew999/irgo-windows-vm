@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,21 +118,120 @@ func launchApp(t *testing.T, name string) *drive.Session {
 		if err := s.Close(); err != nil {
 			t.Errorf("closing the app: %v", err)
 		}
-		if frontErr != nil {
-			return
-		}
-		after, err := drive.Frontmost()
-		switch {
-		case err != nil:
-			t.Errorf("the frontmost app could not be read after the test: %v", err)
-		case after == before:
-		case after.PID == s.PID() || after.PID == os.Getpid():
-			t.Errorf("the frontmost app was %v before this test and %v after it, which is this test's own: driving the app took over the desktop", before, after)
-		default:
-			t.Errorf("the frontmost app was %v before this test and %v after it, which this test does not own: someone or something else switched apps, or the driver's input went astray", before, after)
+		checkFrontmost(t, s, before, frontErr)
+		if t.Failed() {
+			// Where focus and the foreground went, step by step, and what the
+			// page saw: the record a failure on a CI runner is diagnosed from.
+			t.Logf("the session, step by step:\n  %s", strings.Join(s.Trace(), "\n  "))
+			var seen []string
+			for _, e := range s.Events() {
+				seen = append(seen, e.String())
+			}
+			t.Logf("every event the page reported:\n  %s", strings.Join(seen, "\n  "))
 		}
 	})
 	return s
+}
+
+// checkFrontmost fails the test if the frontmost app is not the one it was
+// before the app was launched, or if the app's own window was ever the
+// foreground window while it ran (on Windows, where the session records the
+// foreground at every step). The second catches a takeover that the first
+// misreads: an app that took the foreground hands it to some other window
+// when it closes, so the change looks like someone else's.
+func checkFrontmost(t *testing.T, s *drive.Session, before drive.App, frontErr error) {
+	t.Helper()
+	if took := s.TookForeground(); took != "" {
+		t.Errorf("the driven app's window became the foreground window, which it must never do: driving the app took over the desktop (first seen after: %s)", took)
+	}
+	if frontErr != nil {
+		return
+	}
+	after, err := drive.Frontmost()
+	switch {
+	case err != nil:
+		t.Errorf("the frontmost app could not be read after the test: %v", err)
+	case after.Same(before):
+	case after.PID == s.PID() || after.PID == os.Getpid():
+		t.Errorf("the frontmost app was %v before this test and %v after it, which is this test's own: driving the app took over the desktop", before, after)
+	default:
+		t.Errorf("the frontmost app was %v before this test and %v after it, which this test does not own: someone or something else switched apps, or the driver's input went astray", before, after)
+	}
+}
+
+// retried logs that a step is being tried again, and why. The line starts
+// "retry:", which glaze-check records against the test even when it passes,
+// so a pass that needed a retry says so in GLAZE-STATUS.md.
+func retried(t *testing.T, format string, args ...any) {
+	t.Helper()
+	t.Logf("retry: "+format, args...)
+}
+
+// focusField clicks the element sel matches (a background OS click, which
+// is also how Chromium takes focus inside its own window) and checks that it
+// is the page's active element, clicking again, at most five times and
+// logging every retry, when it is not. document.hasFocus() is logged, not
+// required: on macOS the window is never key, and keys reach the page anyway.
+func focusField(t *testing.T, s *drive.Session, sel, target string) {
+	t.Helper()
+	for try := 1; ; try++ {
+		if err := s.Click(ui(t), sel); err != nil { // bridge locates, OS clicks
+			t.Fatalf("clicking %s: %v", sel, err)
+		}
+		expectTrusted(t, s, "mousedown", func(e drive.Event) bool { return e.Target == target })
+		focused, active, err := s.Focus(ui(t)) // bridge
+		if err != nil {
+			t.Fatal(err)
+		}
+		if active == target {
+			return
+		}
+		if try == 5 {
+			t.Fatalf("five background clicks on %s and it is still not the active element (active element %q, document.hasFocus() %v)", sel, active, focused)
+		}
+		retried(t, "after click %d on %s the active element is %q (document.hasFocus() %v): clicking again", try, sel, active, focused)
+	}
+}
+
+// keyed sends keyboard input with send, after giving sel focus, and waits for
+// the page to report an event that match accepts. When nothing arrives it
+// tries again, up to three times, but only if the field is unchanged — keys
+// that were dropped whole, which is what a page without focus does to them.
+// Anything partial is a failure, never retried. Every retry is logged with
+// the page's focus at the time.
+func keyed(t *testing.T, s *drive.Session, sel, target, what string, send func() error, match func(drive.Event) bool) drive.Event {
+	t.Helper()
+	for try := 1; ; try++ {
+		focusField(t, s, sel, target)
+		was, err := s.Text(ui(t), sel) // bridge
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := send(); err != nil { // OS
+			t.Fatalf("%s: %v", what, err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		e, err := s.Expect(ctx, match)
+		cancel()
+		if err == nil {
+			if !e.Trusted {
+				t.Fatalf("the event for %s was not trusted (isTrusted false): the page saw script, not OS input: %s", what, e)
+			}
+			return e
+		}
+		now, terr := s.Text(ui(t), sel)
+		focused, active, ferr := s.Focus(ui(t))
+		if terr != nil || ferr != nil {
+			t.Fatalf("%s did not land (%v), and reading the page back failed: %v %v", what, err, terr, ferr)
+		}
+		if now != was {
+			t.Fatalf("%s landed in part: %s held %q before and %q after, and no matching event arrived: %v", what, sel, was, now, err)
+		}
+		if try == 3 {
+			t.Fatalf("%s never reached the page in three attempts (%v); the page's focus: document.hasFocus() %v, active element %q", what, err, focused, active)
+		}
+		retried(t, "%s did not reach the page on attempt %d (%s unchanged at %q; document.hasFocus() %v, active element %q): focusing it and sending again", what, try, sel, now, focused, active)
+	}
 }
 
 // ui is a context bounded by uiTimeout, for one step.
@@ -165,29 +265,25 @@ func expectTrusted(t *testing.T, s *drive.Session, typ string, match func(drive.
 }
 
 // TestDriveType clicks into a text field and types into it — Unicode, an
-// emoji, and a Backspace — and reads the field back.
+// emoji, and a Backspace — and reads the field back. Keys reach only a page
+// with focus (on Windows); keyed clicks into the field first, and retries,
+// logged, only keys the page dropped whole.
 func TestDriveType(t *testing.T) {
 	s := launchApp(t, formApp)
 	snap(t, s, "before")
 
-	if err := s.Click(ui(t), "#name"); err != nil { // bridge locates, OS clicks
-		t.Fatalf("clicking the field: %v", err)
-	}
-	expectTrusted(t, s, "mousedown", func(e drive.Event) bool { return e.Target == "input#name" })
-
+	// keyed clicks into the field first (OS), and checks the page has focus
+	// there (bridge) before it types.
 	const typed = "héllo wörld 👋!"
-	if err := s.Type(typed); err != nil { // OS
-		t.Fatalf("typing: %v", err)
-	}
+	keyed(t, s, "#name", "input#name", "typing", func() error { return s.Type(typed) }, // OS
+		func(e drive.Event) bool { return e.Type == "input" && strings.HasPrefix(e.Value, "h") })
 	if err := s.WaitForText(ui(t), "#name", typed); err != nil { // bridge
 		t.Fatal(err)
 	}
 	expectTrusted(t, s, "input", func(e drive.Event) bool { return e.Value == typed })
 
-	if err := s.Press(input.KeyBackspace); err != nil { // OS
-		t.Fatalf("pressing Backspace: %v", err)
-	}
-	expectTrusted(t, s, "keydown", func(e drive.Event) bool { return e.Key == "Backspace" })
+	keyed(t, s, "#name", "input#name", "pressing Backspace", func() error { return s.Press(input.KeyBackspace) }, // OS
+		func(e drive.Event) bool { return e.Type == "keydown" && e.Key == "Backspace" })
 	if err := s.WaitForText(ui(t), "#name", "héllo wörld 👋"); err != nil { // bridge
 		t.Fatal(err)
 	}
@@ -273,14 +369,12 @@ func TestDriveScroll(t *testing.T) {
 		cancel()
 		if err == nil {
 			e = got
-			if post > 1 {
-				t.Logf("the wheel event arrived on post %d, not the first (docs/UPSTREAM.md §6)", post)
-			}
 			break
 		}
 		if post == 3 {
 			t.Fatalf("three scrolls posted and the page saw no wheel event: %v", err)
 		}
+		retried(t, "scroll post %d reached the page as no wheel event within 500ms (docs/UPSTREAM.md §6): posting again", post)
 	}
 	if !e.Trusted {
 		t.Fatalf("the wheel event was not trusted (isTrusted false): %s", e)

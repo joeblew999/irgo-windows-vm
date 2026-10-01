@@ -21,7 +21,8 @@ import (
 	"github.com/crgimenes/native/screen"
 )
 
-// Event is one thing the page saw, from the bridge: a DOM event, or "ready".
+// Event is one thing the page saw, from the bridge: a DOM event, "focus"
+// (the page gained or lost keyboard focus), or "ready".
 type Event struct {
 	Type    string   `json:"type"`
 	Target  string   `json:"target"` // tag#id of the element it went to
@@ -35,6 +36,7 @@ type Event struct {
 	DX      float64  `json:"dx"`
 	DY      float64  `json:"dy"`
 	Trusted bool     `json:"trusted"` // isTrusted: produced by the browser from OS input, not by script
+	Focused bool     `json:"focused"` // ready and focus: whether the page has keyboard focus
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -70,6 +72,10 @@ type Session struct {
 	nextID  int
 	exited  error // set once the process has gone
 	gone    bool
+
+	began     time.Time
+	trace     []string // what the session did, step by step: Trace
+	tookFront string   // the first trace line with the app in front: TookForeground
 }
 
 // Launch starts cmd, an app that calls Serve, and returns once its window is
@@ -84,7 +90,7 @@ func Launch(ctx context.Context, cmd *exec.Cmd) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{cmd: cmd, stdin: stdin, stderr: &bytes.Buffer{}, changed: make(chan struct{}), replies: map[int]reply{}}
+	s := &Session{cmd: cmd, stdin: stdin, stderr: &bytes.Buffer{}, changed: make(chan struct{}), replies: map[int]reply{}, began: time.Now()}
 	cmd.Stderr = &lockedWriter{w: s.stderr, mu: &s.mu}
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -105,10 +111,13 @@ func Launch(ctx context.Context, cmd *exec.Cmd) (*Session, error) {
 	}
 	s.pid, s.window, s.content = st.PID, st.Window, st.Content
 	s.app = input.Target(st.PID)
-	if _, err := s.Expect(ctx, func(e Event) bool { return e.Type == "ready" }); err != nil {
+	s.note("window up: pid %d, window %#x, content at %v in its frame", st.PID, st.Window, st.Content)
+	ready, err := s.Expect(ctx, func(e Event) bool { return e.Type == "ready" })
+	if err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("the page did not load: %w", err)
 	}
+	s.note("page loaded: %s", ready)
 	return s, nil
 }
 
@@ -191,6 +200,7 @@ func (s *Session) Window() uint32 { return s.window }
 // Close ends the app — closing its stdin, which it exits on — and waits for
 // it, killing it if it has not gone within five seconds.
 func (s *Session) Close() error {
+	s.note("closing the app")
 	_ = s.stdin.Close() // a pipe; the app may already be gone
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -335,6 +345,19 @@ func (s *Session) Text(ctx context.Context, sel string) (string, error) {
 	return *got, nil
 }
 
+// Focus is whether the page has keyboard focus (document.hasFocus()) and the
+// element that holds it, as tag#id. Keys reach only a focused page.
+// Bridge-assisted.
+func (s *Session) Focus(ctx context.Context) (focused bool, active string, err error) {
+	var r struct {
+		Focused bool
+		Active  string
+	}
+	err = s.Eval(ctx, `(function(){var e=document.activeElement;`+
+		`return {focused: document.hasFocus(), active: e ? e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') : ''}})()`, &r)
+	return r.Focused, r.Active, err
+}
+
 func textJS(sel string) string {
 	return "(function(){var e=document.querySelector(" + jsString(sel) + ");" +
 		"return e ? ('value' in e && e.tagName !== 'BUTTON' ? e.value : e.textContent) : null})()"
@@ -383,22 +406,82 @@ func (s *Session) Click(ctx context.Context, sel string) error {
 // from the top-left of the web content, as clientX and clientY count them.
 // Real OS input.
 func (s *Session) ClickAt(x, y int) error {
-	return s.app.Click(x+s.content.X, y+s.content.Y, input.Left)
+	err := s.app.Click(x+s.content.X, y+s.content.Y, input.Left)
+	s.note("OS click at page (%d, %d), window (%d, %d): %v", x, y, x+s.content.X, y+s.content.Y, errText(err))
+	return err
 }
 
 // Type types text into whatever has focus in the page, any Unicode as itself.
 // Real OS input.
-func (s *Session) Type(text string) error { return s.app.TypeString(text) }
+func (s *Session) Type(text string) error {
+	err := s.app.TypeString(text)
+	s.note("OS type %q: %v", text, errText(err))
+	return err
+}
 
 // Press presses and releases key with mods held. Real OS input.
 func (s *Session) Press(key input.Key, mods ...input.Modifier) error {
-	return s.app.KeyTap(key, mods...)
+	err := s.app.KeyTap(key, mods...)
+	s.note("OS key %v %v: %v", key, mods, errText(err))
+	return err
 }
 
 // Scroll scrolls the window by dx, dy lines with the pointer at its centre;
 // positive dy scrolls up (towards the top of the page), as native/input
 // counts. Real OS input.
-func (s *Session) Scroll(dx, dy int) error { return s.app.Scroll(dx, dy) }
+func (s *Session) Scroll(dx, dy int) error {
+	err := s.app.Scroll(dx, dy)
+	s.note("OS scroll (%d, %d): %v", dx, dy, errText(err))
+	return err
+}
+
+// Trace is what the session has done so far, one line per step — the
+// window coming up, the page loading, every OS input and its result, the
+// close — each with the time since Launch and, on Windows, the foreground
+// window straight after it. A test logs it when it fails, so the log shows
+// where focus or the foreground went, and when.
+func (s *Session) Trace() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.trace...)
+}
+
+func (s *Session) note(format string, args ...any) {
+	line := fmt.Sprintf("+%.2fs ", time.Since(s.began).Seconds()) + fmt.Sprintf(format, args...)
+	fg, asked, err := stepForeground()
+	switch {
+	case !asked:
+	case err != nil:
+		line += "; foreground: " + err.Error()
+	default:
+		line += "; foreground: " + fg.String()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trace = append(s.trace, line)
+	if asked && err == nil && s.pid != 0 && fg.PID == s.pid && s.tookFront == "" {
+		s.tookFront = line
+	}
+}
+
+// TookForeground is the first step of the trace after which the app's own
+// window was the foreground window, or "" when it never was (or, on macOS,
+// where the trace does not ask). The app is made never to activate, so this
+// is the driver taking over the desktop, even if the foreground has moved
+// on by the time the test checks it: closing an app that holds it hands it
+// to another window.
+func (s *Session) TookForeground() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tookFront
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	return err.Error()
+}
 
 // Screenshot is the window's own pixels, frame included, even while it is
 // behind other windows: native/screen's CaptureWindow.

@@ -17,6 +17,11 @@ import "testing"
 
 func TestPasses(t *testing.T) { t.Log("a log line from a passing test") }
 
+func TestRetries(t *testing.T) {
+	t.Logf("retry: the first try did not land")
+	t.Logf("retry: nor did the second")
+}
+
 func TestFails(t *testing.T) { t.Fatal("the reason it failed") }
 
 func TestSkips(t *testing.T) { t.Skip("unsupported here by design") }
@@ -121,6 +126,7 @@ func TestParseEventsFromARealBinary(t *testing.T) {
 	}
 	for _, want := range []Result{
 		{Name: "TestPasses", Outcome: Pass},
+		{Name: "TestRetries", Outcome: Pass, Retried: "the first try did not land / nor did the second"},
 		{Name: "TestFails", Outcome: Fail, Detail: "the reason it failed"},
 		{Name: "TestSkips", Outcome: Skip, Detail: "unsupported here by design"},
 		{Name: "TestParent", Outcome: Fail, Inherited: true},
@@ -136,7 +142,7 @@ func TestParseEventsFromARealBinary(t *testing.T) {
 		// The message carries file:line in front; the test cares that it is
 		// the message, not where it came from.
 		if r.Outcome != want.Outcome || r.Inherited != want.Inherited || !strings.HasSuffix(r.Detail, want.Detail) ||
-			(want.Detail == "" && r.Detail != "") {
+			(want.Detail == "" && r.Detail != "") || r.Retried != want.Retried {
 			t.Errorf("%s = %+v, want %+v", want.Name, r, want)
 		}
 	}

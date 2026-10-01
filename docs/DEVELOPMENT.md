@@ -163,7 +163,14 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `iso-create` and removed by `iso-delete`, only when building media from scratch.
 
 - **Tools are generated from the command list** in `internal/command`, so they
-  are the commands and nothing else.
+  are the commands and nothing else. A tool's description is the command's
+  summary plus what the declaration says an agent must know first: that it
+  returns a job, that it needs `-force`, its undo (`describe`).
+- **The server sends instructions** with its initialize response
+  (`internal/mcpserver/instructions.go`): the order of the steps, jobs, which
+  failures to retry. `irgo-winvm mcp -h` prints them after how to register the
+  server, and the site's MCP page captures that, so the three cannot differ. A
+  test fails if they name a command or status that does not exist.
 - **The server holds no logic.** Behaviour reachable only over MCP is a second
   answer to a question already answered, and nobody tests it: the cycle tests
   and developers both drive the CLI. If a tool needs logic, it goes in `utmvm`,
@@ -393,12 +400,23 @@ Once one VM has been installed, **`vm-golden-create`** (undo
 **`vm-golden-delete`**) seals it into a [golden image](#the-golden-image), and
 `vm-create` then clones that instead of installing.
 
-Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
-reports what is installed and where, and **`status`** lists long-running
-[jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
+Four commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
+reports what is installed and where, **`status`** lists long-running
+[jobs](#jobs), and **`report`** prints the redacted block an issue needs
+([Reporting issues](CONTRIBUTING.md#reporting-issues-for-agents)). `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
-such, and offline it says "cannot tell" rather than failing.
+such, and offline it says "cannot tell" rather than failing. It ends with the
+next steps in order, each with its command (`nextSteps`): UTM, the installer
+(only when the VM will be installed from it), the VM (a clone, a pull from the
+private cache, or an install, with the one-time Automation dialog), then
+`app-create`, and how to register the MCP server. Rows that are optional or
+fetched by the command that needs them (Go, the guest tools, `wimlib` and
+`xorriso`) read `optional` or `not yet`, never `MISSING`.
+
+Nothing a release user runs assumes a checkout: messages link
+[the site](https://joeblew999.github.io/irgo-windows-vm/) (`utmvm.SiteURL`),
+never a `docs/` path, and the two commands that need the source say so.
 
 Two work only **in a checkout of this repository**, because they build and read
 `examples/`:
@@ -428,6 +446,20 @@ Over MCP, `glaze-check -windows` is a job: call `status`, then `glaze-status`.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
+
+**`irgo-winvm report`** gathers, as one markdown block: the version, macOS and
+hardware, free disk, UTM, the golden image, the last five commands and how
+they exited, the log around the last error, glaze-status's verdict lines, and
+`doctor -json`. Every command an agent can run logs its exit (`msg=exit`, with
+the code, its outcome name, its arguments cut to 80 characters, and the error
+at level ERROR) through `logExit` in `runTool`, so a failure reached over MCP
+is recorded as well as one on a terminal; before this, an error reached stderr
+and nothing else. Redaction is in `cmd/irgo-winvm/report.go`: values of
+credential-named and `IRGO_` environment variables and of `.env.r2`, then
+credential-shaped strings (GitHub tokens, bearer headers, AWS key ids, signed
+URL parameters, emails), then home directories. It does not redact hashes or
+module versions, which triage needs. `report_test.go` plants a secret down each
+road and checks none comes out.
 
 Every command that takes flags documents them with `-h`, and `irgo-winvm help`
 explains the sequence. No document lists flags, so none can go stale: the
@@ -588,9 +620,42 @@ one Mac each have a VM without stopping anybody else's.
 | **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
 
 The first VM is still installed the slow way, under a throwaway name:
-`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`. With
-no golden image, `vm-create` says it is falling back to a full install and
-does that; `-golden=false` installs even when there is one.
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`.
+`-golden=false` installs even when there is a golden image.
+
+**A new VM on a machine with no golden image** (`VMCreate`, and
+`internal/utmvm/vm_golden_import.go`) depends on the
+[private cache](#the-private-r2-cache):
+
+| cache (`GoldenCacheFromEnv`) | `vm-create` | `vm-create -install` |
+|---|---|---|
+| none of its variables set | writes the bundle; says the install is next | installs from the ISO, and says how to make the next VM a clone |
+| configured (`IRGO_GOLDEN_URL` + `IRGO_GOLDEN_TOKEN`, or the S3 five) | stops and says `-install` pulls it, writing no bundle | pulls the image, has UTM import it as `irgo-golden`, clones it |
+| some set, not all | exit 2 naming what is missing, and `-golden=false` | the same |
+
+- **Only with `-install`**, because a pull is minutes (4 min 37 s for 8.4 GB,
+  [measured](RESULTS.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026))
+  and `-install` is what makes `vm-create` a job over MCP. Without it nothing is
+  written: a VM that exists is never cloned, so a bundle written now would make
+  the next `-install` install after all.
+- **Half a configuration is an error**, not a quiet 45-minute install for
+  someone who meant to pull.
+- **The pull runs under the machine lock**, like `vm-golden-pull`, and asks UTM
+  again first, so a golden image another process made meanwhile is cloned, not
+  pulled over. It is `GoldenPull` itself, licence notice and privacy check
+  included, into `golden-pull/`.
+- **The bundle's own name is checked** before the import (`plutil -extract
+  Information.Name`): UTM registers a bundle under the name in its
+  `config.plist`, so an image pushed from another VM would be left registered
+  under that name.
+- **The pull is kept** in `golden-pull/`. UTM's import is an APFS clone of it,
+  so it costs no more space, and after `vm-golden-delete` the next import needs
+  no download. `vm-golden-pull -delete -force` removes it. Its `golden.json` is
+  copied to the runtime root, where `doctor` reads it.
+
+The decisions are unit-tested with fakes for UTM, the bucket and the lock
+(`vm_golden_import_test.go`); the whole path against the real bucket and UTM is
+proven by running it.
 
 **Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
 the guest, as SYSTEM, one step at a time with the disk's allocation printed
@@ -843,8 +908,8 @@ How it is built, and why:
   `ErrUnsupported` skips only on an OS where the capability is documented as
   unsupported (`nocapture` on macOS, `SetAppIcon` on Windows); the same error
   anywhere else is a failure. And the drive tests skip when there is no OS
-  input to drive with: on Windows until native/input has a Windows backend, and
-  on a Mac whose terminal or runner lacks the Accessibility permission.
+  input to drive with: on Windows when built against a native without its
+  Windows backend, and on a Mac whose terminal or runner lacks the Accessibility permission.
 - **Known upstream bugs fail.** `TestAppScheme/absolute_subresources` fails on
   Windows until glaze fixes [§1b](UPSTREAM.md). `glazecheck.KnownUpstream`
   lists it, so a run whose only failures are known answers `KNOWN BUGS ONLY`
@@ -908,12 +973,37 @@ img, err := s.Screenshot()               // native/screen, even behind other win
   could bring it over the user's work.
 - **It never takes over the desktop.** On macOS the app has the Prohibited
   activation policy and its window is ordered behind every other window, so it
-  can never become active; `CGEventPostToPid` moves no cursor. Each test reads
-  the frontmost app (System Events, through `osascript`) before launching and
-  after closing, and fails if it changed. The message says whether the new
-  frontmost app is the test's own (a takeover) or another (a person or another
-  program switched apps — on the owner's Mac other agents bring UTM forward —
-  or the input went astray).
+  can never become active; `CGEventPostToPid` moves no cursor. On Windows
+  `drive` creates the window itself with `WS_EX_NOACTIVATE`, shows it with
+  `SW_SHOWNOACTIVATE` and hands it to glaze, as native's testwin does (glaze's
+  own window took the foreground at start-up in every drive test, measured on
+  the `windows-11-arm` runner, 1 Oct 2026); it sits on top of the Z order,
+  not behind, because Chromium drops a wheel event over another process's
+  window. Each test reads the frontmost app before launching and after
+  closing (System Events through `osascript` on macOS; the foreground window,
+  its title and its process's executable on Windows) and fails if it changed.
+  The message says whether the new frontmost app is the test's own (a
+  takeover) or another (a person or another program switched apps — on the
+  owner's Mac other agents bring UTM forward — or the input went astray).
+  On Windows the session also records the foreground after every step, and a
+  test fails if the app's own window was ever in front (`TookForeground`),
+  because an app that takes the foreground hands it to some other window when
+  it closes, which the before/after check misreads as someone else's.
+- **A failure says what happened, step by step.** `Session.Trace` is every
+  step — window up, page loaded, each OS input and its result, the close —
+  with the time since launch and, on Windows, the foreground window after it.
+  A failed drive test logs it and every event the page reported (the bridge
+  also reports the page gaining and losing focus).
+- **Retries are logged, never silent.** Keys reach a WebView2 page only while
+  it has focus, and a window that is never activated can start without it or
+  lose it (native's input README, Windows). `TestDriveType` clicks into the
+  field and checks it is the active element before typing (up to five clicks)
+  and sends keys again (up to three times) only when the field is unchanged,
+  that is, when the page dropped them whole; anything partial fails.
+  `TestDriveScroll` posts up to three times for [UPSTREAM §6](UPSTREAM.md#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped).
+  Every retry is a `retry: <why>` log line, which `glaze-check` keeps even on
+  a pass: the row reads **PASS after a retry**, with the reasons, in
+  GLAZE-STATUS.md, and the log has a `RETRIED` line.
 - **`isTrusted` is the proof.** Every OS step is required to arrive as a
   trusted event; `TestDriveClick/script_click_is_untrusted` is the automated
   control showing the same click made by script arrives untrusted.
@@ -927,11 +1017,13 @@ img, err := s.Screenshot()               // native/screen, even behind other win
   `go.mod` replace, so `upstream:link` still builds against the local clone,
   which then needs `input/` and `screen/` (the task warns when they are
   missing). `glaze-check` records native as the fork, not as v0.1.15.
-- **Windows waits on native's Windows backend** (`feat/input-screen-windows`).
-  Until it is in the pinned native, `input` returns `ErrUnsupported` there and
-  the drive tests skip, saying so. When it lands: move the pseudo-version, run
-  `glaze:windows`, and check `windowInfo` in `app_windows.go`, whose client-area
-  offset is in pixels and has not been compared with the backend's coordinates.
+- **Windows uses native's Windows backend** (joeblew999/native PR #2,
+  `feat/input-screen-windows`): window messages posted to the app's windows,
+  so no cursor moves and the foreground does not change. Coordinates count
+  from DWM's extended frame bounds, as the backend does (`windowInfo` in
+  `app_windows.go`; `GetWindowRect` put every click 7 px right). The drive
+  tests run on the `windows-11-arm` CI job, whose desktop has to be cleared
+  first (see the Known traps).
 
 `examples/glaze-all` is the demo: every capability is a button, and
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
@@ -1354,6 +1446,19 @@ detail there and only the reminder here.
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |
+
+### Driving a window on Windows, and the hosted runner
+
+| trap | symptom | what to do |
+|---|---|---|
+| letting glaze create the window on Windows | glaze shows it with `SW_SHOW` and moves focus into WebView2, so it became the foreground window as it started, in every drive test (traced on `windows-11-arm`, 1 Oct 2026); a background click also activates it (Chromium focuses its window on mouse-down) | create the window with `WS_EX_NOACTIVATE`, show it with `SW_SHOWNOACTIVATE`, and pass it as `glaze.Options.Window` (`drive`'s `backgroundWindow`) |
+| comparing the foreground only before and after | an app that took the foreground hands it to another window when it closes, so the takeover was reported as "something else switched apps" (TestDriveClick, run 36804946289) | record the foreground at every step and fail on the app's own window (`Session.TookForeground`) |
+| the foreground named by HWND and pid | "window 0x30284 (pid 11052)" says nothing a day later | name the executable and the window title (`drive.Frontmost`) |
+| keys to a WebView2 window that is never activated | dropped whenever the page does not have focus | click into the field first, check it is the active element, and resend only keys that were dropped whole, logging each retry (`TestDriveType`) |
+| the `windows-11-arm` desktop at job start | a full-screen "Microsoft account" prompt (`WWAHost.exe`) over everything, Start open under it, a "System Properties" dialog; Chromium drops wheel events aimed at a covered window | `.github/scripts/runner-desktop.ps1 -Clear`, which lists, clears and checks |
+| stopping Start and Search once | they came back open 3 s later on one runner | Escape and stop their hosts until they stay closed, then check |
+| stopping WSL's updater (`wsl.exe --update --confirm --prompt-before-exit`) | back within 30 s in a new Windows Terminal window that takes the foreground, every ~90 s for the whole job ([runner-images#14264](https://github.com/actions/runner-images/issues/14264)): the runner's `provjobd.exe` runs `wsl.exe` every 30 s and the inbox stub (WSL is not installed) starts the updater whenever none is running; `wsl --update` exits 1, "not installed" | an Image File Execution Options `Debugger` makes `wsl.exe` run `cmd /c exit 1` for the rest of the job (traced with `runner-desktop.ps1 -Watch`) |
+| a native command last in a `pwsh` step | the step fails with that command's exit code (GitHub's wrapper exits with `$LASTEXITCODE`), though the script carried on | end the script with an explicit `exit 0` |
 
 ### In the guest programs
 

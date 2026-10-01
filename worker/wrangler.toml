@@ -29,3 +29,11 @@ bucket_name = "irgo-windows-vm-site"
 [[r2_buckets]]
 binding = "GOLDEN"
 bucket_name = "irgo-golden"
+
+# The remote job queue (worker/jobs.go): jobs/index.json, every live job, and
+# each job's binary, log and results. Private, reached only through
+# /api/jobs, /api/runner and /api/mcp behind JOBS_TOKENS, JOBS_ADMIN_TOKEN
+# and JOBS_RUNNER_TOKEN. A lifecycle rule deletes jobs/ after 7 days.
+[[r2_buckets]]
+binding = "JOBS"
+bucket_name = "irgo-jobs"

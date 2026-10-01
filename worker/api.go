@@ -9,6 +9,8 @@ package main
 //	POST /api/glaze-status/{target}               a run: shots.json and its pictures (token)
 //	GET  /api/glaze-status/{target}/runs/{id}/{f} one stored file of a run
 //	*    /api/golden/{key}, /api/golden-list/{kind}  the private golden image (golden.go)
+//	*    /api/jobs/..., /api/runner/...               the remote job queue (jobs.go)
+//	POST /api/mcp                                     the queue as an MCP server (jobs_mcp.go)
 //
 // Everything here is plain Go behind small interfaces (Env, Store, Blobs), so
 // it is tested with `go test` on the host; platform_js.go binds them to R2 and
@@ -39,9 +41,10 @@ type Store interface {
 
 // Env is what the platform supplies per request.
 type Env struct {
-	Var    func(name string) string // vars and secrets from wrangler.toml / wrangler secret
-	Site   func() (Store, error)    // the SITE bucket: glaze status, public data
-	Golden func() (Blobs, error)    // the GOLDEN bucket: the private golden image
+	Var    func(name string) string  // vars and secrets from wrangler.toml / wrangler secret
+	Site   func() (Store, error)     // the SITE bucket: glaze status, public data
+	Golden func() (Blobs, error)     // the GOLDEN bucket: the private golden image
+	Jobs   func() (JobBucket, error) // the JOBS bucket: the remote job queue (jobs.go)
 	Now    func() time.Time
 }
 
@@ -149,6 +152,12 @@ func Handler(env Env) http.Handler {
 			return
 		case get && len(p) == 2 && p[0] == "golden-list":
 			env.goldenList(w, r, p[1])
+			return
+		case p[0] == "jobs" || p[0] == "runner":
+			env.jobs(w, r, p)
+			return
+		case p[0] == "mcp" && len(p) == 1:
+			env.mcp(w, r)
 			return
 		}
 		fail(w, http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)

@@ -5,13 +5,25 @@ A plan must stand on its own: symptom, evidence, cause, the exact change, and ho
 
 ## Work order
 
-| # | Plan | State |
-|---|---|---|
-| 0 | [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md) — the whole work order and which agent owns each part; one agent on the VM at a time | in progress |
-| 1 | [`2026-09-30_1500_fast-dev-cycle.md`](2026-09-30_1500_fast-dev-cycle.md) — macOS-first loop, batched Windows gate, build tool once, poll not sleep, full logs, `vm:repair:test` | mostly done — `go:tool`, `glaze:mac`, logs, compressed pushes, polling; left: guest-pull transfer (firewall) |
-| 2 | [`2026-09-30_1700_vm-golden-image.md`](2026-09-30_1700_vm-golden-image.md) — ready VM in minutes: seal a golden image once per machine, APFS-clone it per agent (0 s), optional private R2 cache; no public distribution (Windows licence); BitLocker must be off first | phase 1 code done (agent H), merged only after the disposable-VM run |
-| 3 | [`2026-09-30_1900_robotgo-evaluation.md`](2026-09-30_1900_robotgo-evaluation.md) — can go-vgo/robotgo help? No: no single-window capture, focus-dependent input, cgo by default and untested purego backends; optional follow-up: find the UTM window ID with purego instead of `swift` | evaluated, not adopted |
-| 4 | [`2026-09-30_2000_utm-5.md`](2026-09-30_2000_utm-5.md) — UTM 5.0.x are betas; 4.7.5 is the latest stable. Config format, `utmctl` commands, clone and AppleScript are unchanged in 5.0.6; none of our five `utmctl` findings is fixed; the risks are GICv3, the new 3D QEMU arguments, the new guest-tools ISO and open Win11 boot bugs. Stay on 4.7.5, trial on a disposable VM, adopt at stable. `doctor` now reports UTM updates; `vm-create` installs stable only, tested | assessed; code done; trial not run (needs the VM free) |
+Every workstream has a plan here — running, queued, or waiting on the owner. Agents named are the
+main session's background agents; the main session reviews and merges their branches.
+
+| # | Plan | Owner | State |
+|---|---|---|---|
+| 0 | [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md) — index of all work, "Resume here" | main session | living |
+| 1 | [`2026-10-01_1000_release-prime-time.md`](2026-10-01_1000_release-prime-time.md) — install, first run, golden auto-pull, agent guide, v0.5.0 | agent X | in progress |
+| 2 | [`2026-10-01_1020_shared-mac.md`](2026-10-01_1020_shared-mac.md) — VM ownership, leases, reaping, resource guard, per-VM staging | agent Z | in progress |
+| 3 | [`2026-10-01_1030_worker-ledger.md`](2026-10-01_1030_worker-ledger.md) — D1 ledger of agents/machines/VMs, dashboard | agent AA | in progress |
+| 4 | [`2026-10-01_1040_vm-conformance.md`](2026-10-01_1040_vm-conformance.md) — the glaze suite's machinery pointed at the VM; VM-STATUS.md | agent BB | in progress |
+| 5 | [`2026-10-01_1100_remote-cross-platform.md`](2026-10-01_1100_remote-cross-platform.md) — Windows/Linux/GitHub clients drive a Mac through the Worker | agent CC | starting |
+| 6 | [`2026-10-01_1010_issue-intake-and-triage.md`](2026-10-01_1010_issue-intake-and-triage.md) — report command, forms, labels done; triage routine next | main session | intake done; routine next |
+| 7 | [`2026-10-01_1050_native-input-and-drive.md`](2026-10-01_1050_native-input-and-drive.md) — fork PRs #1/#2, examples/drive, Windows CI reliable | — | done; owner merges fork PRs |
+| 8 | [`2026-09-30_1700_vm-golden-image.md`](2026-09-30_1700_vm-golden-image.md) — golden image, 23 s per VM, private R2 cache via the Worker | — | done (auto-pull in plan 1) |
+| 9 | [`2026-10-01_1110_utmvm-professional-pass.md`](2026-10-01_1110_utmvm-professional-pass.md) — utmvm cleanup | queued | after plans 2 and 4 |
+| 10 | [`2026-09-30_2000_utm-5.md`](2026-09-30_2000_utm-5.md) — stay on UTM 4.7.5; trial 5.x on a disposable VM | queued | needs a free VM slot |
+| 11 | [`2026-09-30_1745_glaze-1b-upstream.md`](2026-09-30_1745_glaze-1b-upstream.md) — glaze §1b fix on a branch; Windows run, then file | owner + VM | waiting: Windows run, owner's "send" |
+| 12 | [`2026-09-30_1800_upstream-reports.md`](2026-09-30_1800_upstream-reports.md) — nine drafted upstream reports | owner | waiting: "send them" |
+| 13 | [`2026-09-30_1500_fast-dev-cycle.md`](2026-09-30_1500_fast-dev-cycle.md) — fast loop | — | done except guest-pull (superseded by SMB push) |
 
 Earlier work is in Done: [`done/`](done/) — upstream workflow restored (`upstream:*`), glaze#34 reported,
 VM hardened (`vm-repair`, never-expiring password, fail-fast `-gui`).

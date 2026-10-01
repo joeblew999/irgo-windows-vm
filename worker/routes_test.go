@@ -43,6 +43,7 @@ var sampleParams = map[string][]string{
 	wire.RouteJobGet:          {sampleJob},
 	wire.RouteJobLog:          {sampleJob},
 	wire.RouteJobFile:         {sampleJob, "desktop.png"},
+	wire.RouteJobAdminFile:    {sampleJob, "desktop.png"},
 	wire.RouteJobCancel:       {sampleJob},
 	wire.RouteRunnerHeartbeat: {sampleJob},
 	wire.RouteRunnerInput:     {sampleJob},

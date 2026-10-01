@@ -783,7 +783,7 @@
         "type": "http"
       },
       "jobs-admin": {
-        "description": "lists every job in the queue. The Worker's secret JOBS_ADMIN_TOKEN; clients read it from IRGO_REMOTE_ADMIN_TOKEN.",
+        "description": "lists every job in the queue and reads any job's result files. The Worker's secret JOBS_ADMIN_TOKEN; clients read it from IRGO_REMOTE_ADMIN_TOKEN.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -811,6 +811,112 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/jobs/{id}/files/{name}": {
+      "get": {
+        "operationId": "job-admin-file",
+        "parameters": [
+          {
+            "description": "the job's id: 32 hex digits",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "a result file: result.json, stdout.txt, test2json.json, desktop.png, shot-*.png",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png, application/json or text/plain": {
+                "schema": {
+                  "contentMediaType": "image/png, application/json or text/plain",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "X-Job-Sha256": {
+                "description": "its SHA-256 as stored",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "jobs-admin": []
+          }
+        ],
+        "summary": "one result file of any caller's job, as job-file answers its owner; a job that does not exist is 404",
+        "x-irgo-winvm-commands": [
+          "remote-result"
+        ],
+        "x-scope": "jobs-admin"
+      }
+    },
     "/api/glaze-status": {
       "get": {
         "operationId": "glaze-latest",

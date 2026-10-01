@@ -112,7 +112,8 @@ func TestMatch(t *testing.T) {
 		RouteGoldenPut: {GoldenManifestKey(h64)}, RouteGoldenDelete: {GoldenLatestKey},
 		RouteGoldenList: {"chunks"},
 		RouteJobInput:   {jobID}, RouteJobGet: {jobID}, RouteJobLog: {jobID}, RouteJobFile: {jobID, "desktop.png"},
-		RouteJobCancel: {jobID}, RouteRunnerHeartbeat: {jobID}, RouteRunnerInput: {jobID}, RouteRunnerLog: {jobID},
+		RouteJobAdminFile: {jobID, "desktop.png"},
+		RouteJobCancel:    {jobID}, RouteRunnerHeartbeat: {jobID}, RouteRunnerInput: {jobID}, RouteRunnerLog: {jobID},
 		RouteRunnerFile: {jobID, "desktop.png"}, RouteRunnerFinish: {jobID},
 	}
 	for _, r := range Routes {

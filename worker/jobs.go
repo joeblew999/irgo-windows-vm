@@ -301,6 +301,22 @@ func (env Env) jobBucket(w http.ResponseWriter) (JobBucket, bool) {
 // callerJob finds a job of this caller's, in the index or archived; it
 // answers 404 itself for one that is not there or not theirs.
 func (env Env) callerJob(w http.ResponseWriter, r *http.Request, b JobBucket, id string) (jobIndex, *Job, bool) {
+	return env.findJob(w, b, id, ownedBy(env.jobOwner(r)))
+}
+
+// ownedBy is a job of caller's. No caller owns nothing: an empty name never
+// matches, rather than matching every job.
+func ownedBy(caller string) func(*Job) bool {
+	return func(j *Job) bool { return caller != "" && j.Owner == caller }
+}
+
+// anyOwner is every job, for the admin token's routes.
+func anyOwner(*Job) bool { return true }
+
+// findJob finds a job, in the index or archived, that may answers yes for;
+// it answers 404 itself for one that is not there or that may refuses, so
+// another caller's job looks exactly like one that does not exist.
+func (env Env) findJob(w http.ResponseWriter, b JobBucket, id string, may func(*Job) bool) (jobIndex, *Job, bool) {
 	ix, err := loadIndex(b, env.Now().UTC())
 	if err != nil {
 		fail(w, wire.CodeStorage, "%v", err)
@@ -318,7 +334,7 @@ func (env Env) callerJob(w http.ResponseWriter, r *http.Request, b JobBucket, id
 			j = &a
 		}
 	}
-	if j == nil || j.Owner != env.jobOwner(r) {
+	if j == nil || !may(j) {
 		fail(w, wire.CodeNotFound, "no such job")
 		return ix, nil, false
 	}
@@ -481,8 +497,19 @@ func (env Env) jobLog(w http.ResponseWriter, r *http.Request, p []string) {
 	_, _ = io.Copy(w, body)
 }
 
-// jobFile is GET /api/jobs/{id}/files/{name}.
+// jobFile is GET /api/jobs/{id}/files/{name}: the caller's own job's file.
 func (env Env) jobFile(w http.ResponseWriter, r *http.Request, p []string) {
+	env.serveJobFile(w, p, ownedBy(env.jobOwner(r)))
+}
+
+// jobAdminFile is GET /api/admin/jobs/{id}/files/{name}, for the admin
+// token: the same file, whoever's job it is.
+func (env Env) jobAdminFile(w http.ResponseWriter, _ *http.Request, p []string) {
+	env.serveJobFile(w, p, anyOwner)
+}
+
+// serveJobFile streams file p[1] of job p[0], if may allows that job.
+func (env Env) serveJobFile(w http.ResponseWriter, p []string, may func(*Job) bool) {
 	ct, ok := wire.JobFileType(p[1])
 	if !ok {
 		fail(w, wire.CodeNotFound, "no such file")
@@ -492,7 +519,7 @@ func (env Env) jobFile(w http.ResponseWriter, r *http.Request, p []string) {
 	if !ok {
 		return
 	}
-	if _, _, ok := env.callerJob(w, r, b, p[0]); ok {
+	if _, _, ok := env.findJob(w, b, p[0], may); ok {
 		streamBlob(w, b, jobFileKey(p[0], p[1]), ct)
 	}
 }

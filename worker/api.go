@@ -78,6 +78,7 @@ var handlers = map[string]handlerFunc{
 	wire.RouteJobFile:         Env.jobFile,
 	wire.RouteJobCancel:       Env.jobCancel,
 	wire.RouteJobList:         Env.jobList,
+	wire.RouteJobAdminFile:    Env.jobAdminFile,
 	wire.RouteRunnerClaim:     Env.runnerClaim,
 	wire.RouteRunnerHeartbeat: Env.runnerHeartbeat,
 	wire.RouteRunnerInput:     Env.runnerInput,

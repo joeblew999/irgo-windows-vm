@@ -21,6 +21,7 @@ const (
 	RouteJobFile         = "job-file"
 	RouteJobCancel       = "job-cancel"
 	RouteJobList         = "job-list"
+	RouteJobAdminFile    = "job-admin-file"
 	RouteRunnerClaim     = "runner-claim"
 	RouteRunnerHeartbeat = "runner-heartbeat"
 	RouteRunnerInput     = "runner-input"
@@ -31,8 +32,8 @@ const (
 )
 
 // Scopes. A caller's token submits and reads its own jobs, the admin's lists
-// them all, the runner's (the Mac's) takes and reports them; none does
-// another's job.
+// them all and reads their result files, the runner's (the Mac's) takes and
+// reports them; none does another's job.
 const (
 	ScopeJobs       Scope = "jobs"
 	ScopeJobsAdmin  Scope = "jobs-admin"
@@ -204,7 +205,7 @@ var (
 func init() {
 	Scopes = append(Scopes,
 		ScopeInfo{ScopeJobs, "JOBS_TOKENS", "IRGO_REMOTE_TOKEN", "a remote job's caller: submits and reads its own jobs (the secret is name=token,name=token, one per caller)"},
-		ScopeInfo{ScopeJobsAdmin, "JOBS_ADMIN_TOKEN", "IRGO_REMOTE_ADMIN_TOKEN", "lists every job in the queue"},
+		ScopeInfo{ScopeJobsAdmin, "JOBS_ADMIN_TOKEN", "IRGO_REMOTE_ADMIN_TOKEN", "lists every job in the queue and reads any job's result files"},
 		ScopeInfo{ScopeJobsRunner, "JOBS_RUNNER_TOKEN", "IRGO_REMOTE_RUNNER_TOKEN", "the Mac running irgo-winvm serve: takes jobs and reports them"},
 	)
 	Codes = append(Codes,
@@ -260,6 +261,14 @@ func init() {
 			Summary: "every job in the index, live and ended in the last day",
 			Success: http.StatusOK, Response: JobList{}, ResponseType: TypeJSON,
 			Errors: []Code{CodeStorage, CodeInternal}, Commands: []string{"remote-status"},
+		},
+		Route{
+			Name: RouteJobAdminFile, Method: http.MethodGet, Path: "/api/admin/jobs/{id}/files/{name}", Scope: ScopeJobsAdmin,
+			Summary: "one result file of any caller's job, as job-file answers its owner; a job that does not exist is 404",
+			Params:  []Param{jobIDParam, jobFileParam},
+			Success: http.StatusOK, ResponseType: "image/png, application/json or text/plain",
+			ResponseHeaders: []Param{{HeaderJobSHA256, "header", "its SHA-256 as stored"}},
+			Errors:          jobErrs, Commands: []string{"remote-result"},
 		},
 		Route{
 			Name: RouteRunnerClaim, Method: http.MethodPost, Path: "/api/runner/claim", Scope: ScopeJobsRunner,

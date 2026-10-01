@@ -282,7 +282,7 @@ Done on 1 Oct 2026 by these steps. In order:
    | `LEDGER_TOKEN` | the tool posting to [the ledger](#the-ledger) (`IRGO_LEDGER_TOKEN`) |
    | `LEDGER_READ_TOKEN` | reading the ledger: its page and JSON (`IRGO_LEDGER_READ_TOKEN`) |
    | `JOBS_TOKENS` | [the job queue](#the-remote-job-queue)'s callers, `name=token,…` (`IRGO_REMOTE_TOKEN`) |
-   | `JOBS_ADMIN_TOKEN` | listing every job (`IRGO_REMOTE_ADMIN_TOKEN`) |
+   | `JOBS_ADMIN_TOKEN` | listing every job and reading its result files (`IRGO_REMOTE_ADMIN_TOKEN`) |
    | `JOBS_RUNNER_TOKEN` | the Mac running `serve` (`IRGO_REMOTE_RUNNER_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
@@ -314,7 +314,7 @@ its body and its answers are on the [Worker API](https://joeblew999.github.io/ir
 | scope (secret) | routes |
 |---|---|
 | `jobs` (`JOBS_TOKENS`) | `POST /api/jobs` a spec; `PUT …/{id}/input` the binary, at most 95 MiB, stored only if R2 finds it hashes to the spec; `GET …/{id}`, `…/{id}/log?offset=N`, `…/{id}/files/{name}`; `POST …/{id}/cancel`; `POST /api/mcp` |
-| `jobs-admin` (`JOBS_ADMIN_TOKEN`) | `GET /api/jobs`, every job in the index |
+| `jobs-admin` (`JOBS_ADMIN_TOKEN`) | `GET /api/jobs`, every job in the index; `GET /api/admin/jobs/{id}/files/{name}`, any caller's result file |
 | `jobs-runner` (`JOBS_RUNNER_TOKEN`) | `POST /api/runner/claim`, and the running job's `heartbeat`, `input`, `log`, `files/{name}`, `finish`; 409 once it is not running, which stops the Mac |
 
 **One object, changed by compare-and-swap.** Every live job is in
@@ -342,9 +342,12 @@ lifecycle rule deletes `jobs/` after 7 days.
 caller (`wire.Scope.Named`), so one can be revoked alone and every job records
 its caller's name; a bare token is the caller `caller`. A caller sees only its
 own jobs: another caller's id answers 404, as one that does not exist does.
-Each token does one job, as every other scope's: the admin token lists and
-reads nothing else, the runner's takes and reports jobs, and either is 401 on
-the other's routes. Limits: the binary 95 MiB, a result file 32 MiB and 64 of
+Each token does one job, as every other scope's: the admin token lists jobs
+and reads their result files on its own routes (`/api/admin/…`; never a log, a
+binary, a submit or a cancel), the runner's takes and reports jobs, and each is
+401 on the others' routes. `findJob` is told which jobs a request may see:
+the caller's own (`ownedBy`, where an empty name owns nothing) or, on the
+admin's routes only, any (`anyOwner`). Limits: the binary 95 MiB, a result file 32 MiB and 64 of
 them, the log 2 MiB, 64 arguments of 4 KiB, a timeout of at most 1 h (default
 10 min), 20 live jobs per caller (`too-many`, 429), 500 in the index.
 

@@ -397,6 +397,25 @@ needs `LEDGER_READ_TOKEN`, which the page also takes as an HTTP Basic password
   events, one statement each) and a daily row budget, which the indexes on
   `ts`, `op`, `(machine, vm, ts)` and `(owner, ts)` keep small.
 
+### Capacity
+
+Each Mac reports its disk and memory to the ledger as an ordinary event of type
+`capacity`, through the same `POST /api/ledger/events`, so there is no endpoint
+of its own. Its `detail` is a `wire.LedgerCapacitySnapshot` as JSON (the type and its parser, `wire.ParseLedgerCapacity`, are in the route table's package, so the tool and the Worker share one definition), written by the tool's
+`capacity` (and after `vm-create`, `vm-delete`, `vm-reap` and `prune -force`):
+free and total disk, the Mac's memory and what running VMs are configured with,
+VM, running and stale counts, the disk still promised to VMs, the tool's own
+bytes, whether another clone fits (`yes`, `no`, `cannot tell`) and how many more
+fit by disk and can run by memory. What the numbers mean is in
+[Is there room?](USING.md#is-there-room).
+
+`GET /api/ledger/vms` gives each machine its newest snapshot (`capacity`,
+`capacity_at`); one that does not parse, or has no disk size or verdict, is
+`capacity_error`, cannot tell, never zeros. The page has a **Capacity** table,
+one row per machine. The view decides nothing: the guard on each Mac does.
+`worker/ledger_capacity_test.go` covers newest-wins, an unreadable snapshot and
+a machine that sent none.
+
 Set up on 1 Oct 2026: `wrangler d1 create irgo-ledger` (its id is in
 `wrangler.toml`), `wrangler d1 migrations apply irgo-ledger --remote`, the two
 secrets, then a deploy. Locally: `wrangler d1 migrations apply irgo-ledger

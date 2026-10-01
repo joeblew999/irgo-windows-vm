@@ -37,11 +37,17 @@ func runVMCreate(v values, _ []string) error {
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	// Room for it, and whose it is, before anything is made or started.
-	finish, err := utmvm.BeginCreate(name, v.caller, !v.Bool("golden"), v.Bool("overcommit"), say)
+	// What the tool wrote that is past its bounds goes first, so it never
+	// counts against the room (prune.go).
+	autoPrune(say)
+	finish, err := beginCreateReaping(func() (func(), error) {
+		return utmvm.BeginCreate(name, v.caller, !v.Bool("golden"), v.Bool("overcommit"), say)
+	}, say)
 	if err != nil {
 		return err
 	}
 	defer finish()
+	defer reportCapacityChange()
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
 		VMName:   name,
@@ -116,6 +122,7 @@ func runVMDelete(v values, _ []string) error {
 		return err
 	}
 	say("removed %s — %s reclaimed", utmvm.Home(out.Path), utmvm.HumanBytes(out.TotalBytes))
+	defer reportCapacityChange()
 	return utmvm.ForgetVM(e.Name)
 }
 
@@ -188,6 +195,7 @@ func runVMReap(v values, _ []string) error {
 		return fmt.Errorf("%d to delete or forget. Pass -force to do it (%w)", acting, errRefused)
 	}
 	say("reaped %d", acting)
+	reportCapacityChange()
 	return nil
 }
 

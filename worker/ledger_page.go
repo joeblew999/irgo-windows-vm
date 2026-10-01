@@ -113,6 +113,9 @@ func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request, _ []string) {
 	}
 	b.WriteString("</tbody></table>\n")
 
+	b.WriteString("<h2>Capacity</h2>\n")
+	capacityPanel(&b, v.Machines, head, row)
+
 	b.WriteString("<h2>Recent events</h2>\n")
 	head("when", "type", "command", "VM", "host", "owner", "client", "exit", "took", "detail")
 	for _, e := range v.Recent {
@@ -132,4 +135,37 @@ func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request, _ []string) {
 	w.Header().Set("X-Robots-Tag", "noindex")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// capacityPanel is each machine's newest capacity snapshot: disk, memory, VM
+// counts and whether another clone fits, as the tool's `capacity` reported it.
+func capacityPanel(b *strings.Builder, machines []machineView, head func(...string), row func(...string)) {
+	sent := false
+	for _, m := range machines {
+		sent = sent || m.Capacity != nil || m.CapacityErr != ""
+	}
+	if !sent {
+		b.WriteString("<p>No machine has sent a capacity snapshot in the window (irgo-winvm capacity sends one).</p>\n")
+		return
+	}
+	gib := func(n int64) string { return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30)) }
+	head("host", "as of", "disk free", "memory for VMs", "VMs", "running", "stale", "another clone", "more fit")
+	for _, m := range machines {
+		switch {
+		case m.CapacityErr != "":
+			row(esc(m.Host), esc(when(m.CapacityAt)), `<span class="state state-stale">cannot tell</span> <small>`+esc(m.CapacityErr)+`</small>`, "", "", "", "", "", "")
+		case m.Capacity != nil:
+			c := m.Capacity
+			verdict := `<span class="state state-idle">` + esc(c.Clone) + `</span>`
+			if c.Clone == "yes" {
+				verdict = `<span class="state state-in-use">yes</span>`
+			}
+			row(esc(m.Host), esc(when(m.CapacityAt)),
+				esc(gib(c.DiskFree))+" <small>of "+esc(gib(c.DiskTotal))+", "+esc(gib(c.Promised))+" promised</small>",
+				esc(gib(c.RunningMemory))+" <small>of "+esc(gib(c.Memory))+"</small>",
+				fmt.Sprint(c.VMs), fmt.Sprint(c.Running), fmt.Sprint(c.Stale), verdict,
+				fmt.Sprintf("%d by disk, %d to run", c.MoreClones, c.MoreRunning))
+		}
+	}
+	b.WriteString("</tbody></table>\n")
 }

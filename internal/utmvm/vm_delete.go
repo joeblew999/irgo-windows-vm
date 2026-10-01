@@ -45,6 +45,13 @@ func InspectRemoval(ref string) (Removal, error) {
 		return r, fmt.Errorf("bundle not found at %s", r.Path)
 	}
 	r.TotalBytes, _ = walkBundle(r.Path)
+	// UTM's container cannot be walked (App Data protection), so the walk
+	// finds nothing there; the disk's APFS private size is what deleting it
+	// frees, shared clone blocks excluded (capacity_model.go). Before 1 Oct
+	// 2026 every vm-delete reported "— reclaimed".
+	if d := readVMDisk(e.Name); d.Err == nil && d.Private > r.TotalBytes {
+		r.TotalBytes = d.Private
+	}
 	return r, nil
 }
 

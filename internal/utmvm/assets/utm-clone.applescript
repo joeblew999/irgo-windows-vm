@@ -1,7 +1,9 @@
 -- Clone a stopped VM into a new one, through UTM, without restarting it.
 --
--- Arguments, in order: the source VM's name, the new VM's name, the new MAC.
--- Prints the MAC the new VM ended up with, so the caller can check it took.
+-- Arguments, in order: the source VM's name, the new VM's name, the new MAC,
+-- the new VM's memory in MiB (0 keeps the source's), and the new name again.
+-- Prints the MAC and the memory the new VM ended up with, tab-separated, so
+-- the caller can check both took.
 --
 -- Why each part is here (UTM v4.7.5 source, Scripting/ and Platform/UTMData.swift):
 --
@@ -17,6 +19,10 @@
 --    is kept. The install ISO (5.26 GB, and a separate copy on irgo-win11),
 --    the answer-file CD and the guest-tools CD are done with once Windows and
 --    the agent are installed.
+--  * `memory` is set in the same properties: a test clone is made with 4 GiB
+--    where the image has 8, so one fits beside irgo-win11 on a 16 GiB Mac
+--    (capacity_model.go). Read back, because a property UTM ignores is not an
+--    error.
 --  * All of it is done by UTM, which can read its own container. This process
 --    cannot: macOS App Data protection returns "Operation not permitted" for
 --    ls, cat and touch in ~/Library/Containers/com.utmapp.UTM, even
@@ -31,7 +37,9 @@ tell application "UTM"
 		if (interface of d) is NVMe then set end of keep to {id:(id of d)}
 	end repeat
 	if (count of keep) is not 1 then error "expected one NVMe system disk on " & (name of src) & ", found " & (count of keep)
-	duplicate src with properties {configuration:{name:%q, drives:keep, network interfaces:{{index:0, address:%q}}}}
+	set mem to %d
+	if mem is 0 then set mem to memory of cfg
+	duplicate src with properties {configuration:{name:%q, drives:keep, memory:mem, network interfaces:{{index:0, address:%q}}}}
 	set newCfg to configuration of (virtual machine named %q)
-	return address of item 1 of (network interfaces of newCfg)
+	return (address of item 1 of (network interfaces of newCfg)) & tab & ((memory of newCfg) as text)
 end tell

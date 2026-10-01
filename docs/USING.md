@@ -60,11 +60,15 @@ naming the busy lock; `app-create` on two different VMs runs side by side
   `xorriso`) read `optional` or `not yet`, never `MISSING`.
 - **`status`** lists every VM with its owner, last use and idle time, then
   long-running jobs, or one job by its id.
+- **`capacity`** reports the disk and memory: what each VM and the tool's data
+  hold, by owner, and how many more VMs fit ([Is there room?](#is-there-room)).
 - **`report`** prints a redacted diagnostic block for an issue
   ([Reporting issues](FOR-AGENTS.md#reporting-issues)).
 
 **`vm-reap`** does change something: it removes the clones callers left behind
-([Sharing one Mac](#sharing-one-mac)).
+([Sharing one Mac](#sharing-one-mac)). So does **`prune`**, which removes the
+screenshots, logs and staged binaries past their bounds
+([Is there room?](#is-there-room)).
 
 Four commands, **`glaze-check`** and **`glaze-status`**, **`vm-check`** and
 **`vm-status`**, work only in a checkout of this repository, because they
@@ -147,7 +151,7 @@ records *why* these particular numbers were chosen, only that they are fixed.
 |---|---|---|
 | name | `irgo-win11` | `utmvm.DefaultVMName`, the machine owner's; `-vm` overrides, and every other caller must pass it ([Sharing one Mac](#sharing-one-mac)) |
 | disk | **64 GiB, sparse** | costs kilobytes until the guest writes; see [what it costs](#what-it-costs) |
-| RAM | **8192 MiB** | `vmMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds one ([Is there room?](#is-there-room)) |
+| RAM | **8192 MiB**; a clone of the golden image **4096 MiB** | `vmMemoryMiB` and `cloneMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds `irgo-win11` and one clone ([Is there room?](#is-there-room)) |
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 
 The guest logs itself in as **`dev`**, an administrator, with the password
@@ -429,24 +433,89 @@ refuse with exit 7, the numbers, and the running VMs by name.
 
 - **Memory:** `hw.memsize`, less the memory UTM says each VM that is not
   stopped is configured with (AppleScript `memory of configuration`, which
-  needs no Full Disk Access; paused VMs keep theirs), less the VMs other
-  `vm-create`s are still making (their records' live pids), less the new VM's,
-  must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the owner's own
-  work. Configured, not current use, because the guest commits it: on 1 Oct
-  2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of it dirty,
-  with 6.3 GB of the Mac's 7 GB swap in use. So a 16 GiB Mac holds one VM and
-  refuses a second; 32 GiB holds three. `-overcommit` skips the memory half for
-  a person who accepts swapping: three VMs did boot and pass `glaze-check` on
-  16 GiB for a few minutes ([RESULTS](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026)).
+  needs no Full Disk Access; paused VMs keep theirs), less 8 GiB for each VM
+  other `vm-create`s are still making (their records' live pids), less the new
+  VM's, must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the
+  owner's own work. Configured, not current use, because the guest commits it:
+  on 1 Oct 2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of
+  it dirty, with 6.3 GB of the Mac's 7 GB swap in use. **A clone of the golden
+  image is made with 4 GiB** (`cloneMemoryMiB`, set in UTM's configuration as
+  it is cloned and read back); `irgo-win11` and installs keep 8 GiB. So a
+  16 GiB Mac runs `irgo-win11` and one clone (16 − 8 − 4 = 4 left) and refuses
+  a second; 32 GiB runs `irgo-win11` and four. A 4 GiB clone beside
+  `irgo-win11` passed `glaze-check -windows` and `vm-check`
+  ([RESULTS](RESULTS.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)).
+  `-overcommit` skips the memory half for a person who accepts swapping.
 - **Disk:** free space on the volume holding UTM's VMs (`statfs`, which works
-  there without Full Disk Access) must cover the new VM's growth plus
-  `hostDiskReserveBytes`, **10 GiB**, which keeps macOS, whose swap lives on
-  that volume, out of its low-space warnings. The growth is `cloneHeadroomBytes`,
-  **10 GiB**, for a clone (still an estimate; a clone's boot and one run moved
-  `df` by about 1 GiB) and `installHeadroomBytes`, **30 GiB**, for an install,
-  or for pulling the golden image from the private cache when there is none
-  here (8.4 GB down, then the bundle rebuilt). So a clone wants 20 GiB free and
-  an install 40 GiB. An existing stopped VM being booted needs no disk check.
+  there without Full Disk Access) must cover the new VM, plus what the VMs
+  already there are still promised, plus `hostDiskReserveBytes`, **10 GiB**,
+  which keeps macOS, whose swap lives on that volume, out of its low-space
+  warnings. A new clone needs `cloneReserveBytes`, **4 GiB**; an install, or a
+  pull of the golden image when there is none here, `installReserveBytes`,
+  **30 GiB**. Every VM is allowed to grow to its reserve: one that has written
+  1 GiB of its own is still promised 3, and that space counts as taken. A clone
+  measured on 1 Oct 2026 wrote 0.28 GiB of its own through a boot, a
+  `glaze-check -windows`, twenty `app-create`s and 90 idle minutes
+  ([RESULTS](RESULTS.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)),
+  so 4 GiB is fourteen times that, for a Windows update that session did not
+  show. An existing stopped VM being booted needs no disk check. One VM whose
+  disk cannot be measured makes the answer cannot tell.
+- **Quota:** each owner may have **2 VMs** holding **16 GiB**, where a VM holds
+  its own bytes or its 4 GiB reserve, whichever is more: two fresh clones hold
+  8 GiB and can each grow by 4 more. `IRGO_WINVM_QUOTA_VMS` and
+  `IRGO_WINVM_QUOTA_GIB` change it for everyone on the machine (0 is no limit,
+  anything else that does not parse refuses). VMs without a record
+  (`irgo-win11`, the golden image) belong to nobody's quota.
+
+Before it asks, `vm-create` runs `prune -force`: only what is already past its
+bounds goes (see below). When the answer is no and `IRGO_WINVM_AUTO_REAP` is set
+to a lease such as `24h`, it runs `vm-reap -force` with that lease and asks once
+more; unset, it never deletes a VM, and the refusal says the variable exists.
+
+The numbers live in one place, `internal/utmvm/capacity_model.go`, read by this
+check, by `capacity` and by `doctor`; how they are measured is in
+[Architecture](ARCHITECTURE.md#the-capacity-model).
+
+**`irgo-winvm capacity`** (`-json` for scripts, and the `capacity` tool over
+MCP) answers how much room there is and who holds it:
+
+- the volume's size and free space, the Mac's memory and what running VMs are
+  configured with;
+- every VM UTM lists: its state, owner, configured memory, **its own bytes**
+  (what deleting it frees), what it is still promised, idle time, and whether it
+  is stale (idle past a day, so `vm-reap -force` would take it);
+- every directory the tool writes under its runtime folder, with its own and its
+  shared bytes and what keeps it from growing;
+- what each owner holds against the quota;
+- whether there is room for another clone, worked out by the same decision as
+  `vm-create`'s (with no owner, so no quota), with the reason, and how many more
+  clones fit on disk and how many more VMs can run.
+
+On 1 Oct 2026 on the owner's Mac: 38.2 GiB free of 460 GiB; `irgo-win11`
+20.6 GiB of its own; the golden image 10.1 GiB, all of it shared with
+`golden-export`, a copy made by hand, which therefore holds nothing of its own;
+media 9.1 GiB; room by disk for 7 more clones and by memory for one 4 GiB
+clone beside `irgo-win11`. `doctor` ends with the same answer in one line.
+
+Bytes are APFS's own accounting, not `du`: `du` counts a clone and its source in
+full each, so the golden image and `golden-export` read 20 GB to it and hold
+10 GB between them.
+
+**`irgo-winvm prune`** lists what the tool wrote that is past its bounds, and
+with `-force` removes it, each item under its lock taken without waiting (a busy
+one is kept and said), and checks each is gone:
+
+| what | bound |
+|---|---|
+| runtime screenshots (`shots/`) | 14 days or 200 MiB, newest first; the newest of each stage is always kept, for `vm-screen -promote` |
+| glaze run logs (`logs/glaze-*`) | 30 days or 100 MiB; the newest of each target kept. The command log rotates itself at 8 MiB |
+| staged binaries (`bin/<caller>/`) | unused for 7 days, under that caller's stage lock |
+| `golden-pull/.parts`, `vm/staging/*`, media scratch | untouched for a day, under the machine lock: left by work that died |
+
+It never touches a VM (`vm-reap`), the media (`iso-delete`), the golden image or
+its pull (`vm-golden-*`), the VM records, jobs (20 finished are kept) or the
+ledger spool (4 MiB). On 1 Oct 2026 its first run removed 32 screenshots from
+August, 103 MB by APFS's count and by `du`.
 
 ## Where it keeps things
 

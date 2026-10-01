@@ -293,6 +293,14 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		setIf(&m.LastOwner, e.Owner)
 		setIf(&m.Version, e.Version)
 		setIf(&m.LastCommand, e.Command)
+		if e.Type == wire.LedgerCapacity {
+			// Events are in time order, so the last one read is the newest.
+			c, err := wire.ParseLedgerCapacity(e.Detail)
+			m.Capacity, m.CapacityAt, m.CapacityErr = c, e.TS, ""
+			if err != nil {
+				m.CapacityErr = "unreadable snapshot: " + err.Error()
+			}
+		}
 		if e.Op != "" && e.Type.Opens() && !closed[e.Op] {
 			open[e.Op] = e
 		}

@@ -51,6 +51,10 @@ const (
 	VMCreate     = wire.LedgerVMCreate
 	VMDelete     = wire.LedgerVMDelete
 	Reap         = wire.LedgerReap
+	// Capacity is a snapshot of one machine's disk, memory and VM counts,
+	// wire.LedgerCapacitySnapshot as JSON in Detail. It opens and closes
+	// nothing.
+	Capacity = wire.LedgerCapacity
 )
 
 // Event is one thing that happened: the Worker's wire.LedgerEvent. Record
@@ -319,6 +323,10 @@ func Emit(e Event) {
 		c.FlushAsync()
 	}
 }
+
+// On reports whether a Client is configured, for a caller whose event costs
+// something to gather.
+func On() bool { return std.Load() != nil }
 
 // DrainDefault is Drain on the configured Client.
 func DrainDefault(budget time.Duration) { std.Load().Drain(budget) }

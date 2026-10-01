@@ -57,19 +57,23 @@ func runDoctor(v values, _ []string) error {
 
 	out := utmvm.Reporter("doctor")
 	out("%-22s %-12s %s", "WHAT", "STATE", "WHERE")
-	var update string
+	var update, room string
 	for _, r := range rows {
 		where := utmvm.Home(r.Path)
 		if where == "" {
 			where = r.URL
 		}
 		out("%-22s %-12s %s", r.What, r.State, where)
-		if r.What == utmUpdateRow {
+		switch r.What {
+		case utmUpdateRow:
 			update = r.Note
+		case "capacity":
+			room = "Capacity " + r.Note
 		}
 	}
 	out("")
 	out("%s", update)
+	out("%s", room)
 	out("")
 	for _, line := range nextSteps(measureSetup()) {
 		out("%s", line)
@@ -220,7 +224,8 @@ func doctorRows() []doctorRow {
 		rows = append(rows, recordRow(r))
 	}
 	rows = append(rows, jobsRow(), vmRecordsRow())
-	return append(rows, goldenRows()...)
+	rows = append(rows, goldenRows()...)
+	return append(rows, capacitySummary(utmvm.Capacity()))
 }
 
 // utmReleaseRows reports the installed UTM, the latest stable release and the

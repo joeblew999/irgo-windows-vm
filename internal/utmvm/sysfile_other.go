@@ -69,3 +69,14 @@ func hostMemory() (uint64, error) {
 
 // processAlive is false off macOS, where no vm-create can be running.
 func processAlive(_ int) bool { return false }
+
+// apfsUsage is APFS-only. The capacity report says "cannot tell" for every
+// file rather than guessing what a clone shares.
+func apfsUsage(_ string) (allocated, private int64, err error) {
+	return 0, 0, errors.New("utmvm: APFS clone accounting is macOS-only (host is " + runtime.GOOS + ")")
+}
+
+// volumeSize is unimplemented for the same reason as statfsAvailable.
+func volumeSize(_ string) (total, free int64, err error) {
+	return 0, 0, errors.New("utmvm: free-space reporting is macOS-only (host is " + runtime.GOOS + ")")
+}

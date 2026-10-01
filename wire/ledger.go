@@ -1,6 +1,10 @@
 package wire
 
-import "time"
+import (
+	"encoding/json"
+	"errors"
+	"time"
+)
 
 // The ledger: who used which VM, on which machine, doing what
 // (docs/WORKER.md, "The ledger"). internal/ledger posts events; the
@@ -20,10 +24,13 @@ const (
 	LedgerVMCreate     LedgerType = "vm-create"
 	LedgerVMDelete     LedgerType = "vm-delete"
 	LedgerReap         LedgerType = "reap"
+	// LedgerCapacity is a machine's disk, memory and VM counts, a
+	// LedgerCapacitySnapshot as JSON in Detail. It opens and closes nothing.
+	LedgerCapacity LedgerType = "capacity"
 )
 
 // LedgerTypes is every type the Worker stores.
-var LedgerTypes = []LedgerType{LedgerStart, LedgerEnd, LedgerLeaseAcquire, LedgerLeaseRelease, LedgerVMCreate, LedgerVMDelete, LedgerReap}
+var LedgerTypes = []LedgerType{LedgerStart, LedgerEnd, LedgerLeaseAcquire, LedgerLeaseRelease, LedgerVMCreate, LedgerVMDelete, LedgerReap, LedgerCapacity}
 
 // Opens is t opening an op; Closes is t closing one.
 func (t LedgerType) Opens() bool { return t == LedgerStart || t == LedgerLeaseAcquire }
@@ -118,6 +125,45 @@ type LedgerMachine struct {
 	LastOwner   string `json:"last_owner"`
 	LastCommand string `json:"last_command"`
 	Version     string `json:"version"`
+
+	// Capacity is the machine's newest capacity snapshot, when it has sent
+	// one; CapacityAt is when, and CapacityErr says a snapshot was sent that
+	// could not be read (cannot tell, not zero).
+	Capacity    *LedgerCapacitySnapshot `json:"capacity,omitempty"`
+	CapacityAt  int64                   `json:"capacity_at,omitempty"`
+	CapacityErr string                  `json:"capacity_error,omitempty"`
+}
+
+// LedgerCapacitySnapshot is a capacity event's Detail: one machine's disk,
+// memory and VM counts, as the tool's `capacity` worked them out
+// (docs/USING.md, "Is there room?"). It names nothing, and stays under
+// LedgerMaxDetail.
+type LedgerCapacitySnapshot struct {
+	DiskFree      int64  `json:"disk_free"`
+	DiskTotal     int64  `json:"disk_total"`
+	Memory        int64  `json:"mem"`
+	RunningMemory int64  `json:"mem_running"` // configured for VMs not stopped
+	VMs           int    `json:"vms"`
+	Running       int    `json:"running"`
+	Stale         int    `json:"stale"`
+	Promised      int64  `json:"promised"` // disk the VMs may still grow into
+	Tool          int64  `json:"tool"`     // the tool's own data
+	Clone         string `json:"clone"`    // room for another clone: yes, no or cannot tell
+	MoreClones    int    `json:"more_clones"`
+	MoreRunning   int    `json:"more_running"`
+}
+
+// ParseLedgerCapacity reads a capacity event's Detail. One without a disk
+// size or a verdict is not a snapshot, and is an error rather than zeros.
+func ParseLedgerCapacity(detail string) (*LedgerCapacitySnapshot, error) {
+	var c LedgerCapacitySnapshot
+	if err := json.Unmarshal([]byte(detail), &c); err != nil {
+		return nil, err
+	}
+	if c.DiskTotal <= 0 || c.Clone == "" {
+		return nil, errors.New("no disk size or verdict in it")
+	}
+	return &c, nil
 }
 
 // LedgerVM is a VM on a machine.

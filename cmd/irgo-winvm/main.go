@@ -272,10 +272,12 @@ func init() {
 		"vm-golden-create": {flags: vmGoldenCreateFlags, run: runVMGoldenCreate},
 		"vm-golden-delete": {flags: vmGoldenDeleteFlags, run: runVMGoldenDelete},
 		"vm-reap":          {flags: vmReapFlags, run: runVMReap},
+		"prune":            {flags: pruneFlags, about: pruneAbout, run: runPrune},
 
 		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
 		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},
 		"doctor":       {flags: doctorFlags, run: runDoctor},
+		"capacity":     {flags: capacityFlags, run: runCapacity},
 		"report":       {flags: reportFlags, about: reportAbout, run: runReport},
 		"status":       {flags: statusFlags, about: statusAbout, run: runStatus},
 		"glaze-check":  {flags: glazeCheckFlags, run: runGlazeCheck},

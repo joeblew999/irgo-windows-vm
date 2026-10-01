@@ -314,6 +314,61 @@
         ],
         "type": "object"
       },
+      "LedgerCapacitySnapshot": {
+        "properties": {
+          "clone": {
+            "type": "string"
+          },
+          "disk_free": {
+            "type": "integer"
+          },
+          "disk_total": {
+            "type": "integer"
+          },
+          "mem": {
+            "type": "integer"
+          },
+          "mem_running": {
+            "type": "integer"
+          },
+          "more_clones": {
+            "type": "integer"
+          },
+          "more_running": {
+            "type": "integer"
+          },
+          "promised": {
+            "type": "integer"
+          },
+          "running": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "integer"
+          },
+          "tool": {
+            "type": "integer"
+          },
+          "vms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disk_free",
+          "disk_total",
+          "mem",
+          "mem_running",
+          "vms",
+          "running",
+          "stale",
+          "promised",
+          "tool",
+          "clone",
+          "more_clones",
+          "more_running"
+        ],
+        "type": "object"
+      },
       "LedgerEvent": {
         "properties": {
           "client": {
@@ -418,6 +473,22 @@
       },
       "LedgerMachine": {
         "properties": {
+          "capacity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LedgerCapacitySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capacity_at": {
+            "type": "integer"
+          },
+          "capacity_error": {
+            "type": "string"
+          },
           "host": {
             "type": "string"
           },

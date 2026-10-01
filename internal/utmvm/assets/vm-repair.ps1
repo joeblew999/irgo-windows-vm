@@ -98,3 +98,36 @@ if (-not $reg) {
   & (Join-Path $newest.FullName 'Installer\setup.exe') --msedgewebview --system-level | Out-Null
   "webview2: re-registered $($newest.Name) (registration named $(Split-Path $reg -Leaf), which is gone)"
 }
+
+# 8. Device Encryption. Windows 11 24H2 turns it on by itself on VMs installed
+#    before autounattend set PreventDeviceEncryption (irgo-win11: 100 %
+#    encrypted, found by vm-check 1 Oct 2026). Prevent it, and start decrypting
+#    C: if it is encrypted. Not waited for: decryption runs in the background
+#    and vm-check's TestDeviceEncryptionOff/volume_decrypted reports when done.
+#    WMI, not manage-bde, whose output is localised.
+$bl = 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker'
+New-Item -Path $bl -Force -ErrorAction SilentlyContinue | Out-Null
+Set-ItemProperty -Path $bl -Name PreventDeviceEncryption -Value 1 -Type DWord
+$vol = Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' `
+  -ClassName Win32_EncryptableVolume -Filter "DriveLetter='C:'" -ErrorAction SilentlyContinue
+if (-not $vol) {
+  'device encryption: ok (prevented; BitLocker not available on C:)'
+} else {
+  $st = Invoke-CimMethod -InputObject $vol -MethodName GetConversionStatus
+  # ConversionStatus: 0 decrypted, 1 encrypted, 2 encrypting, 3 decrypting,
+  # 4 encryption paused, 5 decryption paused.
+  switch ($st.ConversionStatus) {
+    0 { 'device encryption: ok (prevented; C: fully decrypted)' }
+    3 { "device encryption: decrypting C: ($($st.EncryptionPercentage) % still encrypted)" }
+    default {
+      $r = Invoke-CimMethod -InputObject $vol -MethodName Decrypt
+      if ($r.ReturnValue -ne 0) { throw "device encryption: Decrypt on C: returned $($r.ReturnValue)" }
+      "device encryption: started decrypting C: (was status $($st.ConversionStatus), $($st.EncryptionPercentage) % encrypted)"
+    }
+  }
+}
+
+# 9. Hibernation: hiberfil.sys is gigabytes a VM never uses (3.4 GB on irgo-win11).
+powercfg /h off
+if ($LASTEXITCODE -ne 0) { throw "powercfg /h off exited $LASTEXITCODE" }
+'hibernation: ok (off)'

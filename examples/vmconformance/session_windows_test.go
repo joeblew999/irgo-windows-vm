@@ -1,6 +1,7 @@
 package vmconformance
 
 import (
+	"fmt"
 	"image"
 	"os/user"
 	"regexp"
@@ -100,16 +101,18 @@ func TestSessionWebView2Renders(t *testing.T) {
 	shoot(t, func() (image.Image, error) { return screen.CaptureWindow(uint32(uintptr(w.Window()))) })
 }
 
-// TestSessionEvidence shows each setting the SYSTEM tests read, in a console,
-// as dev can read it — the commands are the ones anyone would type — and
-// photographs it. Each also checks the console shows what the record says,
-// so a picture never tells a different story from its row.
+// TestSessionEvidence shows each setting the SYSTEM tests read, as dev can
+// read it — the commands are the ones anyone would type — and photographs
+// it. It fails only when it cannot show them: whether the setting is right is
+// the SYSTEM test's verdict, and counting it twice would make one missing
+// setting two failures. What each picture shows of what the SYSTEM test
+// wants is recorded beside it.
 func TestSessionEvidence(t *testing.T) {
 	inSession(t)
 	for _, c := range []struct {
 		name string
 		cmds []string
-		want []string // each must appear in what the commands printed
+		want []string // what the SYSTEM test wants, looked for in what they printed
 	}{
 		{"WindowsBuild", []string{`ver`, `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" /v DisplayVersion`}, []string{"Microsoft Windows"}},
 		{"WindowsUpdatePolicy", []string{`reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /s`},
@@ -127,16 +130,17 @@ func TestSessionEvidence(t *testing.T) {
 			[]string{"Current AC Power Setting Index: 0x00000000"}},
 		{"FileShare", []string{`net view \\localhost`, `netsh advfirewall firewall show rule name="irgo-winvm: SMB from the host"`},
 			[]string{"irgo-drop", "LocalSubnet"}},
-		{"WebView2", []string{`reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv`},
+		{"WebView2", []string{`reg query "HKLM\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv /reg:32`},
 			[]string{"pv    REG_SZ"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			out := showInConsole(t, c.cmds...)
+			out := strings.Join(strings.Fields(showInConsole(t, c.cmds...)), " ")
+			var shows []string
 			for _, w := range c.want {
-				if !strings.Contains(out, w) {
-					t.Errorf("the console does not show %q:\n%s", w, out)
-				}
+				w = strings.Join(strings.Fields(w), " ")
+				shows = append(shows, fmt.Sprintf("%q %t", w, strings.Contains(out, w)))
 			}
+			evidence(t, "shows %s", strings.Join(shows, ", "))
 		})
 	}
 }

@@ -1,101 +1,62 @@
 package vmconformance
 
 import (
-	"fmt"
+	"html"
 	"image"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/crgimenes/glaze"
 	"github.com/crgimenes/native/screen"
 )
 
-// showInConsole runs cmds, cmd.exe command lines that only read, in a console
-// window of their own on this desktop, photographs the window once they have
-// all finished — each command echoed above what it printed, as anyone would
-// see it typing them — closes the window, and returns everything they printed.
+// showInConsole runs cmds — cmd.exe command lines that only read — as dev,
+// shows each one with what it printed in a window drawn like a console, and
+// photographs that window; Cleanup closes it. It returns everything they
+// printed.
 //
-// A classic console (conhost.exe named outright), not whatever the default
-// terminal is, so the window is one this test can find by its title,
-// photograph with PrintWindow and close with WM_CLOSE. Cleanup makes sure it
-// is gone, and fails the test if it is not: a check leaves nothing on the
-// screen (docs/DEVELOPMENT.md, desktop hygiene).
+// A glaze window rather than a real console: a classic console started with
+// conhost.exe from the suite came up in about half the attempts on build
+// 26100 (1 Oct 2026), while a window this process owns is found,
+// photographed and closed every time. The commands are run here, exactly as
+// typed, and the window shows their output unchanged.
 func showInConsole(t *testing.T, cmds ...string) string {
 	t.Helper()
-	dir := t.TempDir()
-	id := fmt.Sprintf("irgo-vm-check-%d", time.Now().UnixNano())
-	all, done := filepath.Join(dir, "all.txt"), filepath.Join(dir, "done.txt")
-	var b strings.Builder
-	b.WriteString("@echo off\r\nmode con: cols=118 lines=34 >nul\r\ntitle " + id + "\r\n")
-	for i, c := range cmds {
-		part := filepath.Join(dir, fmt.Sprintf("%d.txt", i))
-		b.WriteString("echo ^> " + echoSafe(c) + "\r\n")
-		b.WriteString(c + " > \"" + part + "\" 2>&1\r\n")
-		b.WriteString("type \"" + part + "\"\r\n")
-		b.WriteString("echo ^> " + echoSafe(c) + " >> \"" + all + "\"\r\n")
-		b.WriteString("type \"" + part + "\" >> \"" + all + "\"\r\n")
-		b.WriteString("echo.\r\n")
-	}
-	b.WriteString("echo done> \"" + done + "\"\r\n")
-	bat := filepath.Join(dir, "show.cmd")
-	if err := os.WriteFile(bat, []byte(b.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	c := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "conhost.exe"), "cmd.exe", "/k", bat)
-	if err := c.Start(); err != nil {
-		t.Fatalf("starting a console: %v", err)
-	}
-	var win window
-	t.Cleanup(func() {
-		if win.hwnd != 0 {
-			if err := closeWindow(win.hwnd, win.pid); err != nil {
-				t.Errorf("the console this test opened would not close: %v", err)
-			}
+	var all, page strings.Builder
+	for _, c := range cmds {
+		// The command line as typed: exec's own quoting writes \" for a quote,
+		// which cmd.exe does not read, and reg query then reports a key that
+		// is there as missing.
+		x := exec.Command("cmd.exe")
+		x.SysProcAttr = &syscall.SysProcAttr{CmdLine: "cmd.exe /c " + c}
+		out, err := x.CombinedOutput()
+		text := strings.TrimRight(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+		if err != nil {
+			text += "\n[" + err.Error() + "]"
 		}
-		_ = c.Process.Kill() // gone already when the window closed
-		_ = c.Wait()
+		all.WriteString("> " + c + "\n" + text + "\n\n")
+		page.WriteString(`<div class="c">C:\&gt; ` + html.EscapeString(c) + "</div>" + html.EscapeString(text) + "\n\n")
+	}
+	drawn := make(chan struct{}, 1)
+	w := openWindowSized(t, 790, 520, func(w glaze.WebView) {
+		_ = w.Bind("drawn", func() {
+			select {
+			case drawn <- struct{}{}:
+			default:
+			}
+		})
+		w.SetHtml(`<!doctype html><html><body style="margin:0;background:#0c0c0c;color:#cccccc">` +
+			`<pre style="font:13px Consolas,monospace;margin:10px;white-space:pre-wrap">` +
+			`<style>.c{color:#f9f1a5}</style>` + page.String() + `</pre><script>drawn()</script></body></html>`)
 	})
-
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		if _, err := os.Stat(done); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			// Photographed anyway, so the record shows what it was stuck on.
-			if w, ok := waitWindow(func(w window) bool { return strings.Contains(w.title, id) }, time.Second); ok {
-				win = w
-				shoot(t, func() (image.Image, error) { return screen.CaptureWindow(uint32(win.hwnd)) })
-				t.Fatalf("the commands had not finished in their console after 60s (window %q, %s): %s", w.title, w.class, strings.Join(cmds, "; "))
-			}
-			var consoles []string
-			for _, w := range topWindows() {
-				if w.class == "ConsoleWindowClass" || w.class == "CASCADIA_HOSTING_WINDOW_CLASS" {
-					consoles = append(consoles, fmt.Sprintf("%q (%s)", w.title, w.class))
-				}
-			}
-			t.Fatalf("the commands had not finished after 60s, and no window is titled %s; consoles on the desktop: %s; commands: %s",
-				id, strings.Join(consoles, ", "), strings.Join(cmds, "; "))
-		}
-		time.Sleep(200 * time.Millisecond)
+	select {
+	case <-drawn:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the window showing the commands' output did not draw within 30s")
 	}
-	var ok bool
-	if win, ok = waitWindow(func(w window) bool { return strings.Contains(w.title, id) }, 10*time.Second); !ok {
-		t.Fatalf("no window titled %s appeared for the console", id)
-	}
-	shoot(t, func() (image.Image, error) { return screen.CaptureWindow(uint32(win.hwnd)) })
-	out, err := os.ReadFile(all)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(out)
-}
-
-// echoSafe escapes a command line for echo, so it is shown as typed.
-func echoSafe(s string) string {
-	return strings.NewReplacer("^", "^^", "&", "^&", "|", "^|", "<", "^<", ">", "^>", "%", "%%").Replace(s)
+	shoot(t, func() (image.Image, error) { return screen.CaptureWindow(uint32(uintptr(w.Window()))) })
+	return all.String()
 }

@@ -95,21 +95,11 @@ func shoot(t *testing.T, grab func() (image.Image, error)) {
 }
 
 var (
-	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
-	procProcessIdToSessionId  = kernel32.NewProc("ProcessIdToSessionId")
-	procGetTickCount64        = kernel32.NewProc("GetTickCount64")
-	procGetDiskFreeSpaceExW   = kernel32.NewProc("GetDiskFreeSpaceExW")
-	user32                    = syscall.NewLazyDLL("user32.dll")
-	procFindWindowExW         = user32.NewProc("FindWindowExW")
-	procGetWindowTextW        = user32.NewProc("GetWindowTextW")
-	procGetClassNameW         = user32.NewProc("GetClassNameW")
-	procGetWindowThreadProcID = user32.NewProc("GetWindowThreadProcessId")
-	procIsWindow              = user32.NewProc("IsWindow")
-	procIsWindowVisible       = user32.NewProc("IsWindowVisible")
-	procPostMessageW          = user32.NewProc("PostMessageW")
+	kernel32                 = syscall.NewLazyDLL("kernel32.dll")
+	procProcessIdToSessionId = kernel32.NewProc("ProcessIdToSessionId")
+	procGetTickCount64       = kernel32.NewProc("GetTickCount64")
+	procGetDiskFreeSpaceExW  = kernel32.NewProc("GetDiskFreeSpaceExW")
 )
-
-const wmClose = 0x0010
 
 func sessionID() uint32 {
 	var id uint32
@@ -259,79 +249,16 @@ func powershell(t *testing.T, script string) string {
 		"-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; "+script))
 }
 
-// Windows on the desktop: found by walking every top-level window with
-// FindWindowEx, which, unlike EnumWindows, sees every z-order band
-// (docs/DEVELOPMENT.md, the traps).
-
-type window struct {
-	hwnd         uintptr
-	pid          uint32
-	class, title string
-}
-
-func topWindows() []window {
-	var out []window
-	var h uintptr
-	for {
-		h, _, _ = procFindWindowExW.Call(0, h, 0, 0)
-		if h == 0 {
-			return out
-		}
-		if v, _, _ := procIsWindowVisible.Call(h); v == 0 {
-			continue
-		}
-		var cls, ttl [256]uint16
-		n, _, _ := procGetClassNameW.Call(h, uintptr(unsafe.Pointer(&cls[0])), uintptr(len(cls)))
-		m, _, _ := procGetWindowTextW.Call(h, uintptr(unsafe.Pointer(&ttl[0])), uintptr(len(ttl)))
-		var pid uint32
-		_, _, _ = procGetWindowThreadProcID.Call(h, uintptr(unsafe.Pointer(&pid)))
-		out = append(out, window{h, pid, syscall.UTF16ToString(cls[:n]), syscall.UTF16ToString(ttl[:m])})
-	}
-}
-
-// waitWindow waits for a visible top-level window that match accepts.
-func waitWindow(match func(window) bool, timeout time.Duration) (window, bool) {
-	deadline := time.Now().Add(timeout)
-	for {
-		for _, w := range topWindows() {
-			if match(w) {
-				return w, true
-			}
-		}
-		if time.Now().After(deadline) {
-			return window{}, false
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-// closeWindow asks hwnd to close, as its close button does, and waits for it
-// to go; then kills pid, which owns it, if it has not.
-func closeWindow(hwnd uintptr, pid uint32) error {
-	_, _, _ = procPostMessageW.Call(hwnd, wmClose, 0, 0)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok, _, _ := procIsWindow.Call(hwnd); ok == 0 {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if pid != 0 {
-		if p, err := os.FindProcess(int(pid)); err == nil {
-			_ = p.Kill()
-		}
-	}
-	time.Sleep(500 * time.Millisecond)
-	if ok, _, _ := procIsWindow.Call(hwnd); ok != 0 {
-		return errors.New("the window is still there after WM_CLOSE and killing its process")
-	}
-	return nil
-}
-
 // openWindow creates a glaze window on the main thread, calls load there
 // before the run loop starts, and returns once the loop is running. Cleanup
 // terminates the loop and destroys the window.
 func openWindow(t *testing.T, load func(glaze.WebView)) glaze.WebView {
+	t.Helper()
+	return openWindowSized(t, 560, 300, load)
+}
+
+// openWindowSized is openWindow at w x h.
+func openWindowSized(t *testing.T, width, height int, load func(glaze.WebView)) glaze.WebView {
 	t.Helper()
 	var w glaze.WebView
 	created := make(chan error, 1)
@@ -345,7 +272,7 @@ func openWindow(t *testing.T, load func(glaze.WebView)) glaze.WebView {
 		}
 		defer w.Destroy()
 		w.SetTitle("irgo VM conformance: " + t.Name())
-		w.SetSize(560, 300, glaze.HintNone)
+		w.SetSize(width, height, glaze.HintNone)
 		load(w)
 		created <- nil
 		w.Run()

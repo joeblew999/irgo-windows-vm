@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -149,11 +150,24 @@ func desktopClean(e utmvm.Entry, user string, local map[string]string, say func(
 	rel := "vm/" + strings.ReplaceAll(hostDesktop, "/", "_") + ".png"
 	if p, sErr := utmvm.Shot(e.UUID, "vm-check"); sErr != nil {
 		r.NoShot = "vm-screen: " + sErr.Error()
+	} else if small, zErr := shrinkPNG(p); zErr != nil {
+		r.NoShot = "shrinking the picture: " + zErr.Error()
 	} else {
-		local[rel] = p
+		local[rel] = small
 		r.Shot, r.ShotNote = rel, "the whole VM, photographed from the host with vm-screen after the check"
 	}
 	return r
+}
+
+// shrinkPNG writes a copy of a vm-screen picture at most 800 pixels wide, as wide as the suite's own,
+// beside it, and returns its path: the full Retina capture of UTM's window is
+// over 5 MB, too much to commit for every check. sips is macOS's own.
+func shrinkPNG(path string) (string, error) {
+	out := strings.TrimSuffix(path, ".png") + "-800.png"
+	if b, err := exec.Command("sips", "-Z", "800", path, "--out", out).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(b)))
+	}
+	return out, nil
 }
 
 // vmStatusFlags is none, so -h is answered whether or not anything has been

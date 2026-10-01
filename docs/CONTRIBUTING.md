@@ -369,18 +369,14 @@ What a release offers a user, and where each comes from:
 | install | from |
 |---|---|
 | `curl -fsSL …/install.sh \| sh` | `install.sh` at the root, also attached to each release (`release.extra_files`). It verifies the binary against `SHA256SUMS` before installing it |
-| `brew install --cask joeblew999/tap/irgo-winvm` | the cask GoReleaser writes and pushes to [joeblew999/homebrew-tap](https://github.com/joeblew999/homebrew-tap) |
+| `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm` | the cask GoReleaser commits to `Casks/` in this repository on each release |
 | `go install …/cmd/irgo-winvm@vX.Y.Z` | the module proxy; the binary reports the tag from its build info |
 | the raw binary | the release's assets |
 
-**The tap** needs, once: the public repository `joeblew999/homebrew-tap` (empty
-is fine; GoReleaser writes `Casks/irgo-winvm.rb`), and a repository secret
-`HOMEBREW_TAP_GITHUB_TOKEN` here holding a fine-grained token with Contents
-read and write on that repository. Without the secret the cask is not uploaded
-and the release notes leave the brew line out; everything else publishes. The
-cask clears the quarantine flag after install, because the binary is not
-signed with an Apple Developer ID and Homebrew quarantines what a cask
-downloads.
+**The tap** is this repository: GoReleaser commits `Casks/irgo-winvm.rb` on each release with the
+release workflow's own token, so nothing needs setting up. The cask clears the quarantine flag after
+install, because the binary is not signed with an Apple Developer ID and Homebrew quarantines what a
+cask downloads.
 
 **Gatekeeper.** The binaries are ad-hoc signed by the Go linker (arm64 requires
 a signature to run at all) and not notarized. A file with no quarantine flag

@@ -66,20 +66,19 @@ checksum:
   name_template: SHA256SUMS
   algorithm: sha256
 
-# `brew install joeblew999/tap/irgo-winvm`. A cask, not a formula: GoReleaser
-# deprecated `brews` for prebuilt binaries in v2.10, and a cask installs the
-# binary as published, with the checksum GoReleaser computed.
-#
-# The tap repository joeblew999/homebrew-tap must exist, and release.yml must
-# have HOMEBREW_TAP_GITHUB_TOKEN (a token that can push to it). Until then the
-# upload is skipped, so a release without the tap still publishes everything
-# else — the cask file is still written to dist/homebrew/ for inspection.
+# The Homebrew cask. A cask, not a formula: GoReleaser deprecated `brews` for
+# prebuilt binaries in v2.10, and a cask installs the binary as published,
+# with the checksum GoReleaser computed.
 homebrew_casks:
   - name: irgo-winvm
+    # The cask lives in this repository (Casks/), pushed with the release
+    # workflow's own GITHUB_TOKEN: no second repository and no extra token.
+    # Users tap it once by URL (the repository is not named homebrew-*).
     repository:
       owner: joeblew999
-      name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
+      name: irgo-windows-vm
+      branch: main
+      token: '{{ .Env.GITHUB_TOKEN }}'
     directory: Casks
     homepage: https://joeblew999.github.io/irgo-windows-vm/
     description: Run a Go program built on your Mac on a real Windows 11 ARM64 VM
@@ -88,7 +87,6 @@ homebrew_casks:
       name: joeblew999
       email: joeblew999@users.noreply.github.com
     commit_msg_template: "irgo-winvm {{ .Tag }}"
-    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
     # The binary is not signed by a Developer ID, and Homebrew quarantines
     # what a cask downloads, so Gatekeeper would refuse to run it. This is
     # the same step the manual install asks of you.
@@ -156,9 +154,7 @@ release:
 
     It downloads the binary for your Mac, checks it against `SHA256SUMS`, and
     installs it as `~/.local/bin/irgo-winvm` (`IRGO_WINVM_DIR` to put it elsewhere).
-    {{- if envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}
-    Or with Homebrew: `brew install --cask joeblew999/tap/irgo-winvm`.
-    {{- end }}
+    Or with Homebrew: `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm`.
     Or with Go: `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@{{ .Tag }}`.
 
     Or download `irgo-winvm-darwin-arm64` (Apple Silicon) below, then:

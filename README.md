@@ -39,7 +39,7 @@ It downloads the binary for your Mac from the
 checks it against the release's `SHA256SUMS`, and installs it as
 `~/.local/bin/irgo-winvm`. Or:
 
-- **Homebrew:** `brew install --cask joeblew999/tap/irgo-winvm`
+- **Homebrew:** `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm`
 - **Go:** `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest`
 - **By hand:** download `irgo-winvm-darwin-arm64` from the release, then
   `chmod +x` it, `xattr -d com.apple.quarantine` it, and put it on your PATH as

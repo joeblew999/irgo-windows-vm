@@ -163,7 +163,7 @@ func (g gen) operation(r wire.Route) obj {
 	for status, cs := range byStatus {
 		sort.Strings(cs)
 		e := obj{"description": "code " + strings.Join(cs, " or ")}
-		if !(r.Method == http.MethodHead) {
+		if r.Method != http.MethodHead {
 			e["content"] = obj{wire.TypeJSON: obj{"schema": obj{"$ref": "#/components/schemas/Error"}}}
 		}
 		responses[strconv.Itoa(status)] = e

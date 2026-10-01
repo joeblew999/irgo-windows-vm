@@ -367,7 +367,7 @@ lint is clean for darwin and windows (`upstream:lint`). Full diagnosis:
 `.plans/done/2026-09-30_1250_glaze-webview2-stale-registration.md`.
 
 **In this repository.** `irgo-winvm vm-repair -reboot` repairs the registration
-on an affected VM (see [DEVELOPMENT.md](DEVELOPMENT.md#when--gui-stops-working-on-an-old-vm)).
+on an affected VM (see [Using it](USING.md#when--gui-stops-working-on-an-old-vm)).
 
 **Status.** `FILED` as [glaze#34](https://github.com/crgimenes/glaze/issues/34)
 on 30 Sep 2026, no reply yet. The fix is on branch
@@ -453,7 +453,7 @@ nothing; 5.x records `hasFailed`, and only `snapshot create` checks it.
 
 **In this repository.** After `delete`, the tool checks whether the bundle still
 exists rather than trusting the status. This defect is also why this tool's own
-[exit codes](DEVELOPMENT.md#what-it-exits-with) exist and are documented: they
+[exit codes](USING.md#what-it-exits-with) exist and are documented: they
 are the only reliable signal a caller gets.
 
 **UTM 5.** Not fixed in v5.0.6: `hasFailed` is read only at `UTMCtl.swift:853`
@@ -543,7 +543,7 @@ fields, and `Platform/UTMData.swift` discards the decoding error:
 
 **Reproduction.** Six distinct config mistakes were found by bisection because
 of it, each costing an import cycle to identify. They are listed in
-[DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
+[Known traps](TRAPS.md).
 
 **UTM 5.** Not fixed in v5.0.6: the same `try?` (lines 690, 724, 747; 677,
 711, 734 in 4.7.5).

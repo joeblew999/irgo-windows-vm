@@ -515,6 +515,8 @@ footer {
 .has-toc .footer-inner { max-width: calc(var(--measure) + var(--toc) + 7rem); }
 footer p { margin: 0 0 0.5rem; }
 footer a { color: var(--accent); }
+footer .all-pages { margin: 0 0 0.9rem; line-height: 1.9; }
+footer .all-pages a[aria-current] { color: var(--fg-strong); font-weight: 600; text-decoration: none; }
 
 /* The build stamp. Quiet, because it is only wanted when somebody suspects
    they are holding a stale page — which is exactly when they will go looking

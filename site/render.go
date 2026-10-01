@@ -9,7 +9,7 @@ package main
 // the HTML and the plain text disagree about content.
 //
 // Heading IDs are the one thing on a page other pages depend on —
-// UPSTREAM.md#utm, DEVELOPMENT.md#things-that-cost-hours — and nothing here
+// UPSTREAM.md#utm, USING.md#what-it-exits-with — and nothing here
 // computes them. goldmark's parser.WithAutoHeadingID still does, from the raw
 // heading line, before any transformer below runs. The anchor links, the table
 // of contents and the heading dates all READ the ID the parser assigned; none

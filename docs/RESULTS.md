@@ -328,7 +328,7 @@ presses reached Setup's UI. Media built with the no-prompt loader doesn't need
 it.
 
 The two failed attempts, and why they failed, are in the trap table in
-[DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
+[Known traps](TRAPS.md).
 
 ## Suspend and resume — 400 ms, verified 12 Aug 2026
 
@@ -358,7 +358,7 @@ restarting.
 version isn't offered: `utmctl suspend --save-state` either refuses (naming GPU
 acceleration, then NVMe) or *reports success and power-cuts the guest*: exit 0,
 no state file, and the next boot goes through "Diagnosing your PC". See the trap
-table in [DEVELOPMENT.md](DEVELOPMENT.md#known-traps).
+table in [Known traps](TRAPS.md).
 
 ## glaze and native on Windows ARM64 — measured 12 Aug 2026
 
@@ -385,7 +385,7 @@ args: [alpha beta]
   the guest's code. A binary exiting 3 exits `app-create` **1**, with "exited 3
   in the guest" in the message. The two must differ, because a missing VM exits
   3 and a busy guest agent exits 4. See the contract in
-  [DEVELOPMENT.md](DEVELOPMENT.md#what-it-exits-with).
+  [What it exits with](USING.md#what-it-exits-with).
 
 ### Native capabilities — windows/arm64, native
 

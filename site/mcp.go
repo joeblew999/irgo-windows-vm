@@ -139,7 +139,7 @@ What an agent does to answer "does my app work on Windows?", each a tool call:
 2. ` + "`" + `vm-create` + "`" + ` with ` + "`" + `vm: "agent1"` + "`" + `: a VM of its own. With a golden image this is a
    clone that answers in seconds. Without one, ` + "`" + `install: true` + "`" + ` returns a job id,
    and ` + "`" + `status` + "`" + ` with that id (in ` + "`" + `args` + "`" + `) says when it is done; it pulls the golden
-   image from the [private cache](development.html#the-private-r2-cache) when
+   image from the [private cache](using.html#the-private-r2-cache) when
    ` + "`" + `IRGO_GOLDEN_URL` + "`" + ` and ` + "`" + `IRGO_GOLDEN_TOKEN` + "`" + ` are set, or installs Windows
    (about 45 minutes, once; ` + "`" + `iso-create` + "`" + ` with ` + "`" + `fetch: true` + "`" + ` first).
 3. Build the app with ` + "`" + `GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o app.exe` + "`" + `.
@@ -222,7 +222,7 @@ see it and correct itself. The result carries structured content:
   that can't tell these from "no such VM" either abandons a working VM or
   retries forever against one that will never exist.
 
-Every code is explained in [Development](development.html#what-it-exits-with).
+Every code is explained in [Using it](using.html#what-it-exits-with).
 
 ## See the screen
 

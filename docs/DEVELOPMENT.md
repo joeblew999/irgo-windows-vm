@@ -426,6 +426,16 @@ Both are transport only: a bundle directory goes up, the same bytes come down.
 `-bundle` must be a copy this process can read, because macOS refuses it UTM's
 container (see the traps). Over MCP both always run as jobs.
 
+**Two ways to reach the bucket, one format.** With `IRGO_GOLDEN_URL` set, both
+commands go through [the Worker](#the-cloudflare-worker), which has the bucket
+bound and needs no R2 keys (`internal/utmvm/vm_golden_worker.go`); this is the
+way in use, because the owner's Cloudflare token can deploy Workers but cannot
+create R2 API tokens. Without it they use R2's S3 API with an access key
+(`vm_golden_r2.go`). Both are one `goldenStore` interface under the same code:
+the same manifest, the same checks, the same resume and delta, and every test
+in `vm_golden_cache_test.go` runs through both. Either reads what the other
+wrote: the compressed SHA-256 is the object's `zsha256` metadata both ways.
+
 > [!WARNING]
 > The Windows licence forbids redistribution (§2c), and every running clone
 > needs its own Windows 11 Pro licence (§2d(iv)). The bucket is for **your own**
@@ -438,6 +448,12 @@ Cloudflare API for the bucket's two public routes, the r2.dev development URL
 both were read and both are off. On or **cannot tell** (no token, a 403, an
 answer without `enabled`) refuses. `-delete` does not ask: removing the image
 is what you would do if the bucket were public.
+
+Through the Worker the check runs when `IRGO_R2_API_TOKEN` is set (with
+`IRGO_R2_ACCOUNT_ID` and `IRGO_R2_BUCKET`). Without it there is nothing to ask,
+and the commands say so rather than calling the bucket private: the Worker's
+binding is not a public route and every request to it needs a token, but the
+bucket's own public routes go unchecked.
 
 **In the bucket**, under `golden/` (`internal/utmvm/vm_golden_cache.go`):
 
@@ -454,12 +470,14 @@ is what you would do if the bucket were public.
 
 **Push** sends only chunks the bucket lacks (a `HEAD` per region; the
 compressed digest is kept in the object's metadata), so a new image moves its
-delta. It checks every chunk the manifest names is there at its recorded size,
+delta. Through the Worker each upload also carries its SHA-256, and R2 refuses
+a body that does not match it, so a chunk damaged on the way is never stored. It checks every chunk the manifest names is there at its recorded size,
 writes the manifest, reads it back, then moves `latest`.
 
 **Pull** fetches every chunk through `isoDownload` (the ISO downloader, now
-taking a SHA-256) from a 30-minute presigned URL, which resumes a `.part` with
-`Range` and renames only after the compressed SHA-256 matches. A mismatch is
+taking a SHA-256 and request headers), from the Worker with the read token or
+from a 30-minute presigned URL, and resumes a `.part` with `Range` and renames
+only after the compressed SHA-256 matches. A mismatch is
 fetched once more, then fails. Chunks already in `.parts/` are not fetched
 again. It then rebuilds each file at its offsets, checks each region's
 uncompressed SHA-256, and reads the file back for its **tree hash** (the
@@ -486,8 +504,24 @@ already in the build for go-diskfs.
 
 ### Setting up the bucket
 
-Done once, by the owner, in the Cloudflare dashboard. This tool creates no
-Cloudflare resources.
+Done once, by the owner. This tool creates no Cloudflare resources.
+
+**Through the Worker** (in use): the bucket `irgo-golden` exists with no public
+access, the Worker binds it as `GOLDEN` and holds its two tokens
+([Deploying it](#deploying-it)). Then `.env.r2` needs:
+
+```
+IRGO_GOLDEN_URL=https://irgo-windows-vm.gedw99.workers.dev
+IRGO_GOLDEN_TOKEN=<the Worker's GOLDEN_TOKEN: read>
+IRGO_GOLDEN_PUSH_TOKEN=<the Worker's GOLDEN_PUSH_TOKEN: write; only where you push or delete>
+IRGO_R2_ACCOUNT_ID=<account id>       # these three are optional: with them the
+IRGO_R2_BUCKET=irgo-golden            # bucket's public access is checked too
+IRGO_R2_API_TOKEN=<Workers R2 Storage Read>
+```
+
+A machine or CI job that only pulls gets the read token and nothing else.
+
+**Through S3** (when you have R2 API tokens), in the Cloudflare dashboard:
 
 1. **R2 > Create bucket**, e.g. `irgo-golden`, location automatic, default
    jurisdiction. In its **Settings**, leave **Public Development URL**
@@ -514,8 +548,8 @@ IRGO_R2_SECRET_ACCESS_KEY=<from step 2>
 IRGO_R2_API_TOKEN=<token value from step 3>
 ```
 
-A variable that is missing is named, every one at once, with exit 2. In CI,
-set the same five as repository secrets.
+A variable that is missing is named, every one at once, with exit 2, for
+either way. In CI, set the same variables as repository secrets.
 
 ## What it exits with
 
@@ -863,9 +897,9 @@ process that owns it is not the one that was killed. See the traps below.
 
 ## The Cloudflare Worker
 
-`worker/` is a prototype, not deployed yet: one Cloudflare Worker, written in Go
-on [syumai/workers-go](https://github.com/syumai/workers-go), that serves three
-things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
+`worker/` is one Cloudflare Worker, written in Go on
+[syumai/workers-go](https://github.com/syumai/workers-go) and deployed at
+`https://irgo-windows-vm.gedw99.workers.dev`, that serves three things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
 the owner switches.
 
 - **The site.** `site/dist`, from `mise run site:build`, as Workers static
@@ -878,12 +912,21 @@ the owner switches.
   status page shows it above the recorded one, so the page is current without
   a redeploy. On GitHub Pages that request finds nothing and the page is
   unchanged.
-- **The golden image.** `GET /api/golden/<key>`, with a different token,
-  answers `302` to a presigned R2 URL valid for 30 minutes. The keys are
-  exactly the ones `vm-golden-push` writes (`golden/latest`,
-  `golden/manifests/<sha256>.json`, `golden/chunks/<sha256>.zst`, in
-  `internal/utmvm/vm_golden_cache.go` on the golden-image branch, not merged
-  yet), and the Worker refuses anything else.
+- **The golden image** (`worker/golden.go`), the private bucket bound as
+  `GOLDEN`, and the only way `vm-golden-push` and `vm-golden-pull` reach it
+  when `IRGO_GOLDEN_URL` is set ([the private R2 cache](#the-private-r2-cache)):
+
+  | request | token | does |
+  |---|---|---|
+  | `GET /api/golden/<key>` | `GOLDEN_TOKEN` | the object, streamed; `Range` answers 206 |
+  | `HEAD /api/golden/<key>` | `GOLDEN_TOKEN` | `X-Golden-Size`, `X-Golden-Sha256` |
+  | `PUT /api/golden/<key>` | `GOLDEN_PUSH_TOKEN` | stored only if it hashes to `X-Golden-Sha256`; 201 |
+  | `DELETE /api/golden/<key>` | `GOLDEN_PUSH_TOKEN` | 204, also when nothing was there |
+  | `GET /api/golden-list/<manifests\|chunks>?cursor=` | `GOLDEN_PUSH_TOKEN` | a page of keys and sizes |
+
+  `<key>` is exactly one the cache writes: `golden/latest`,
+  `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
+  else is 404 with any token.
 
 All of the handler is plain Go behind two small interfaces (`worker/api.go`).
 `go:check` builds and tests it for the host, where `workers.Serve` is an
@@ -896,17 +939,28 @@ Workers runtime.
   the path, so a caller without one learns nothing about which keys exist. A
   secret that is not set refuses everything with 503: an unconfigured Worker
   does not fall open.
-- **The golden bucket is never bound to the Worker.** The Worker signs URLs
-  with a read-only R2 token scoped to that bucket and holds nothing else of it.
-  It has no listing, no write, and no route to any other object. The bucket
-  keeps no public access, so the `vm-golden-push` check that it is private
-  (r2.dev URL off, no custom domain) still describes it. The licence terms
-  that make the image private are in `.plans/2026-09-30_1700_vm-golden-image.md`.
-- **Redirect, not proxy.** A 64 MiB chunk streamed through Go in Wasm would
-  cost far more CPU than a Worker request gets (10 ms on the free plan). A
-  presigned URL costs one HMAC chain, and `Range` resumes go straight to R2,
-  which is what `isoDownload` needs. Go's HTTP client drops `Authorization` on
-  a redirect to another host, so the Worker token never reaches R2.
+- **The golden bucket is reachable only through `/api/golden`.** A binding is
+  not a public route; the bucket keeps no public access, so the
+  `vm-golden-push` check that it is private (r2.dev URL off, no custom domain)
+  still describes it. Each token does one job: `GOLDEN_TOKEN` reads,
+  `GOLDEN_PUSH_TOKEN` writes, deletes and lists, and neither does the other's.
+  A pulling machine cannot enumerate the bucket. Listing exists only for
+  `vm-golden-push -delete`, which has to find every manifest and every chunk
+  no manifest names (an interrupted push leaves some); without it that answer
+  would be cannot tell. The licence terms that make the image private are in
+  `.plans/2026-09-30_1700_vm-golden-image.md`.
+- **Bytes never pass through Go.** A GET hands R2's body stream to the
+  Response, and a PUT hands the request's stream to R2's `put`, through two
+  hooks of workers-go (`GetRawJSBody` on a request body, `WriteRawJSBody` on
+  the ResponseWriter, which `io.Copy` reaches through the body's `WriteTo`).
+  workers-go's own `r2.Bucket.Put` reads the whole body into Wasm memory and
+  its `Get` takes no range, so `platform_js.go` calls the binding through
+  `syscall/js`. The Worker cannot hash a stream it never reads, so R2 does:
+  the PUT passes the claimed SHA-256 as `put`'s `sha256` option and R2 refuses
+  a mismatch (error 10037, answered 400). A manifest's claim must also be its
+  name. Every PUT needs `Content-Length` (411 otherwise; R2 stores a stream
+  only of known length) and at most 80 MiB (413): a chunk is 64 MiB
+  compressed, plus the few KiB zstd adds to data it cannot shrink.
 - **Uploads are checked before anything is stored.** The target must match the
   manifest. Every picture the manifest names must be sent, nothing else may
   be, and each must be a PNG with a plain name. A run older than the stored
@@ -940,6 +994,17 @@ request where Go is clearly faster is the POST, which CI sends twice per push.
 workers-go recommends TinyGo for size. Going back to Go means changing two
 lines in `mise-tasks/worker/wasm`: `-mode=go`, and `GOOS=js GOARCH=wasm go build`.
 
+Measured live on 1 Oct 2026 (`wrangler tail`, the deployed TinyGo build), the
+golden endpoints cost the same CPU whatever the size, because the bytes are the
+runtime's: 8 to 22 ms per request, a 401 included, so that is the Wasm
+handler's floor. A 64 MiB PUT took 18 ms of CPU over 7.7 s of wall time, its
+GET 13 ms. That is over the Free plan's nominal 10 ms, and every request
+still succeeded. Cloudflare's own body limit on this account: a 96 MiB PUT
+reached the Worker (and its 413), a 101 MiB one was refused by Cloudflare
+before it, as the 100 MB limit of the Free and Pro plans says. From this Mac,
+a 64 MiB chunk went up in about 9 s and came down in about 2.7 s. An answer
+to HEAD keeps no `Content-Length` on Workers, hence `X-Golden-Size`.
+
 TinyGo cost two traps, both found under `wrangler dev` and both invisible to
 `go test` on the host:
 
@@ -972,8 +1037,7 @@ mise install
 mise run site:build
 cd worker
 wrangler dev --local --var GLAZE_STATUS_TOKEN:local-glaze --var GOLDEN_TOKEN:local-gold \
-  --var R2_ACCOUNT_ID:acct0000 --var GOLDEN_BUCKET:irgo-golden \
-  --var GOLDEN_ACCESS_KEY_ID:AKIDLOCAL --var GOLDEN_SECRET_ACCESS_KEY:secretlocal
+  --var GOLDEN_PUSH_TOKEN:local-push
 ```
 
 `wrangler dev` runs `mise run worker:wasm` itself. Then, from the repository
@@ -988,19 +1052,33 @@ for p in $d/*.png; do f+=(-F "$(basename $p)=@$p"); done
 curl -s -H 'Authorization: Bearer local-glaze' "${f[@]}" localhost:8787/api/glaze-status/windows   # 201
 curl -s localhost:8787/api/glaze-status                              # the run, as JSON
 curl -s -w ' %{http_code}\n' localhost:8787/api/golden/golden/latest # 401
-curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -H 'Authorization: Bearer local-gold' \
-  localhost:8787/api/golden/golden/latest                            # 302, a presigned URL
+curl -s -w ' %{http_code}\n' -H 'Authorization: Bearer local-gold' \
+  localhost:8787/api/golden/golden/latest                            # 404: nothing pushed yet
+```
+
+And the golden cache end to end, from the repository root, against the
+simulated bucket (no Cloudflare account, no API token, so the public-access
+check says it was not done):
+
+```
+export IRGO_GOLDEN_URL=http://localhost:8787 IRGO_GOLDEN_TOKEN=local-gold IRGO_GOLDEN_PUSH_TOKEN=local-push
+irgo-winvm vm-golden-push -bundle <a test bundle> && irgo-winvm vm-golden-pull -dir /tmp/pull
+irgo-winvm vm-golden-push -delete -force
 ```
 
 Then open `http://localhost:8787/glaze-status`: the live box sits above the
 recorded run. Measured 1 Oct 2026, every one of these answered as commented.
 The posted picture came back byte for byte identical to the committed one, an
 older run was refused with 409, and `/api/golden/` with a valid token
-(a listing) answered 404.
+(a listing) answered 404. The golden endpoints were measured the same day
+with 1 and 65 MiB objects: a wrong `X-Golden-Sha256` answered 400 and stored
+nothing, the whole object and a `Range` half came back byte for byte, and a
+synthetic 300 MB sparse bundle went up, came back identical (`diff -r`), and
+was deleted.
 
 ### Deploying it
 
-Not done yet. Nothing has been created on Cloudflare. In order:
+Done on 1 Oct 2026 by these steps. In order:
 
 1. **Authenticate wrangler**, with `wrangler login` or `CLOUDFLARE_API_TOKEN`.
    That token needs Workers Scripts Edit and Workers R2 Storage Edit on the
@@ -1008,35 +1086,35 @@ Not done yet. Nothing has been created on Cloudflare. In order:
 2. **Create the site bucket**: `wrangler r2 bucket create irgo-windows-vm-site`.
    Leave public access off (no r2.dev URL, no custom domain). The Worker is
    the only reader.
-3. **The golden bucket** is the one `vm-golden-push` uses (`IRGO_R2_BUCKET`).
-   It is not created here and must stay private. In the dashboard, under R2
-   and then Manage API tokens, create a token with **Object Read only**,
-   scoped to **that bucket only**. Keep its Access Key ID and Secret Access
-   Key.
-4. **Fill in `[vars]`** in `worker/wrangler.toml`: `R2_ACCOUNT_ID` (the
-   account id) and `GOLDEN_BUCKET` (the bucket's name). Neither is a secret.
-5. **Build the site, then deploy**: `mise run site:build`, then
+3. **The golden bucket**, `irgo-golden`, must exist and stay private (no
+   r2.dev URL, no custom domain). `wrangler.toml` binds it as `GOLDEN`; if it
+   is renamed, change `bucket_name` there.
+4. **Build the site, then deploy**: `mise run site:build`, then
    `cd worker && wrangler deploy`. The deploy runs `mise run worker:wasm` and
    uploads `site/dist` as the Worker's assets. Its output names the URL,
    `https://irgo-windows-vm.<subdomain>.workers.dev`, and `startup_time_ms`.
-6. **Set the four secrets** from `worker/`, one `wrangler secret put <NAME>`
-   each:
+5. **Set the three secrets** from `worker/`, one `wrangler secret put <NAME>`
+   each, each a different `openssl rand -hex 32`. Until one is set, its
+   endpoints answer 503.
 
-   | secret | value |
+   | secret | for |
    |---|---|
-   | `GLAZE_STATUS_TOKEN` | a new random token, e.g. `openssl rand -hex 32` |
-   | `GOLDEN_TOKEN` | a different random token, for machines that pull the golden image |
-   | `GOLDEN_ACCESS_KEY_ID` | from step 3 |
-   | `GOLDEN_SECRET_ACCESS_KEY` | from step 3 |
+   | `GLAZE_STATUS_TOKEN` | CI posting glaze runs |
+   | `GOLDEN_TOKEN` | reading the golden image (`IRGO_GOLDEN_TOKEN`) |
+   | `GOLDEN_PUSH_TOKEN` | writing and deleting it (`IRGO_GOLDEN_PUSH_TOKEN`) |
 
-7. **Point CI at it**:
+   Keep the golden pair in `.env.r2` too (see
+   [Setting up the bucket](#setting-up-the-bucket)).
+
+6. **Point CI at it**:
    `gh variable set GLAZE_STATUS_URL --body https://irgo-windows-vm.<subdomain>.workers.dev`
-   and `gh secret set GLAZE_STATUS_TOKEN` with the same value as step 6. The
+   and `gh secret set GLAZE_STATUS_TOKEN` with the same value as step 5. The
    conformance job's last step then posts on every push to main. Until both
    are set, that step prints that it is not posting and succeeds.
-8. **Check the deployment** with the curls above, using the real URL and
-   tokens. A request with no token must get 401 on both `/api/glaze-status/*`
-   (POST) and `/api/golden/*`.
+7. **Check the deployment** with the curls above, using the real URL and
+   tokens. A request with no token must get 401 on `/api/glaze-status/*`
+   (POST), `/api/golden/*` (every method) and `/api/golden-list/*`, and the
+   read token must get 401 on a PUT.
 
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part

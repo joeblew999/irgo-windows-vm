@@ -93,10 +93,13 @@ func TestWorkerOutageNeverChangesTheExitCode(t *testing.T) {
 
 	cases := [][]string{{"app-create"}, {"status"}, {"iso-create", "-no-such-flag"}, {"no-such-command"}}
 	want := map[int]int{}
+	base := map[int]time.Duration{}
 	for i, args := range cases {
 		t.Setenv("HOME", t.TempDir())
 		ledger.Configure(nil)
+		began := time.Now()
 		want[i] = int(exitCode(run(args)))
+		base[i] = time.Since(began)
 	}
 	for name, url := range map[string]string{"hanging": hang.URL, "down": downURL, "500": failing.URL} {
 		for i, args := range cases {
@@ -109,8 +112,11 @@ func TestWorkerOutageNeverChangesTheExitCode(t *testing.T) {
 			if got != want[i] {
 				t.Errorf("Worker %s: %v exited %d, %d with the ledger off", name, args, got, want[i])
 			}
-			if took > time.Second {
-				t.Errorf("Worker %s: %v took %s; the command waited on the ledger", name, args, took)
+			// Relative to the same command with the ledger off: `status` asks
+			// UTM, which alone took over a second under a full parallel test
+			// run, so an absolute bound failed with no ledger wait at all.
+			if took > 2*base[i]+time.Second {
+				t.Errorf("Worker %s: %v took %s (%s with the ledger off); the command waited on the ledger", name, args, took, base[i])
 			}
 			if d := time.Since(drainBegan); d > time.Second {
 				t.Errorf("Worker %s: draining took %s, over its budget", name, d)

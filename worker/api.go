@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -42,6 +43,7 @@ type Env struct {
 	Var    func(name string) string // vars and secrets from wrangler.toml / wrangler secret
 	Site   func() (Store, error)    // the SITE bucket: glaze status, public data
 	Golden func() (Blobs, error)    // the GOLDEN bucket: the private golden image
+	Ledger func() (*sql.DB, error)  // the LEDGER D1 database (ledger.go)
 	Now    func() time.Time
 }
 
@@ -62,6 +64,11 @@ var handlers = map[string]handlerFunc{
 	wire.RouteGoldenPut:    Env.goldenPut,
 	wire.RouteGoldenDelete: Env.goldenDelete,
 	wire.RouteGoldenList:   Env.goldenList,
+	wire.RouteLedgerPost:   Env.ledgerPost,
+	wire.RouteLedgerEvents: Env.ledgerEvents,
+	wire.RouteLedgerVMs:    Env.ledgerVMs,
+	wire.RouteLedgerPage:   Env.ledgerPage,
+	wire.RouteLedgerBare:   ledgerBare,
 }
 
 // checkHandlers is nil when handlers has exactly the table's routes.
@@ -99,7 +106,7 @@ func Handler(env Env) http.Handler {
 			fail(w, wire.CodeNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)
 			return
 		}
-		if !env.authorized(w, r, route.Scope) {
+		if route.Page && !env.authorizedPage(w, r, route.Scope) || !route.Page && !env.authorized(w, r, route.Scope) {
 			return
 		}
 		if route.NeedLength && r.ContentLength < 0 {
@@ -132,13 +139,49 @@ func (env Env) authorized(w http.ResponseWriter, r *http.Request, scope wire.Sco
 		return false
 	}
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	g, h := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
-	if !ok || got == "" || subtle.ConstantTimeCompare(g[:], h[:]) != 1 {
+	if !ok || !tokenMatches(got, want) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="irgo-windows-vm"`)
 		fail(w, wire.CodeUnauthorized, "refused: no valid bearer token")
 		return false
 	}
 	return true
+}
+
+// authorizedPage is authorized for a route that is a page a browser opens
+// (wire.Route.Page): it also takes the token as the password of HTTP Basic
+// (any user name), and a refusal asks for Basic, so the browser prompts. A
+// browser cannot send a bearer token on a navigation, and a token in the URL
+// would land in history and logs.
+func (env Env) authorizedPage(w http.ResponseWriter, r *http.Request, scope wire.Scope) bool {
+	info, _ := scope.Info()
+	want := env.Var(info.Secret)
+	if want == "" {
+		fail(w, wire.CodeNotConfigured, "refused: %s is not set on this Worker", info.Secret)
+		return false
+	}
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		_, got, ok = r.BasicAuth()
+	}
+	if !ok || !tokenMatches(got, want) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="irgo-windows-vm ledger", charset="UTF-8"`)
+		fail(w, wire.CodeUnauthorized, "refused: no valid token")
+		return false
+	}
+	return true
+}
+
+// ledgerBare sends a bare /api/ledger to the page, after the token check like
+// every other ledger path.
+func ledgerBare(_ Env, w http.ResponseWriter, r *http.Request, _ []string) {
+	http.Redirect(w, r, wire.MustFind(wire.RouteLedgerPage).URL(""), http.StatusFound)
+}
+
+// tokenMatches compares as SHA-256 digests, so the comparison does not depend
+// on the length of either. An empty token never matches.
+func tokenMatches(got, want string) bool {
+	g, h := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return got != "" && subtle.ConstantTimeCompare(g[:], h[:]) == 1
 }
 
 func health(_ Env, w http.ResponseWriter, _ *http.Request, _ []string) {

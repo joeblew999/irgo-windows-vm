@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -11,10 +12,22 @@ import (
 	"syscall/js"
 
 	"github.com/syumai/workers-go/cloudflare"
+	"github.com/syumai/workers-go/cloudflare/d1"
 	"github.com/syumai/workers-go/cloudflare/r2"
 
 	"github.com/joeblew999/irgo-windows-vm/wire"
 )
+
+// ledgerDB is the D1 binding LEDGER (wrangler.toml), through workers-go's
+// database/sql driver. Opened per request: the binding belongs to the
+// request's environment.
+func ledgerDB() (*sql.DB, error) {
+	c, err := d1.OpenConnector("LEDGER")
+	if err != nil {
+		return nil, fmt.Errorf("LEDGER is not bound (wrangler.toml, d1_databases): %w", err)
+	}
+	return sql.OpenDB(c), nil
+}
 
 // getenv reads a var or secret of the current request's environment.
 func getenv(name string) string { return cloudflare.Getenv(name) }

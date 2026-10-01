@@ -4,6 +4,8 @@ import (
 	"flag"
 	"strconv"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // Each command declares its flags once, in a func beside its run func that
@@ -15,7 +17,19 @@ import (
 //
 // An unknown name panics: it is a typo in this package, and a zero value would
 // make the flag silently stop working.
-type values struct{ fs *flag.FlagSet }
+//
+// caller is who is running the command, decided by runToolFor once the flags
+// have parsed.
+type values struct {
+	fs     *flag.FlagSet
+	caller utmvm.Caller
+}
+
+// ownerFlag adds -owner to a command whose effects belong to a caller: the VMs
+// it makes, the uploads it stages, the leases it renews.
+func ownerFlag(fs *flag.FlagSet) {
+	fs.String("owner", "", "who you are, recorded as the owner of VMs you make and naming your staging space (default: $"+utmvm.OwnerEnv+", else the MCP client, else user@host:repo)")
+}
 
 func (v values) lookup(name string) flag.Value {
 	f := v.fs.Lookup(name)

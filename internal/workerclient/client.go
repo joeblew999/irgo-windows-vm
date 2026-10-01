@@ -32,7 +32,10 @@ import (
 type Client struct {
 	origin string
 	tokens map[wire.Scope]string
-	hc     *http.Client
+	// HTTP is the client requests go through: by default one with no
+	// overall timeout, because a 64 MiB chunk over a slow uplink takes
+	// minutes, and the context bounds each call.
+	HTTP *http.Client
 	// Attempts is how many times a request is sent before its answer is
 	// final: a dropped connection, a 5xx or a 429 is tried again, waiting a
 	// second longer each time. A push is hundreds of requests, and one lost
@@ -41,11 +44,9 @@ type Client struct {
 }
 
 // New is a client for the Worker at origin (checked with CheckOrigin by the
-// caller), holding the token for each scope it may use. Its HTTP client has
-// no overall timeout, because a 64 MiB chunk over a slow uplink takes
-// minutes: the context bounds each call.
+// caller), holding the token for each scope it may use.
 func New(origin string, tokens map[wire.Scope]string) *Client {
-	return &Client{origin: strings.TrimSuffix(origin, "/"), tokens: tokens, hc: &http.Client{}, Attempts: 4}
+	return &Client{origin: strings.TrimSuffix(origin, "/"), tokens: tokens, HTTP: &http.Client{}, Attempts: 4}
 }
 
 // CheckOrigin refuses a Worker address that is not an origin, or that would
@@ -170,7 +171,7 @@ func (c *Client) send(ctx context.Context, r wire.Route, u string, body []byte, 
 		for k, v := range c.Header(r.Name) {
 			req.Header[k] = v
 		}
-		resp, err := c.hc.Do(req)
+		resp, err := c.HTTP.Do(req)
 		retry := err != nil || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
 		if !retry || attempt == attempts || ctx.Err() != nil {
 			return resp, err

@@ -10,6 +10,8 @@ const (
 	ScopeGlazeWrite  Scope = "glaze-status-write"
 	ScopeGoldenRead  Scope = "golden-read"
 	ScopeGoldenWrite Scope = "golden-write"
+	ScopeLedgerWrite Scope = "ledger-write"
+	ScopeLedgerRead  Scope = "ledger-read"
 )
 
 // ScopeInfo says where a scope's token lives on each side.
@@ -29,6 +31,8 @@ var Scopes = []ScopeInfo{
 	{ScopeGlazeWrite, "GLAZE_STATUS_TOKEN", "GLAZE_STATUS_TOKEN", "CI's conformance job posting a glaze run"},
 	{ScopeGoldenRead, "GOLDEN_TOKEN", "IRGO_GOLDEN_TOKEN", "reading the golden image: every machine that pulls"},
 	{ScopeGoldenWrite, "GOLDEN_PUSH_TOKEN", "IRGO_GOLDEN_PUSH_TOKEN", "writing, deleting and listing it: only where you push"},
+	{ScopeLedgerWrite, "LEDGER_TOKEN", "IRGO_LEDGER_TOKEN", "the tool posting events to the ledger"},
+	{ScopeLedgerRead, "LEDGER_READ_TOKEN", "IRGO_LEDGER_READ_TOKEN", "reading the ledger: its page and its JSON"},
 }
 
 // Info returns the scope's entry in Scopes; ok is false for ScopeNone.
@@ -41,10 +45,11 @@ func (s Scope) Info() (ScopeInfo, bool) {
 	return ScopeInfo{}, false
 }
 
-// Origin variables: where a client finds the Worker. Two, because CI's glaze
-// post and the golden cache were configured separately and both are set in
+// Origin variables: where a client finds the Worker. One per use, because
+// CI's glaze post, the golden cache and the ledger were configured separately and both are set in
 // places this repository does not control (a repository variable, .env.r2).
 const (
 	EnvGlazeURL  = "GLAZE_STATUS_URL"
 	EnvGoldenURL = "IRGO_GOLDEN_URL"
+	EnvLedgerURL = "IRGO_LEDGER_URL"
 )

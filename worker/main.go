@@ -13,5 +13,5 @@ import (
 )
 
 func main() {
-	workers.Serve(Handler(Env{Var: getenv, Site: siteBucket, Golden: goldenBucket, Now: time.Now}))
+	workers.Serve(Handler(Env{Var: getenv, Site: siteBucket, Golden: goldenBucket, Ledger: ledgerDB, Now: time.Now}))
 }

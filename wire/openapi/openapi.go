@@ -229,6 +229,15 @@ func (g gen) inline(t reflect.Type) any {
 			if name == "-" {
 				continue
 			}
+			if f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct {
+				// encoding/json puts an embedded struct's fields in this one.
+				e := g.inline(f.Type).(obj)
+				for k, v := range e["properties"].(obj) {
+					props[k] = v
+				}
+				required = append(required, e["required"].([]string)...)
+				continue
+			}
 			if name == "" {
 				name = f.Name
 			}

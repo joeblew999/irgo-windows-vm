@@ -41,8 +41,12 @@ type Route struct {
 	Method string
 	// Path is the pattern: literal segments, {name} for one segment, and a
 	// final {name...} for the rest of the path, slashes included.
-	Path    string
-	Scope   Scope
+	Path  string
+	Scope Scope
+	// Page is a page a browser opens: the token is also taken as the
+	// password of HTTP Basic, and a refusal asks for Basic so the browser
+	// prompts, because a navigation cannot carry a bearer token.
+	Page    bool
 	Summary string
 	// Params describes each {name} in Path, in order, and any query parameter.
 	Params []Param
@@ -98,6 +102,11 @@ const (
 	RouteGoldenPut    = "golden-put"
 	RouteGoldenDelete = "golden-delete"
 	RouteGoldenList   = "golden-list"
+	RouteLedgerPost   = "ledger-post"
+	RouteLedgerEvents = "ledger-events"
+	RouteLedgerVMs    = "ledger-vms"
+	RouteLedgerPage   = "ledger-page"
+	RouteLedgerBare   = "ledger-bare"
 )
 
 var goldenKeyParam = Param{"key", "path", "golden/latest, golden/manifests/<sha256>.json or golden/chunks/<sha256>.zst; anything else is 404"}
@@ -196,6 +205,58 @@ var Routes = []Route{
 		Success: http.StatusOK, Response: GoldenList{}, ResponseType: TypeJSON,
 		Errors:   []Code{CodeNotFound, CodeStorage, CodeInternal},
 		Commands: []string{"vm-golden-push"},
+	},
+	{
+		Name: RouteLedgerPost, Method: http.MethodPost, Path: "/api/ledger/events", Scope: ScopeLedgerWrite,
+		Summary: "store a batch of 1 to 25 events; an id already stored is a duplicate, not an error, so a batch can be sent again. " +
+			"Each event is checked on its own: a bad one is rejected and the rest stored",
+		Request: LedgerBatch{}, RequestType: TypeJSON, MaxBody: LedgerMaxBody,
+		Success: http.StatusOK, Response: LedgerPosted{}, ResponseType: TypeJSON,
+		Errors: []Code{CodeBadRequest, CodeStorage, CodeInternal},
+	},
+	{
+		Name: RouteLedgerEvents, Method: http.MethodGet, Path: "/api/ledger/events", Scope: ScopeLedgerRead,
+		Summary: "history, newest first",
+		Params: []Param{
+			{"since", "query", "RFC 3339, or a duration back from now such as 24h; default 7 days"},
+			{"limit", "query", "1 to 1000; default 200"},
+			{"owner", "query", "exact match; so are vm, machine, host, type, op, repo and client, all optional"},
+			{"vm", "query", "exact match"},
+			{"machine", "query", "exact match"},
+			{"host", "query", "exact match"},
+			{"type", "query", "exact match"},
+			{"op", "query", "exact match"},
+			{"repo", "query", "exact match"},
+			{"client", "query", "exact match"},
+		},
+		Success: http.StatusOK, Response: LedgerEvents{}, ResponseType: TypeJSON,
+		Errors: []Code{CodeBadRequest, CodeStorage, CodeInternal},
+	},
+	{
+		Name: RouteLedgerVMs, Method: http.MethodGet, Path: "/api/ledger/vms", Scope: ScopeLedgerRead,
+		Summary: "now: machines, VMs (in-use, stale, idle, deleted), open work and recent events",
+		Params: []Param{
+			{"since", "query", "the window, as for ledger-events; default 14 days"},
+			{"stale", "query", "open work older than this, with no expiry, is stale; default 3h"},
+		},
+		Success: http.StatusOK, Response: LedgerView{}, ResponseType: TypeJSON,
+		Errors: []Code{CodeBadRequest, CodeStorage, CodeInternal},
+	},
+	{
+		Name: RouteLedgerPage, Method: http.MethodGet, Path: "/api/ledger/", Scope: ScopeLedgerRead, Page: true,
+		Summary: "ledger-vms as a page for a person",
+		Params: []Param{
+			{"since", "query", "as for ledger-vms"},
+			{"stale", "query", "as for ledger-vms"},
+		},
+		Success: http.StatusOK, ResponseType: "text/html",
+		Errors: []Code{CodeBadRequest, CodeStorage, CodeInternal},
+	},
+	{
+		Name: RouteLedgerBare, Method: http.MethodGet, Path: "/api/ledger", Scope: ScopeLedgerRead, Page: true,
+		Summary:         "a redirect to the page, after the token check like every other ledger path",
+		Success:         http.StatusFound,
+		ResponseHeaders: []Param{{"Location", "header", "/api/ledger/"}},
 	},
 }
 

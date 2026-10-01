@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
 | 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
 | 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
 | 1 Oct 2026 | [a VM of your own in 23 s: install 12 min 24 s once, seal 2 min 49 s, then `vm-create` clones and boots](#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
@@ -30,6 +31,32 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## Several callers on one Mac — measured 1 Oct 2026
+
+**Result:** the guards in [Sharing one Mac](DEVELOPMENT.md#sharing-one-mac)
+behave on the real machine. M2 Pro, 16 GiB, UTM 4.7.5, with `irgo-win11`
+running throughout and never touched; one disposable clone, `z1`.
+
+| step | command | measured |
+|---|---|---|
+| what a running VM holds | `footprint` on its QEMULauncher, `sysctl vm.swapusage` | `irgo-win11` (8192 MiB configured): **8327 MB footprint, 8051 MB dirty**; swap 6.3 of 7 GB in use |
+| UTM's memory per VM | AppleScript `memory of configuration` | 8192 for both VMs, in 0.6 s, no Full Disk Access |
+| a clone while `irgo-win11` runs | `vm-create -vm z1` | **exit 7** in 0.7 s: 16 GiB, 8 running, 8 for z1, 0 left, want 4; nothing made, no record |
+| the same, deliberately | `vm-create -vm z1 -overcommit` | made and answering in **26 s**; disk read through `statfs` on UTM's volume: 41.9 GiB free, want 20 |
+| a second clone | `vm-create -vm z2` (another owner) | **exit 7**, naming `irgo-win11` and `z1` as the 16 GiB already running |
+| an agent without `-vm` | `IRGO_WINVM_OWNER=… app-create x.exe` | **exit 2**, told to `vm-create -vm <name>` |
+| an MCP client without `-vm` | stdio, client `agent-x`, `app-create` | `code 2, status usage`, the caller named as `agent-x/apple@…:repo-b (from MCP client)` |
+| staging | `app-upload` from clients `agent-y` and `agent-x`, then `app-delete` from `agent-x` | each staged under its own `bin/agent-…-<hash>/`; agent-x's delete left agent-y's file |
+| a run on the clone | `app-create -vm z1 zhello.exe` | output back in 4.1 s (SMB, 1.9 s); the record's last use moved |
+| reaping, in lease | `vm-reap -stale 1h` | `keep z1 — in lease`, exit 0 |
+| reaping, while `vm-repair -vm z1` ran | `vm-reap -stale 1s -force` | `keep z1 — in use: a command holds its lock`; nothing deleted |
+| reaping, idle | `vm-reap -stale 1s -force` | `z1` stopped and deleted through UTM in 4.9 s, record removed; `irgo-win11` and `irgo-golden` untouched |
+| a left-over record | a record for a VM UTM does not have, and one for `irgo-win11` | `forget` and `keep — protected`; `-force` removed only the first |
+
+Not measured: how much a clone grows over a working day. `df` fell by about
+1.1 GiB across z1's clone, boot, one run and a `vm-repair`, with the rest of the
+Mac writing too, so `cloneHeadroomBytes` stays an estimate.
 
 ## The drive tests on GitHub's Windows ARM64 runner — measured 1 Oct 2026
 
@@ -59,6 +86,7 @@ they stay closed), a "System Properties" dialog, Widgets, and OneDrive's
 first-run setup starting OneDrive a minute in. The keyboard retries in
 `TestDriveType` never fired in these runs: with focus moved into the page on
 load, the field took focus on the first click every time.
+
 ## The real golden image through the private R2 cache — measured 1 Oct 2026
 
 **Result:** the sealed golden image (Windows 11 Pro 26100.4349) went up to the

@@ -110,6 +110,395 @@
           "ok"
         ],
         "type": "object"
+      },
+      "LedgerBatch": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "LedgerEvent": {
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "version": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "type",
+          "machine"
+        ],
+        "type": "object"
+      },
+      "LedgerEvents": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "events"
+        ],
+        "type": "object"
+      },
+      "LedgerMachine": {
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "last_command": {
+            "type": "string"
+          },
+          "last_owner": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "integer"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "host",
+          "last_seen",
+          "last_owner",
+          "last_command",
+          "version"
+        ],
+        "type": "object"
+      },
+      "LedgerOpen": {
+        "properties": {
+          "age_s": {
+            "type": "integer"
+          },
+          "client": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "version": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "type",
+          "machine",
+          "age_s",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "LedgerPosted": {
+        "properties": {
+          "accepted": {
+            "type": "integer"
+          },
+          "duplicates": {
+            "type": "integer"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerRejected"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "accepted",
+          "duplicates",
+          "rejected"
+        ],
+        "type": "object"
+      },
+      "LedgerRejected": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "error"
+        ],
+        "type": "object"
+      },
+      "LedgerType": {
+        "type": "string"
+      },
+      "LedgerVM": {
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "created": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "integer"
+          },
+          "host": {
+            "type": "string"
+          },
+          "last_activity": {
+            "type": "integer"
+          },
+          "last_command": {
+            "type": "string"
+          },
+          "last_type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "open": {
+            "type": "integer"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "host",
+          "vm",
+          "state",
+          "owner",
+          "client",
+          "repo",
+          "last_command",
+          "last_type",
+          "last_activity",
+          "open"
+        ],
+        "type": "object"
+      },
+      "LedgerView": {
+        "properties": {
+          "machines": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerMachine"
+            },
+            "type": "array"
+          },
+          "now": {
+            "type": "integer"
+          },
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerOpen"
+            },
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "integer"
+          },
+          "stale_after": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "vms": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerVM"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "now",
+          "since",
+          "stale_after",
+          "truncated",
+          "machines",
+          "vms",
+          "open",
+          "recent"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -125,6 +514,16 @@
       },
       "golden-write": {
         "description": "writing, deleting and listing it: only where you push. The Worker's secret GOLDEN_PUSH_TOKEN; clients read it from IRGO_GOLDEN_PUSH_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "ledger-read": {
+        "description": "reading the ledger: its page and its JSON. The Worker's secret LEDGER_READ_TOKEN; clients read it from IRGO_LEDGER_READ_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "ledger-write": {
+        "description": "the tool posting events to the ledger. The Worker's secret LEDGER_TOKEN; clients read it from IRGO_LEDGER_TOKEN.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -960,6 +1359,499 @@
         "security": [],
         "summary": "the Worker is up; reads no secret and no bucket",
         "x-scope": "none"
+      }
+    },
+    "/api/ledger": {
+      "get": {
+        "operationId": "ledger-bare",
+        "responses": {
+          "302": {
+            "description": "Found",
+            "headers": {
+              "Location": {
+                "description": "/api/ledger/",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "a redirect to the page, after the token check like every other ledger path",
+        "x-scope": "ledger-read"
+      }
+    },
+    "/api/ledger/": {
+      "get": {
+        "operationId": "ledger-page",
+        "parameters": [
+          {
+            "description": "as for ledger-vms",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "as for ledger-vms",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "contentMediaType": "text/html",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "ledger-vms as a page for a person",
+        "x-scope": "ledger-read"
+      }
+    },
+    "/api/ledger/events": {
+      "get": {
+        "operationId": "ledger-events",
+        "parameters": [
+          {
+            "description": "RFC 3339, or a duration back from now such as 24h; default 7 days",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 to 1000; default 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match; so are vm, machine, host, type, op, repo and client, all optional",
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "vm",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "machine",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "host",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "op",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerEvents"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "history, newest first",
+        "x-scope": "ledger-read"
+      },
+      "post": {
+        "operationId": "ledger-post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LedgerBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerPosted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code too-large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-write": []
+          }
+        ],
+        "summary": "store a batch of 1 to 25 events; an id already stored is a duplicate, not an error, so a batch can be sent again. Each event is checked on its own: a bad one is rejected and the rest stored",
+        "x-max-body": 262144,
+        "x-scope": "ledger-write"
+      }
+    },
+    "/api/ledger/vms": {
+      "get": {
+        "operationId": "ledger-vms",
+        "parameters": [
+          {
+            "description": "the window, as for ledger-events; default 14 days",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "open work older than this, with no expiry, is stale; default 3h",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "now: machines, VMs (in-use, stale, idle, deleted), open work and recent events",
+        "x-scope": "ledger-read"
       }
     },
     "/api/openapi.json": {

@@ -80,7 +80,7 @@ func TestStartRecordsAJobAndStatusReadsItBack(t *testing.T) {
 	withTempDir(t)
 	withSleep(t)
 
-	s, err := Start("30", nil)
+	s, err := Start("30", nil, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -150,11 +150,11 @@ func TestStartingTheSameWorkTwiceReturnsTheFirstJob(t *testing.T) {
 	withTempDir(t)
 	withSleep(t)
 
-	first, err := Start("30", []string{"31"})
+	first, err := Start("30", []string{"31"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Start("30", []string{"31"})
+	second, err := Start("30", []string{"31"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestStartingTheSameWorkTwiceReturnsTheFirstJob(t *testing.T) {
 	}
 
 	// Different arguments are different work and must start separately.
-	other, err := Start("30", []string{"32"})
+	other, err := Start("30", []string{"32"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestFinishedJobsArePruned(t *testing.T) {
 	}
 
 	withSleep(t)
-	if _, err := Start("30", nil); err != nil {
+	if _, err := Start("30", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -267,7 +267,7 @@ func TestRunningJobsAreNeverPruned(t *testing.T) {
 	// and passed against a build with the guard removed.
 	var live []string
 	for i := 0; i < 3; i++ {
-		s, err := Start("30", []string{string(rune('a' + i))})
+		s, err := Start("30", []string{string(rune('a' + i))}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,13 +283,46 @@ func TestRunningJobsAreNeverPruned(t *testing.T) {
 		_ = write(State{ID: "done-" + string(rune('a'+i)), Command: "vm-create", PID: 1,
 			Started: time.Now().Add(-time.Duration(i) * time.Hour)})
 	}
-	if _, err := Start("30", []string{"trigger"}); err != nil {
+	if _, err := Start("30", []string{"trigger"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, id := range live {
 		if _, err := Status(id); err != nil {
 			t.Errorf("running job %s was pruned: %v", id, err)
+		}
+	}
+}
+
+// TestTheChildIsToldItsClient: the MCP client's name reaches the job child in
+// ClientEnv, and a value the starting process inherited does not. The child
+// is a shell that writes the variable to the job's log.
+//
+// Negative control (by hand, 1 Oct 2026): deleting the cmd.Env line from
+// Start fails both cases, the child seeing the inherited "stale"; restored.
+func TestTheChildIsToldItsClient(t *testing.T) {
+	withTempDir(t)
+	prev := executable
+	executable = func() (string, error) { return "/bin/sh", nil }
+	t.Cleanup(func() { executable = prev })
+	t.Setenv(ClientEnv, "stale")
+
+	for _, client := range []string{"claude-code", ""} {
+		// The trailing word makes each case's arguments differ, so the
+		// second is not returned as the first job, still running.
+		s, err := Start("-c", []string{`printf '[%s]' "$` + ClientEnv + `"`, "case-" + client}, client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		log := filepath.Join(Dir(), s.ID+".log")
+		var got []byte
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if got, _ = os.ReadFile(log); len(got) > 0 {
+				break
+			}
+		}
+		if want := "[" + client + "]"; string(got) != want {
+			t.Errorf("client %q: the child saw %q, want %q", client, got, want)
 		}
 	}
 }

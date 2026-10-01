@@ -351,7 +351,9 @@ stored and how it is read is in [the Worker](WORKER.md#the-ledger).
 the start and end of every command (exit code, duration, the error text)
 except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build
 runs it as `glaze-status -h` a dozen times). Over MCP it records the client's
-name from its `initialize`. Each event carries a machine id, the hostname, the
+name from its `initialize`, and so does a detached job an MCP client started:
+the server hands the name to the job's process in `IRGO_WINVM_JOB_CLIENT`
+(`job.ClientEnv`), which `runTool` reads. Each event carries a machine id, the hostname, the
 owner (`IRGO_WINVM_OWNER`, else the login name), the repository
 (`IRGO_WINVM_REPO`, else the checkout it runs in, read from its git config),
 the VM and the tool version. It is **off** unless `IRGO_LEDGER_URL` and

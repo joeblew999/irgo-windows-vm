@@ -32,6 +32,7 @@ func serveFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.Duration("poll", 3*time.Second, "how often to ask the Worker for a job while the queue is empty")
 	fs.Bool("once", false, "take one job, run it, and exit")
+	fs.Bool("overcommit", false, "admit each job's clone even when the running VMs' configured memory leaves this Mac too little; they will swap (vm-create -overcommit)")
 	host, _ := os.Hostname()
 	fs.String("name", strings.Split(host, ".")[0], "this Mac's name in the jobs it runs")
 	return fs
@@ -53,7 +54,7 @@ func runServe(v values, _ []string) error {
 	say("licence: each clone is a running copy of Windows and needs its own licence; this is for your own use, not a public service")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err = remote.Serve(ctx, c, macExecutor{say: say}, remote.ServeOptions{
+	err = remote.Serve(ctx, c, macExecutor{say: say, overcommit: v.Bool("overcommit")}, remote.ServeOptions{
 		Poll: v.Duration("poll"), Once: v.Bool("once"), Say: say,
 	})
 	if errors.Is(err, remote.ErrAuth) {
@@ -67,7 +68,10 @@ func runServe(v values, _ []string) error {
 // library call (as glaze-check -windows does), its output and pictures
 // collected, and the VM deleted whatever happened. Nothing from the job runs
 // on the Mac: the binary is pushed into the guest and executed there.
-type macExecutor struct{ say func(string, ...any) }
+type macExecutor struct {
+	say        func(string, ...any)
+	overcommit bool
+}
 
 // jobVMPrefix names every VM serve makes, so one left behind by a crash is
 // recognisable as a job's and safe to delete.
@@ -101,7 +105,7 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	// another VM would leave too little memory or disk, and the clone
 	// recorded as the job's caller's, so status and vm-reap see whose it is.
 	owner := utmvm.Caller{ID: "remote:" + j.Owner + "/" + j.ID[:12], Source: "remote job"}
-	finish, err := utmvm.BeginCreate(vm, owner, false, false, say)
+	finish, err := utmvm.BeginCreate(vm, owner, false, e.overcommit, say)
 	if err != nil {
 		return fail(err, "admitting a VM for the job")
 	}

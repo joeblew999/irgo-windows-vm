@@ -27,5 +27,5 @@ bucket_name = "irgo-windows-vm-site"
 [vars]
 # The golden image's private bucket, reached only through presigned URLs.
 # Empty until the owner fills them in; /api/golden answers 503 until then.
-R2_ACCOUNT_ID = ""
-GOLDEN_BUCKET = ""
+R2_ACCOUNT_ID = "7384af54e33b8a54ff240371ea368440"
+GOLDEN_BUCKET = "irgo-golden"

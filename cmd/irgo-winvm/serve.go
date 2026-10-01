@@ -135,9 +135,17 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	defaults := appCreateFlags()
 	user := defaults.Lookup("user").DefValue
 	say("binary: %s %s", j.Spec.Name, strings.Join(args, " "))
-	res, runErr := utmvm.AppCreate(ent.UUID, exe, utmvm.AppOptions{
-		Args: args, GUI: j.Spec.GUI, User: user, Timeout: time.Duration(j.Spec.TimeoutS) * time.Second, Say: say,
-	})
+	opts := utmvm.AppOptions{Args: args, GUI: j.Spec.GUI, User: user, Timeout: time.Duration(j.Spec.TimeoutS) * time.Second, Say: say}
+	res, runErr := utmvm.AppCreate(ent.UUID, exe, opts)
+	// A fresh clone's agent answers before AutoLogon reaches the desktop: the
+	// first -gui job ran 2 s after the agent answered and found no session
+	// (measured 1 Oct 2026). AppCreate checks before it pushes, so asking
+	// again costs a tasklist; two minutes covers a slow logon.
+	for wait := time.Now().Add(2 * time.Minute); j.Spec.GUI && errors.Is(runErr, utmvm.ErrNoDesktopSession) && time.Now().Before(wait) && ctx.Err() == nil; {
+		say("no desktop session yet; asking again in 10 s")
+		time.Sleep(10 * time.Second)
+		res, runErr = utmvm.AppCreate(ent.UUID, exe, opts)
+	}
 	files := map[string][]byte{}
 	raw := []byte(res.Stdout)
 	if len(raw) > 0 {

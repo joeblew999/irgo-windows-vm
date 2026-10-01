@@ -116,7 +116,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
 | `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
-| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`, `capacity.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
 

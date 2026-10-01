@@ -244,6 +244,9 @@ func convert(target string, raw []byte, jsonPath string, sec *Section, runErr er
 		if !r.Inherited && r.failed() {
 			say("%s %s: %s", strings.ToUpper(r.Outcome), r.Name, r.Detail)
 		}
+		if r.Retried != "" {
+			say("RETRIED %s (%s): %s", r.Name, r.Outcome, r.Retried)
+		}
 	}
 	return nil
 }

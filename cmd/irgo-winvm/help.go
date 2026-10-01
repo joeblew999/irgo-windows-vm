@@ -38,6 +38,14 @@ Undo, in the same shape:
      vm-delete    remove the VM
      app-delete   remove your .exe from the VM
 
+A VM in minutes, once one has been installed the slow way:
+
+     vm-golden-create  seal an installed, disposable VM into the golden
+                       image; from then on vm-create clones it and boots
+                       the clone instead of installing, and other VMs keep
+                       running. Each agent takes its own -vm name.
+     vm-golden-delete  remove the golden image
+
 When something is wrong:
 
      vm-screen    save a PNG of the VM's screen — the only way to see a

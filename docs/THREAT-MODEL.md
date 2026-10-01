@@ -26,7 +26,7 @@ Assume someone can send authenticated MCP calls to the HTTP transport.
 | `vm-screen` | a picture of that desktop, including whatever you had open in the guest |
 | `vm-delete -force` | a destroyed 45-minute install |
 | `iso-delete -force -all` | a destroyed 4.2 GB download, from a source that rate-limits |
-| `vm-create -install` | a 45-minute job that restarts UTM, stopping anything else you run in it |
+| `vm-create -install` | a 45-minute job (seconds plus a boot when it clones the golden image); it no longer restarts UTM |
 | `doctor` | your username, your paths, and the versions you have installed |
 
 **The guest is disposable.** It is a throwaway VM with a `dev`/`dev` account, so

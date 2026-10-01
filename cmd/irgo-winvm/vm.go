@@ -13,6 +13,7 @@ func vmCreateFlags() *flag.FlagSet {
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
 	fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
+	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
 	return fs
 }
 
@@ -31,9 +32,10 @@ func runVMCreate(v values, _ []string) error {
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
 	res, err := utmvm.VMCreate(utmvm.VMCreateOptions{
-		VMName:  name,
-		Install: install,
-		Timeout: timeout,
+		VMName:   name,
+		Install:  install,
+		Timeout:  timeout,
+		NoGolden: !v.Bool("golden"),
 	}, func(line string) { say("%s", line) })
 	if err != nil {
 		return err

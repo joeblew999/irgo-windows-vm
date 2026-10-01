@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -127,6 +128,14 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// this project's own ISO lives in the media directory, and a survivor
 	// that is not found is a survivor that is not re-protected.
 	_, immutable := walkBundle(r.Path)
+	// The walk finds nothing inside UTM's container when App Data protection
+	// refuses this process a listing, so the one file that can carry the flag
+	// is also asked for by its known path, which stat still answers.
+	if iso := filepath.Join(r.Path, bundleData, installISO); !slices.Contains(immutable, iso) {
+		if flags, ok := fileFlags(iso); ok && flags&uchgFlag != 0 {
+			immutable = append(immutable, iso)
+		}
+	}
 	if len(immutable) > 0 {
 		step("… releasing %d protected file(s) so the bundle can be removed", len(immutable))
 	}
@@ -152,13 +161,23 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// phantom prints "couldn't be removed" and exits 0 — so the bundle is
 	// checked afterwards rather than the error being trusted.
 	step("… asking UTM to delete it, so no phantom entry is left")
-	_ = exec.Command("utmctl", "delete", r.UUID).Run()
+	//
+	// utmctlPath, not "utmctl": it lives inside UTM.app and is not on PATH
+	// unless something linked it there (Homebrew's cask does, which is why
+	// this worked on the machine that wrote it). Found by name, a missing
+	// utmctl failed here in silence and the RemoveAll below made exactly the
+	// phantom this comment is about.
+	_ = exec.Command(utmctlPath(), "delete", r.UUID).Run()
 	if _, err := os.Stat(r.Path); err == nil {
 		step("… UTM left the bundle behind; removing it")
 		if rmErr := os.RemoveAll(r.Path); rmErr != nil {
 			return r, fmt.Errorf("removing %s: %w", r.Path, rmErr)
 		}
 	}
+	// The remembered guest address goes with the VM, under either reference,
+	// so a later VM of the same name does not start by dialling this one's.
+	forgetGuestIP(r.UUID)
+	forgetGuestIP(r.Name)
 	return r, nil
 }
 

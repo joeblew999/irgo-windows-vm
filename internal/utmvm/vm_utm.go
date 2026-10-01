@@ -82,11 +82,15 @@ func EnsureUTM() (Install, error) {
 	return DetectUTM()
 }
 
-// EnsureGuestTools returns the guest tools ISO, downloading it if UTM has not
-// already cached one.
+// EnsureGuestTools returns the guest tools ISO, downloading it if it is not
+// here yet.
 //
-// It writes to UTM's own cache location, so UTM and every VM generated
-// afterwards pick it up exactly as if the GUI had fetched it.
+// It used to write to UTM's own cache location, so UTM and every VM generated
+// afterwards picked it up as if the GUI had fetched it. This process cannot
+// read or write there: macOS App Data protection refuses it UTM's container
+// (measured 30 Sep 2026 — `head` on the cached ISO is "Operation not
+// permitted", so it could be neither linked nor copied into a bundle). So it
+// is kept in this tool's own directory, and downloaded once.
 func EnsureGuestTools() (string, error) {
 	p, err := GuestToolsISO()
 	if err == nil {
@@ -95,13 +99,10 @@ func EnsureGuestTools() (string, error) {
 	return FetchGuestTools(nil)
 }
 
-// FetchGuestTools downloads the guest tools into UTM's cache and returns the
-// path. progress, if non-nil, is called as bytes arrive.
+// FetchGuestTools downloads the guest tools and returns the path. progress, if
+// non-nil, is called as bytes arrive.
 func FetchGuestTools(progress func(done, total int64)) (string, error) {
-	dest, err := guestToolsPath()
-	if err != nil {
-		return "", err
-	}
+	dest := guestToolsPath()
 	if _, sErr := os.Stat(dest); sErr == nil {
 		return dest, nil
 	}
@@ -114,9 +115,7 @@ func FetchGuestTools(progress func(done, total int64)) (string, error) {
 	// guard available — a truncated download here presents later as a VM with
 	// no network, which is a long way from the cause.
 	if dErr := isoDownload(GuestToolsURL, dest, digest{}, progress); dErr != nil {
-		return "", fmt.Errorf("downloading UTM guest tools: %w\n"+
-			"  Alternatively, open UTM once and choose \"Install Windows guest tools\" "+
-			"from any VM's menu; it caches the ISO in the same place", dErr)
+		return "", fmt.Errorf("downloading UTM guest tools from %s to %s: %w", GuestToolsURL, dest, dErr)
 	}
 	fi, sErr := os.Stat(dest)
 	if sErr != nil {
@@ -146,31 +145,22 @@ func majorOf(v string) int {
 	return n
 }
 
-// guestToolsPath is where UTM caches the guest tools, and therefore where a
-// download of our own has to land for UTM and every generated VM to find it.
-func guestToolsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(utmContainerDir(home),
-		"Library", "Application Support", utmToolsDir, utmToolsISO), nil
-}
+// guestToolsPath is where the guest tools are kept: the vm stage's own
+// directory, not UTM's cache, which this process cannot read (see
+// EnsureGuestTools).
+func guestToolsPath() string { return filepath.Join(vmDataDir(), utmToolsISO) }
 
-// GuestToolsISO returns UTM's downloaded guest tools image, if present.
+// GuestToolsISO returns the downloaded guest tools image, if present.
 //
 // Installing these inside the guest is what gives the QEMU guest agent, and
 // therefore `utmctl exec` and `utmctl ip-address`. Without it a VM boots fine
 // but cannot be driven from the host at all — which defeats the point of
 // generating one from a script.
 func GuestToolsISO() (string, error) {
-	p, err := guestToolsPath()
-	if err != nil {
-		return "", err
-	}
+	p := guestToolsPath()
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("UTM guest tools not downloaded yet: %w\n"+
-			"Open UTM once and let it fetch them, or the guest agent will be unavailable", err)
+			"  vm-create downloads them; without them the guest agent is unavailable", err)
 	}
 	return p, nil
 }

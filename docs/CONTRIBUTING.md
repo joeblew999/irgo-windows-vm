@@ -62,7 +62,7 @@ Run the one for the stage you changed.
 | task | what it does | cost |
 |---|---|---|
 | `mise run iso:test` | deletes the ISO and rebuilds it from the `.esd` | ~50 s, and 4.9 GB of disk once (see the note in the task) |
-| `mise run vm:test` | creates and deletes a VM under a disposable name | minutes; refuses to run if a VM is up, because it restarts UTM |
+| `mise run vm:test` | creates and deletes a VM under a disposable name | minutes; leaves running VMs alone (UTM imports the bundle, no restart) |
 | `mise run app:test` | pushes a binary to the VM, runs it, removes it | ~20 s; needs a VM with Windows installed |
 
 Use a disposable VM for anything destructive. `vm:test` already does: it builds

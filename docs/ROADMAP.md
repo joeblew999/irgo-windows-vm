@@ -47,9 +47,8 @@ To close it:
 3. Confirm `status` still reports the job alive minutes later.
 4. Let it finish, then `app-create` a probe into the new VM.
 
-**Cost and risk:** about 45 minutes of wall clock. `vm-create` restarts UTM, so
-the working `irgo-win11` VM must be shut down first, and losing it costs another
-45 minutes. Whoever owns the machine decides when this runs.
+**Cost and risk:** about 45 minutes of wall clock. `vm-create` no longer restarts UTM
+(since 30 Sep 2026 UTM imports the bundle), so `irgo-win11` can keep running. Whoever owns the machine decides when this runs.
 
 **What it catches that nothing else can:**
 

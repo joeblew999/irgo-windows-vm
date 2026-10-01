@@ -49,6 +49,9 @@ A change that makes one stage reach into another's paths is a design error.
   anything expensive: without it a boot cannot be driven, and the failure would
   otherwise arrive forty minutes into an install as a timeout that does not
   mention permissions.
+- **Not** Full Disk Access, or access to other apps' data. The tool never reads
+  or writes UTM's container itself; it writes bundles under its own directory
+  and has UTM import, clone, reconfigure and delete them through AppleScript.
 
 ### Scope: Windows only
 
@@ -104,6 +107,9 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
+  vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
+  golden.json            what is known about the golden image
+  mutation*.lock         the mutation locks, one machine-wide, one per VM, one for bin/
   net/      the guest address the last SMB push reached, one file per VM
   utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
@@ -174,20 +180,32 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 ### Jobs
 
 `vm-create -install` (about 45 minutes), `iso-create -fetch` and
-`vm-golden-push`/`vm-golden-pull` (always) start the work and return a job id instead of blocking on a connection that would time out.
+`vm-golden-create`, `vm-golden-push` and `vm-golden-pull` (always) start the work and return a job id instead of
+blocking on a connection that would time out.
 Over MCP, `glaze-check -windows` is a job too. The work outlives the client that
 started it; `status` reports what is running, what finished and how long it
 took. Whether a job is alive is answered by asking the operating system, not by
 reading a file that says so. Job records live in `jobs/` under the runtime data
 directory.
 
-### The mutation lock
+### The mutation locks
 
-Every command that changes state takes one shared lock (`internal/utmvm/lock.go`).
-There is one lock for all three stages, not one per stage, because their
-mutations touch the same machine. A second mutation is **refused, not queued**,
-with exit code 6. The lock is released when its holder dies; the primitive that
-does that differs per platform, hence `lock_darwin.go` and `lock_other.go`.
+Every command that changes state takes the locks it declares in
+`command.All` (`Locks`), from three kinds (`internal/utmvm/lock.go`):
+
+| lock | guards | taken by |
+|---|---|---|
+| machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
+| per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
+| stage (`mutation-stage.lock`) | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+
+So `app-create` on two VMs runs side by side, and a second mutation of the same
+VM is **refused, not queued**, with exit code 6 and a message naming the busy
+lock. The VM is read from the command's own `-vm` flag, its name case-folded
+and a UUID resolved to the name, so every spelling lands on one lock. A lock is
+released when its holder dies (flock on macOS; nothing to lock elsewhere, hence
+`lock_darwin.go` and `lock_other.go`), and its file is never deleted: unlinking
+a flock file someone holds lets a third process lock a new file of that name.
 
 ## Building, testing and linting
 
@@ -369,6 +387,10 @@ as a known upstream bug (see [the conformance suite](#the-conformance-suite)). [
 They run in that order, and each is cheap to repeat: if the work is already
 done, it says so and stops.
 
+Once one VM has been installed, **`vm-golden-create`** (undo
+**`vm-golden-delete`**) seals it into a [golden image](#the-golden-image), and
+`vm-create` then clones that instead of installing.
+
 Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
 reports what is installed and where, and **`status`** lists long-running
 [jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
@@ -517,6 +539,77 @@ IRGO_R2_API_TOKEN=<token value from step 3>
 A variable that is missing is named, every one at once, with exit 2. In CI,
 set the same five as repository secrets.
 
+## The golden image
+
+A golden image is an installed Windows, sealed once, that every new VM is
+cloned from instead of installed. It turns "a VM of my own" from about 45
+minutes into a clone and a boot, and it lets several developers or agents on
+one Mac each have a VM without stopping anybody else's.
+
+| command | what it does | undo |
+|---|---|---|
+| **`vm-golden-create -vm <disposable>`** | seals that VM and registers the result as `irgo-golden` | `vm-golden-delete` |
+| **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
+
+The first VM is still installed the slow way, under a throwaway name:
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`. With
+no golden image, `vm-create` says it is falling back to a full install and
+does that; `-golden=false` installs even when there is one.
+
+**Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
+the guest, as SYSTEM, one step at a time with the disk's allocation printed
+after each):
+
+1. boot the source VM and wait for its agent;
+2. BitLocker off (and `PreventDeviceEncryption` set), hibernation off,
+   `DISM /StartComponentCleanup /ResetBase`, TRIM;
+3. shut Windows down from inside and wait for UTM to report it stopped;
+4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
+   (the install, answer-file and guest-tools CDs are dropped);
+5. clone the golden image once more, boot that clone until its agent answers,
+   and delete it, so an image that does not boot is never reported made;
+6. write `golden.json`: source, Windows build, WebView2 version, allocated and
+   apparent size, seal and boot times, tool version. `doctor` reports it.
+
+It refuses `irgo-win11` without `-force`, and refuses when it cannot find out
+which VM it was given. The source is left sealed and stopped, an ordinary VM
+that `vm-delete` removes.
+
+**Cloning** (`CloneFromGolden`) takes the machine lock for the clone itself,
+seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new
+VM's lock only. It refuses when the golden image is running (it must stay
+stopped: UTM will not clone a running VM, and a golden image that has booted is
+no longer the one its manifest describes) and when free space is below 10 GiB,
+an estimate of how much a clone grows until it is measured.
+
+Why it is built this way:
+
+- **Everything goes through UTM.** macOS App Data protection refuses this
+  process `ls`, `cat` and `touch` in `~/Library/Containers/com.utmapp.UTM`, even
+  unsandboxed; `stat` on a known path works. UTM can do all of it to its own
+  folder, so clone, import, drive changes and delete are AppleScript
+  (`assets/utm-*.applescript`), and no Full Disk Access is needed.
+- **UTM's clone is `copyfile` with CLONE and DATA_SPARSE**: instant on APFS,
+  sparse, free until the clone writes. It always assigns a new UUID and renames
+  the bundle with the VM.
+- **It keeps the MAC** unless UTM's global `IsRegenerateMACOnClone` is on, which
+  defaults to off. Two clones with one MAC compete for one DHCP lease, so every
+  clone is given `randomMAC()`, and the MAC UTM reports back is checked.
+- **Nothing restarts UTM.** A new bundle is written to `vm/staging/` and UTM
+  imports it; the install medium is ejected with `update configuration` on the
+  stopped VM. Quitting UTM would stop every VM it runs.
+- **Decrypted, because ciphertext does not compress.** Windows 11 24H2 turned
+  Device Encryption on by itself; the answer file now prevents it at install,
+  and sealing decrypts VMs made before that. This also removes the risk of a
+  TPM protector locking a clone out.
+- **No sysprep.** It re-runs OOBE and risks the `dev` setup, for a machine SID
+  nothing standalone uses. Every clone is `WIN11ARM` on the network.
+- **Local only.** The Windows licence forbids passing the image to anyone else,
+  and every running clone needs its own licence. There is no public download.
+
+The research, and what is measured and what is not, is in
+`.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
+
 ## What it exits with
 
 `utmctl` exits 0 when it fails (see [UPSTREAM.md](UPSTREAM.md#utm)), so this
@@ -541,8 +634,8 @@ script.
 **4 and 6 are worth retrying.** Windows Update takes the guest agent away for
 minutes at a time while the VM is fine. `app-create` already waits and tries to
 recover before giving up, which is why it can take several minutes to return 4.
-6 means another mutation holds the [lock](#the-mutation-lock); the holder
-finishes on its own schedule.
+6 means another mutation holds a [lock](#the-mutation-locks) this one needs,
+and the message names which; the holder finishes on its own schedule.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.
@@ -562,7 +655,7 @@ intends to close.
 |---|---|---|
 | the `.esd` from Microsoft | **4.2 GB** | downloaded once, from a source that rate-limits |
 | scratch to build the ISO | **12 GiB** | free space `iso-create` requires |
-| the built ISO | **~4.9 GB** | hardlinked into the VM, not copied |
+| the built ISO | **~4.9 GB** | cloned into the VM (APFS), not copied |
 | the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
 
 About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
@@ -1085,6 +1178,13 @@ detail there and only the reminder here.
 | reading UTM's container | `Operation not permitted` for `ls` and `cat`, even unsandboxed (macOS App Data protection); `stat` on a known path works | `vm-golden-push -bundle` takes a copy UTM exported, not the bundle in place |
 | testing holes on a small file | APFS keeps an 8 MiB file fully allocated whatever its holes; at 64 MiB they are holes (measured 30 Sep 2026) | make a sparse test file 64 MiB or more |
 | aws-sdk-go-v2 `PutObject` with default settings | sends `aws-chunked` bodies with a trailing CRC, which a plain S3 server or fake does not expect | `RequestChecksumCalculation: WhenRequired` |
+
+| reading or writing UTM's container | `Operation not permitted` for `ls`, `cat`, `touch`, even unsandboxed (macOS App Data protection); `stat` on a known path works | have UTM do it through AppleScript |
+| a bundle written into UTM's folder | UTM only rescans at launch, and restarting it stops every running VM | write it elsewhere and `import` it |
+| `utmctl clone` / `duplicate` | keeps the source's MAC unless a global setting (default off) says otherwise; two clones fight over one DHCP lease | set the MAC in the same `duplicate ... with properties` |
+| an APFS clone of an immutable file | the clone is immutable too (`copyfile` copies BSD flags), so UTM cannot delete it later | clear the flag on the clone |
+| a long comment in `autounattend.xml` | Setup ignored the **whole** answer file and stopped at "Select language settings"; the same element under a one-line comment installed (30 Sep 2026; that comment was the only one with `%` in it, the trigger was not isolated). Unit tests pass either way | keep comments in the answer file short; prove any change to it with an install |
+| Windows 11 24H2 left alone | encrypts the disk on its own (Device Encryption), so a copy of it does not compress | `PreventDeviceEncryption` in specialize; decrypt before sealing |
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |

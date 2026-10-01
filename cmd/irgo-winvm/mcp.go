@@ -70,15 +70,22 @@ func mcpDeps() mcpserver.Deps {
 		},
 		StartJob: func(name string, args []string) (string, error) {
 			// Asked at call time so a second mutation hears "busy" now rather
-			// than after forking. The job child still takes the lock itself.
-			// An unanswerable check refuses.
-			held, err := utmvm.MutationHeld()
+			// than after forking; the job child still takes the locks itself.
+			// Taken and released rather than queried, so the refusal names the
+			// busy lock. An unanswerable check refuses.
+			c, ok := find(name)
+			if !ok {
+				return "", fmt.Errorf("%w: no such command %q", errUsage, name)
+			}
+			v, _, err := c.parse(args)
 			if err != nil {
 				return "", err
 			}
-			if held {
-				return "", utmvm.ErrMutationInProgress
+			release, err := utmvm.Acquire(locksFor(c.Command, v)...)
+			if err != nil {
+				return "", err
 			}
+			release()
 			s, err := job.Start(name, args)
 			if err != nil {
 				return "", err

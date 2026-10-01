@@ -46,9 +46,9 @@ func run(args []string) error {
 
 // runTool is the one path every command takes: the CLI, an MCP tool call, and
 // the detached job child, which re-runs this binary. A command that changes
-// state on disk takes the mutation lock after its flags parse, so -h is
-// answered even while another mutation holds it; a second mutation is refused,
-// never queued.
+// state on disk takes its mutation locks after its flags parse, so -h is
+// answered even while another mutation holds them; a second mutation is
+// refused, never queued.
 func runTool(name string, args []string) error {
 	c, ok := find(name)
 	if !ok {
@@ -58,14 +58,37 @@ func runTool(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.Mutates {
-		release, err := utmvm.AcquireMutation()
+	if c.Mutates() {
+		release, err := utmvm.Acquire(locksFor(c.Command, v)...)
 		if err != nil {
 			return err
 		}
 		defer release()
 	}
 	return c.run(v, rest)
+}
+
+// locksFor is the locks c takes with these parsed flags: LockVM becomes the
+// lock of the VM its -vm flag names, or of the default VM when it has no -vm
+// or it is empty, so `-vm a1`, `-vm=A1` and a UUID all land on one lock.
+func locksFor(c command.Command, v values) []utmvm.Lock {
+	var locks []utmvm.Lock
+	if c.Locks&command.LockMachine != 0 {
+		locks = append(locks, utmvm.MachineLock)
+	}
+	if c.Locks&command.LockStage != 0 {
+		locks = append(locks, utmvm.StageLock)
+	}
+	if c.Locks&command.LockVM != 0 {
+		vm := utmvm.DefaultVMName
+		if v.fs != nil {
+			if f := v.fs.Lookup("vm"); f != nil && f.Value.String() != "" {
+				vm = f.Value.String()
+			}
+		}
+		locks = append(locks, utmvm.VMLockFor(vm))
+	}
+	return locks
 }
 
 // cmd is a declared command joined to what runs it.
@@ -125,6 +148,9 @@ func init() {
 		"iso-delete": {flags: isoDeleteFlags, run: runISODelete},
 		"vm-delete":  {flags: vmDeleteFlags, run: runVMDelete},
 		"app-delete": {flags: appDeleteFlags, run: runAppDelete},
+
+		"vm-golden-create": {flags: vmGoldenCreateFlags, run: runVMGoldenCreate},
+		"vm-golden-delete": {flags: vmGoldenDeleteFlags, run: runVMGoldenDelete},
 
 		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
 		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},

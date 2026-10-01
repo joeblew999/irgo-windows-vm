@@ -87,10 +87,11 @@ func Externals() []External {
 		},
 		{
 			Name: "UTM guest tools ISO",
-			Path: guestToolsPathOrEmpty(),
+			Path: guestToolsPath(),
 			Why: "the QEMU guest agent and the virtio-net driver. Without it a VM boots and " +
-				"is then unreachable: no network, no `utmctl exec`, no IP.",
-			Fix: "open UTM once and let it download them; there is no supported way to fetch them ourselves",
+				"is then unreachable: no network, no `utmctl exec`, no IP. Kept here, not in " +
+				"UTM's cache, which this process is not allowed to read.",
+			Fix: "irgo-winvm vm-create -install, which downloads it from " + GuestToolsURL,
 		},
 		{
 			Name: "Windows 11 ARM64 ISO",
@@ -205,15 +206,4 @@ func vmDirOrEmpty() string {
 		return ""
 	}
 	return d
-}
-
-// guestToolsPathOrEmpty is where UTM caches its guest tools, or empty when it
-// cannot be resolved. Asked of the vm code rather than spelled out again:
-// doctor reports on UTM, it does not know where UTM keeps things.
-func guestToolsPathOrEmpty() string {
-	p, err := guestToolsPath()
-	if err != nil {
-		return ""
-	}
-	return p
 }

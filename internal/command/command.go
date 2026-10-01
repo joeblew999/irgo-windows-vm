@@ -32,9 +32,10 @@ type Command struct {
 	// because it is shipped to an agent as a claim about what is safe.
 	Destructive bool
 
-	// Mutates marks a command that changes state on disk and so takes the
-	// mutation lock. Not simply !ReadOnly: `mcp` changes nothing itself.
-	Mutates bool
+	// Locks is which mutation locks the command takes; zero means it changes
+	// nothing on disk. Not simply !ReadOnly: `mcp` changes nothing itself.
+	// The locks themselves are in internal/utmvm/lock.go.
+	Locks Locks
 
 	// Detach names the flag that makes this command long-running, or is
 	// DetachAlways. With it, an MCP call starts a job and returns a handle
@@ -48,6 +49,22 @@ type Command struct {
 	OverMCP bool
 }
 
+// Locks is a set of mutation locks.
+type Locks uint8
+
+const (
+	// LockMachine guards what every VM shares: the media and the golden image.
+	LockMachine Locks = 1 << iota
+	// LockVM guards the one VM the command's -vm flag names.
+	LockVM
+	// LockStage guards bin/, the binaries staged for app-create.
+	LockStage
+)
+
+// Mutates reports whether c changes state on disk, which is whether it takes
+// any lock.
+func (c Command) Mutates() bool { return c.Locks != 0 }
+
 // DetachAlways is Detach for a command with no quick form. It is not a flag
 // and cannot be passed as one.
 const DetachAlways = "(always)"
@@ -55,26 +72,30 @@ const DetachAlways = "(always)"
 // All is every command, in the order the usage prints them. A command that is
 // not here does not exist.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Mutates: true, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Mutates: true, Detach: "-install", OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Mutates: true, OverMCP: true},
-	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Mutates: true, OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, OverMCP: true},
+	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, OverMCP: true},
+	// Sealing is many minutes even with nothing to decrypt, so it is always a
+	// job over MCP.
+	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, OverMCP: true},
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
-	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Mutates: true, Detach: DetachAlways, OverMCP: true},
-	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Mutates: true, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, OverMCP: true},
 
-	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
-	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Mutates: true, Destructive: true, OverMCP: true},
+	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
+	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, OverMCP: true},
+	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
-	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Mutates: true, OverMCP: true},
+	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
 	// glaze-check and glaze-status work only in a checkout of this repository.
-	// glaze-check is not Mutates: the Mac run touches no VM, and taking the
-	// lock would block it for the whole of an install. -windows takes the lock
+	// glaze-check takes no lock here: the Mac run touches no VM, and a lock
+	// would block it for the whole of an install. -windows takes that VM's lock
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
 	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},

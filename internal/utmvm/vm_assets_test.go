@@ -84,6 +84,39 @@ func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 	}
 }
 
+// Device Encryption turned itself on in a 24H2 guest and made the whole disk
+// ciphertext, which no golden image can compress. The value has to be set in
+// specialize, before OOBE ends, and in a command, not a comment.
+//
+// The comment beside it in autounattend.xml is one line on purpose. With a
+// twelve-line one (measured 30 Sep 2026, docs/RESULTS.md) Setup ignored the
+// whole answer file and stopped at "Select language settings"; the same
+// component under a one-line comment installed. The trigger was not isolated;
+// that comment was the only one in the file with "%" in it. This test passed
+// against the broken file: only an install shows it.
+//
+// Negative control, run by hand: move the RunSynchronousCommand into
+// oobeSystem, or delete it and leave the comment, and this fails.
+func TestAnswerFilePreventsDeviceEncryptionBeforeOOBE(t *testing.T) {
+	s := stripXMLComments(string(autounattendXML))
+	start := strings.Index(s, `<settings pass="specialize">`)
+	if start < 0 {
+		t.Fatal("answer file has no specialize pass")
+	}
+	end := strings.Index(s[start:], "</settings>")
+	if end < 0 {
+		t.Fatal("specialize pass is not closed")
+	}
+	specialize := s[start : start+end]
+	want := `reg add HKLM\SYSTEM\CurrentControlSet\Control\BitLocker /v PreventDeviceEncryption /t REG_DWORD /d 1 /f`
+	if !strings.Contains(specialize, "<Path>"+want+"</Path>") {
+		t.Errorf("specialize does not run %q; Windows 11 24H2 encrypts the disk on its own and a golden image of it does not compress", want)
+	}
+	if !strings.Contains(specialize, `name="Microsoft-Windows-Deployment"`) {
+		t.Error("RunSynchronous in specialize belongs to Microsoft-Windows-Deployment; under another component Setup ignores it")
+	}
+}
+
 // stripXMLComments removes <!-- ... --> so a comment warning about a mistake
 // cannot be mistaken for the mistake.
 func stripXMLComments(s string) string {

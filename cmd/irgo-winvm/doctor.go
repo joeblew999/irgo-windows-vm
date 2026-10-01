@@ -108,7 +108,8 @@ func doctorRows() []doctorRow {
 	for _, r := range utmvm.Records() {
 		rows = append(rows, recordRow(r))
 	}
-	return append(rows, jobsRow())
+	rows = append(rows, jobsRow())
+	return append(rows, goldenRows()...)
 }
 
 // utmReleaseRows reports the installed UTM, the latest stable release and the

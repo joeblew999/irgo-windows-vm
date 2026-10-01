@@ -10,7 +10,11 @@ package utmvm
 // the package compiles for a Windows or Linux developer who only wants
 // `targets` to tell them what their machine can do.
 
-import "syscall"
+import (
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
 
 // uchgFlag is UF_IMMUTABLE: the file may not be changed, renamed or deleted
 // until the flag is cleared. Truncation is refused too, which is the case that
@@ -71,3 +75,8 @@ func sameDevice(a, b string) bool {
 }
 
 const immutableSupported = true
+
+// cloneFile makes dst an APFS clone of src: a new inode sharing src's blocks
+// until either is written. Fails across volumes and on filesystems without
+// clones; the caller copies then.
+func cloneFile(src, dst string) error { return unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW) }

@@ -79,10 +79,10 @@ func runGlazeCheck(v values, _ []string) error {
 		if err != nil {
 			return err
 		}
-		// Held around the run, so the library is called directly rather than
-		// through the app-create command, which would try to take the lock
-		// again and be refused by this process.
-		release, err := utmvm.AcquireMutation()
+		// This VM's lock only, held around the run, so the library is called
+		// directly rather than through the app-create command, which would try
+		// to take the lock again and be refused. Other VMs stay free.
+		release, err := utmvm.Acquire(utmvm.VMLock(e.Name))
 		if err != nil {
 			return err
 		}

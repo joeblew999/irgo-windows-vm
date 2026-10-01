@@ -27,3 +27,7 @@ func Frontmost() (App, error) {
 	}
 	return App{Name: name, PID: n}, nil
 }
+
+// stepForeground is not asked on macOS (asked is false): Frontmost runs
+// osascript, too slow for every step, and the tests ask it before and after.
+func stepForeground() (App, bool, error) { return App{}, false, nil }

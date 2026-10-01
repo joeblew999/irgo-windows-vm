@@ -66,7 +66,8 @@ type ShotRow struct {
 // with the reason, rather than failing the check: it is evidence about the
 // run, not part of the verdict.
 func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, error), say func(string, ...any)) error {
-	dir := filepath.Join(root, filepath.FromSlash(ShotsDir), sec.Target)
+	su := sec.Suite()
+	dir := filepath.Join(root, filepath.FromSlash(su.ShotsDir), sec.Target)
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
@@ -84,11 +85,11 @@ func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, err
 			continue
 		}
 		if r.Shot != "" {
-			if err := copyShot(dir, sec.Target, r.Shot, fetch); err != nil {
+			if err := copyShot(dir, su.shotPrefix(sec.Target), r.Shot, fetch); err != nil {
 				r.Shot, r.ShotNote, r.NoShot = "", "", "taken in the run, and not copied back: "+err.Error()
 			}
 		}
-		row := ShotRow{Test: r.Name, Result: r.label(), Note: r.ShotNote, Missing: r.NoShot}
+		row := ShotRow{Test: r.Name, Result: r.label(su), Note: r.ShotNote, Missing: r.NoShot}
 		if r.Shot != "" {
 			row.Picture = path.Base(r.Shot)
 			taken++
@@ -102,7 +103,7 @@ func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, err
 	if err := writeFile(filepath.Join(dir, manifestName), append(b, '\n')); err != nil {
 		return err
 	}
-	say("screenshots: %d of %d in %s", taken, len(m.Tests), filepath.Join(ShotsDir, sec.Target))
+	say("screenshots: %d of %d in %s", taken, len(m.Tests), filepath.Join(su.ShotsDir, sec.Target))
 	return nil
 }
 
@@ -110,11 +111,12 @@ func collectShots(root string, sec *Section, fetch func(rel string) ([]byte, err
 var pngMagic = []byte("\x89PNG\r\n\x1a\n")
 
 // copyShot fetches one picture and writes it into dir, checking it is a PNG
-// the test named for this target and not something else that arrived.
-func copyShot(dir, target, rel string, fetch func(string) ([]byte, error)) error {
-	name, ok := strings.CutPrefix(rel, target+"/")
+// the test named under prefix (the target, unless the suite says otherwise)
+// and not something else that arrived.
+func copyShot(dir, prefix, rel string, fetch func(string) ([]byte, error)) error {
+	name, ok := strings.CutPrefix(rel, prefix+"/")
 	if !ok || name == "" || strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("%s is not a picture of %s", rel, target)
+		return fmt.Errorf("%s is not a picture of %s", rel, prefix)
 	}
 	b, err := fetch(rel)
 	if err != nil {
@@ -128,8 +130,8 @@ func copyShot(dir, target, rel string, fetch func(string) ([]byte, error)) error
 
 // readManifest reads a target's manifest under root; ok is false when there
 // is none.
-func readManifest(root, target string) (Manifest, bool, error) {
-	return readManifestIn(filepath.Join(root, filepath.FromSlash(ShotsDir), target))
+func (s *Suite) readManifest(root, target string) (Manifest, bool, error) {
+	return readManifestIn(filepath.Join(root, filepath.FromSlash(s.ShotsDir), target))
 }
 
 // readManifestIn reads the manifest in a target's directory.
@@ -153,19 +155,20 @@ func readManifestIn(dir string) (m Manifest, ok bool, err error) {
 const thumbWidth = 280
 
 // gallery is the Screenshots section: one row per test that took a picture on
-// either target, the Mac and Windows side by side, each with its result.
-// Empty when neither target has a manifest with anything in it.
+// any target, the targets side by side in order (for glaze the Mac and
+// Windows), each with its result. Empty when no target has a manifest with
+// anything in it.
 //
 // HTML images rather than markdown ones, so they can be drawn smaller than
 // the file and link to it; the paths are relative to docs/, where the status
 // file is, and the site publishes docs/screens at the same place relative to
 // its pages, so one path works on GitHub and on the site.
-func gallery(root string) (string, error) {
+func (s *Suite) gallery(root string, columns []string) (string, error) {
 	var ms []Manifest
 	var order []string
 	seen := map[string]bool{}
-	for _, t := range targets {
-		m, ok, err := readManifest(root, t)
+	for _, t := range columns {
+		m, ok, err := s.readManifest(root, t)
 		if err != nil {
 			return "", err
 		}
@@ -186,27 +189,28 @@ func gallery(root string) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("## Screenshots\n\n")
-	b.WriteString("Every test that opens a window photographs it at the moment that shows what it checked — the page loaded, the tray up, " +
-		"the menu installed, the dialog open — and the picture is recorded with the run it came from. A capture that failed says why " +
-		"instead of showing a picture; a black or one-colour frame counts as failed. How each is taken is in " +
-		"`examples/conformance/shots_test.go`.\n\n")
+	b.WriteString(s.GalleryIntro)
 	for _, m := range ms {
 		switch {
 		case len(m.Tests) == 0 && m.When.IsZero():
-			fmt.Fprintf(&b, "- %s: no pictures recorded yet\n", titleShort(m.Target))
+			fmt.Fprintf(&b, "- %s: no pictures recorded yet\n", s.Short(m.Target))
 		default:
 			from := ""
 			if m.RunURL != "" {
 				from = fmt.Sprintf(", [CI run](%s)", m.RunURL)
 			}
-			fmt.Fprintf(&b, "- %s: %s, commit `%s`, %s%s\n", titleShort(m.Target), m.When.Format("2006-01-02 15:04 -0700"), short(m.Commit), m.Platform, from)
+			fmt.Fprintf(&b, "- %s: %s, commit `%s`, %s%s\n", s.Short(m.Target), m.When.Format("2006-01-02 15:04 -0700"), short(m.Commit), m.Platform, from)
 		}
 	}
-	b.WriteString("\n| test | " + titleShort(TargetMac) + " | " + titleShort(TargetWindows) + " |\n|---|---|---|\n")
+	b.WriteString("\n| test |")
+	for _, m := range ms {
+		b.WriteString(" " + s.Short(m.Target) + " |")
+	}
+	b.WriteString("\n|---|" + strings.Repeat("---|", len(ms)) + "\n")
 	for _, name := range order {
 		fmt.Fprintf(&b, "| %s |", name)
 		for _, m := range ms {
-			b.WriteString(" " + shotCell(m, name) + " |")
+			b.WriteString(" " + s.shotCell(m, name) + " |")
 		}
 		b.WriteString("\n")
 	}
@@ -215,7 +219,7 @@ func gallery(root string) (string, error) {
 
 // shotCell is one test's cell for one target: its result, and its picture or
 // why there is none.
-func shotCell(m Manifest, test string) string {
+func (s *Suite) shotCell(m Manifest, test string) string {
 	for _, r := range m.Tests {
 		if r.Test != test {
 			continue
@@ -223,9 +227,9 @@ func shotCell(m Manifest, test string) string {
 		if r.Picture == "" {
 			return r.Result + "<br>not captured: " + htmlText(r.Missing)
 		}
-		src := "screens/conformance/" + m.Target + "/" + r.Picture
+		src := s.shotsURL() + "/" + m.Target + "/" + r.Picture
 		cell := fmt.Sprintf(`%s<br><a href="%s"><img src="%s" width="%d" alt="%s on %s"></a>`,
-			r.Result, src, src, thumbWidth, htmlText(test), titleShort(m.Target))
+			r.Result, src, src, thumbWidth, htmlText(test), s.Short(m.Target))
 		if r.Note != "" {
 			cell += "<br><sub>" + htmlText(r.Note) + "</sub>"
 		}
@@ -237,13 +241,6 @@ func shotCell(m Manifest, test string) string {
 	// The manifest lists only tests that tried to take a picture, so absence
 	// cannot tell a test that stopped first from one that was not in the run.
 	return "no picture in this run: the test skipped or failed first, or was not in it"
-}
-
-func titleShort(target string) string {
-	if target == TargetMac {
-		return "Mac"
-	}
-	return "Windows"
 }
 
 // htmlText makes a message safe as text inside HTML inside a table cell.
@@ -310,7 +307,7 @@ func Import(root, dir string, say func(string, ...any)) error {
 		if err := replaceDir(tdir, filepath.Join(root, filepath.FromSlash(ShotsDir), target)); err != nil {
 			return err
 		}
-		if _, err := record(root, target, sec); err != nil {
+		if _, err := Glaze.record(root, target, sec); err != nil {
 			return err
 		}
 		done[target] = tdir

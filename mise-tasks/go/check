@@ -46,3 +46,4 @@ done
 # that only builds on darwin would otherwise pass every check run on a Mac.
 run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples build -o /dev/null ./...
 run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples test -c -o /dev/null ./conformance
+run env CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go -C examples test -c -o /dev/null ./vmconformance

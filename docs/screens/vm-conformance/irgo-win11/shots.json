@@ -1,0 +1,70 @@
+{
+  "Target": "irgo-win11",
+  "When": "2026-10-01T12:42:03.951621+07:00",
+  "Platform": "windows/arm64, VM irgo-win11 (through app-create: as SYSTEM, and -gui in dev's session)",
+  "Commit": "f0b88cd6e1d13e3102b2cf2f823e1b3f5744d906",
+  "Verdict": "NO: failed: TestDeviceEncryptionOff/prevented TestDeviceEncryptionOff/volume_decrypted TestHibernationOff",
+  "Tests": [
+    {
+      "Test": "TestSessionDesktop",
+      "Result": "PASS",
+      "Picture": "TestSessionDesktop.png"
+    },
+    {
+      "Test": "TestSessionNotificationsOff",
+      "Result": "PASS",
+      "Picture": "TestSessionNotificationsOff.png"
+    },
+    {
+      "Test": "TestSessionWebView2Renders",
+      "Result": "PASS",
+      "Picture": "TestSessionWebView2Renders.png"
+    },
+    {
+      "Test": "TestSessionEvidence/WindowsBuild",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_WindowsBuild.png"
+    },
+    {
+      "Test": "TestSessionEvidence/WindowsUpdatePolicy",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_WindowsUpdatePolicy.png"
+    },
+    {
+      "Test": "TestSessionEvidence/WindowsKeys",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_WindowsKeys.png"
+    },
+    {
+      "Test": "TestSessionEvidence/DeviceEncryption",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_DeviceEncryption.png"
+    },
+    {
+      "Test": "TestSessionEvidence/Hibernation",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_Hibernation.png"
+    },
+    {
+      "Test": "TestSessionEvidence/NeverSleeps",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_NeverSleeps.png"
+    },
+    {
+      "Test": "TestSessionEvidence/FileShare",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_FileShare.png"
+    },
+    {
+      "Test": "TestSessionEvidence/WebView2",
+      "Result": "PASS",
+      "Picture": "TestSessionEvidence_WebView2.png"
+    },
+    {
+      "Test": "Host/DesktopClean",
+      "Result": "PASS",
+      "Picture": "Host_DesktopClean.png",
+      "Note": "the whole VM, photographed from the host with vm-screen after the check"
+    }
+  ]
+}

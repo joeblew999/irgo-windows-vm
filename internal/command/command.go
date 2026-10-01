@@ -119,6 +119,12 @@ var All = []Command{
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
 	{Name: "glaze-check", Summary: "does glaze work? its conformance suite, here or -windows (needs the source checkout)", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict and whether it still holds (needs the source checkout)", ReadOnly: true, OverMCP: true},
+	// vm-check and vm-status work only in a checkout too: the suite is
+	// examples/vmconformance. vm-check runs it in the VM, as SYSTEM and in the
+	// desktop session, changing nothing there; a minute or two, so a job over
+	// MCP.
+	{Name: "vm-check", Summary: "does the VM have what this project relies on? run the VM suite in it, record every check", Locks: LockVM, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	{Name: "vm-status", Summary: "the recorded VM verdicts, one per VM, and how far each still holds", ReadOnly: true, OverMCP: true},
 	{Name: "remote-status", Summary: "a remote job's state and place in the queue; with the admin token and no id, every job", ReadOnly: true, OverMCP: true},
 	{Name: "remote-logs", Summary: "what the Mac said while it ran a remote job", ReadOnly: true, OverMCP: true},
 	{Name: "remote-result", Summary: "download a finished remote job's files: result.json, output, test2json, screenshots", OverMCP: true},

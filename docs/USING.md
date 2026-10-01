@@ -66,10 +66,13 @@ naming the busy lock; `app-create` on two different VMs runs side by side
 **`vm-reap`** does change something: it removes the clones callers left behind
 ([Sharing one Mac](#sharing-one-mac)).
 
-Two commands, **`glaze-check`** and **`glaze-status`**, work only in a checkout
-of this repository, because they build and read `examples/`. They answer "does
-glaze work?" and are described in [Testing](TESTING.md#does-glaze-work).
-Outside a checkout both exit 2 and say where they looked.
+Four commands, **`glaze-check`** and **`glaze-status`**, **`vm-check`** and
+**`vm-status`**, work only in a checkout of this repository, because they
+build and read `examples/`. The first two answer "does glaze work?"
+([Testing](TESTING.md#does-glaze-work)); the other two "does this VM have
+what the project relies on?", reading only
+([the VM conformance suite](TESTING.md#the-vm-conformance-suite)). Outside a
+checkout they exit 2 and say where they looked.
 
 ## What it exits with
 

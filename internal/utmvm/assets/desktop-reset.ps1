@@ -28,6 +28,11 @@
 #
 # Checked, not assumed: it looks again afterwards and exits 1 if any of those is
 # still there, or if the taskbar is gone. One line per kind.
+#
+# -CheckOnly closes nothing: it reports what is there, the same detection, and
+# exits 1 if the desktop holds anything but the shell — any other window
+# counts too. vm-check runs it, because a check must not change the VM.
+param([switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 
 Add-Type @'
@@ -132,6 +137,23 @@ function Say($label, $items) {
 }
 
 $found = @(Junk)
+
+if ($CheckOnly) {
+  $bad = $false
+  foreach ($j in $found) { $bad = $true; "OPEN: $($j.Kind) '$($j.Title)' ($($j.Proc) pid $($j.Pid))" }
+  foreach ($w in @(Toasts)) { $bad = $true; "OPEN: a notification '$($w.Title)'" }
+  foreach ($w in @(StartPanes)) { $bad = $true; "OPEN: the Start menu ($(ProcName $w.Pid))" }
+  if (-not [IrgoDesk]::TrayExists()) { $bad = $true; 'TASKBAR MISSING: no Shell_TrayWnd on this desktop' }
+  $shell = 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'Progman', 'WorkerW', 'DummyDWMListenerWindow',
+    'EdgeUiInputTopWndClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow', 'ConsoleWindowClass'
+  foreach ($w in @([IrgoDesk]::Shown() | Where-Object { $shell -notcontains $_.Class -and $immersive -notcontains (ProcName $_.Pid) })) {
+    $bad = $true
+    "OPEN: '$($w.Title)' ($(ProcName $w.Pid), $($w.Class))"
+  }
+  if ($bad) { exit 1 }
+  'desktop: nothing open but the shell'
+  exit 0
+}
 
 # The update prompt's host is stopped, not asked. WM_CLOSE to the proxy window
 # made the window go while its picture stayed on the screen — measured 30 Sep

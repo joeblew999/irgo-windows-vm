@@ -93,6 +93,7 @@ var pages = []struct {
 
 	{"docs/TESTING.md", "testing.html", "Testing", "Testing", "", "Does glaze work? The conformance suite, driving an app, the cycle tests"},
 	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "", "testing.html", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
+	{"docs/VM-STATUS.md", "vm-status.html", "VM status", "", "testing.html", "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"},
 	{"docs/ARCHITECTURE.md", "architecture.html", "Architecture", "Architecture", "", "How the code is built: stages, packages, locks, jobs, data, the golden image"},
 	{"docs/WORKER.md", "worker.html", "The Cloudflare Worker", "", "architecture.html", "The Worker: the site, live glaze status and the golden image's private API"},
 	{"docs/TRAPS.md", "traps.html", "Known traps", "", "architecture.html", "What fails silently or misleadingly, one line each"},

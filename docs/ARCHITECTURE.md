@@ -50,8 +50,9 @@ Each top-level directory has one job:
 cmd/irgo-winvm/   the CLI: flags, handlers, exit codes. The one thing users install
 internal/         the CLI's packages (see Packages). internal/ so nothing outside can import them
 examples/         conformance, the glaze and native test suite (mise run glaze:mac /
-                  glaze:windows), drive, which its interaction tests click and
-                  type with, and glaze-all, the demo you drive by hand
+                  glaze:windows), vmconformance, the VM's (vm-check), shots, how
+                  both take pictures, drive, which the interaction tests click
+                  and type with, and glaze-all, the demo you drive by hand
 site/             renders docs/ into the website
 worker/           the Cloudflare Worker: the site, live glaze status, golden-image links
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
@@ -115,7 +116,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
 | `internal/remote` | the client of the Worker's job queue, and the loop `serve` runs, behind an `Executor` the CLI supplies; knows nothing of UTM, so it builds and is tested on every OS ([Remote jobs](#remote-jobs)) |
-| `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
+| `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
@@ -182,7 +183,7 @@ is in [For agents](FOR-AGENTS.md); how it is built:
 `vm-create -install` (about 45 minutes), `iso-create -fetch` and
 `vm-golden-create`, `vm-golden-push` and `vm-golden-pull` (always) start the
 work and return a job id instead of blocking on a connection that would time
-out. Over MCP, `glaze-check -windows` is a job too. The work runs in its own
+out. Over MCP, `glaze-check -windows` and `vm-check` are jobs too. The work runs in its own
 process group and outlives the client that started it; `status` reports what is
 running, what finished and how long it took. Whether a job is alive is answered
 by asking the operating system, not by reading a file that says so. The same
@@ -396,9 +397,15 @@ after each):
 4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
    (the install, answer-file and guest-tools CDs are dropped);
 5. clone the golden image once more, boot that clone until its agent answers,
-   and delete it, so an image that does not boot is never reported made;
+   run [the VM conformance suite](TESTING.md#the-vm-conformance-suite) on it
+   (`-check`, on by default; outside a checkout it records that it could not),
+   and delete it, so an image that does not boot is never reported made. An
+   image whose clone fails the suite is unregistered again so nothing clones
+   it (`verifyGolden`); the clone is left to look at, and the sealed source
+   stays, so making the image again is a clone of seconds;
 6. write `golden.json`: source, Windows build, WebView2 version, allocated and
-   apparent size, seal and boot times, tool version. `doctor` reports it.
+   apparent size, seal and boot times, the suite's verdict (`vm_check`), tool
+   version. `doctor` reports it.
 
 **Cloning** (`CloneFromGolden`) takes the machine lock for the clone itself,
 seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new

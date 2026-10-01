@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Build the Cloudflare Worker (worker/) to Wasm with TinyGo, into worker/build/"
+set -euo pipefail
+# wrangler.toml's [build] runs this, so `wrangler dev` and `wrangler deploy`
+# always ship what this builds. Two steps, as workers-go's own template:
+# workers-assets-gen writes the JS that loads the Wasm (worker.mjs, runtime.mjs,
+# TinyGo's wasm_exec.js), then TinyGo builds app.wasm beside it.
+#
+# TinyGo, not Go: the deploy bundle is 1.44 MiB (547 KiB gzip) against Go's
+# 6.98 MiB (1998 KiB gzip), measured 1 Oct 2026 with `wrangler deploy
+# --dry-run`. Both fit Workers' 64 MiB; the smaller one is less to compile
+# against the 1 s startup limit. The numbers, the local timings and the two
+# TinyGo traps this code avoids are in docs/DEVELOPMENT.md, "The Cloudflare
+# Worker".
+#
+# -target wasm runs wasm-opt, which is binaryen, pinned in mise.toml: without
+# it TinyGo 0.42 fails with "no usable wasm-opt found".
+run() { echo "\$ $*"; "$@"; }
+cd "$MISE_PROJECT_ROOT/worker"
+run go tool workers-assets-gen -mode=tinygo -o build
+run tinygo build -o build/app.wasm -target wasm -no-debug .
+ls -l build/app.wasm

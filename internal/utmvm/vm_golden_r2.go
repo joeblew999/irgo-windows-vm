@@ -36,6 +36,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/joeblew999/irgo-windows-vm/internal/workerclient"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // R2Config is where the cache is and the credentials for it. It comes from the
@@ -144,23 +146,9 @@ func GoldenCacheEnvSet() bool {
 	return false
 }
 
-// checkWorkerURL refuses a Worker URL that would send the tokens in clear:
-// https, or http to this machine only (wrangler dev, the tests).
-func checkWorkerURL(s string) error {
-	u, err := url.Parse(s)
-	switch {
-	case err != nil:
-		return err
-	case u.Host == "" || u.Path != "" || u.RawQuery != "":
-		return fmt.Errorf("%q is not an origin such as https://irgo-windows-vm.example.workers.dev", s)
-	case u.Scheme == "https":
-		return nil
-	case u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"):
-		return nil
-	default:
-		return fmt.Errorf("%q: the tokens go only over https (or http to localhost)", s)
-	}
-}
+// checkWorkerURL is the client's: an origin, and the tokens only over https
+// or to localhost.
+func checkWorkerURL(s string) error { return workerclient.CheckOrigin(s) }
 
 func (c R2Config) viaWorker() bool { return c.WorkerURL != "" }
 
@@ -181,7 +169,7 @@ func (c R2Config) api() string {
 // Where names the bucket for a person, without any credential.
 func (c R2Config) Where() string {
 	if c.viaWorker() {
-		return c.WorkerURL + "/api/golden"
+		return newWorkerStore(c).Where()
 	}
 	return c.endpoint() + "/" + c.Bucket
 }
@@ -237,7 +225,7 @@ type s3Store struct {
 // metaSHA256 is the object metadata that holds its SHA-256
 // (x-amz-meta-zsha256). The Worker reads and writes the same name, so either
 // transport reads what the other stored.
-const metaSHA256 = "zsha256"
+const metaSHA256 = wire.MetaSHA256
 
 func (s s3Store) head(ctx context.Context, key string) (int64, string, bool, error) {
 	h, err := s.cl.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.c.Bucket), Key: aws.String(key)})

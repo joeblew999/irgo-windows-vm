@@ -23,6 +23,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 // fakeR2 is R2 in-process: the few S3 calls the cache makes (PUT, GET with
@@ -31,7 +33,7 @@ import (
 // a request that carries none is refused, as R2 would.
 //
 // With worker set it is instead the project's Worker in front of the same
-// objects (worker/golden.go): /api/golden/{key} and /api/golden-list/{kind},
+// objects (worker/golden.go): the golden-* routes of wire.Routes,
 // a read token and a write token, and a PUT refused unless its body hashes to
 // X-Golden-Sha256, as R2 refuses it behind the real one. Each mode refuses the
 // other's requests, so a test cannot pass through the wrong transport.
@@ -110,7 +112,7 @@ func (f *fakeR2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.dataCalls++
 	f.mu.Unlock()
-	if isWorker := strings.HasPrefix(r.URL.Path, "/api/"); isWorker != f.worker {
+	if isWorker := strings.HasPrefix(r.URL.Path, wire.Prefix); isWorker != f.worker {
 		f.t.Errorf("%s %s reached the fake in the other transport's mode", r.Method, r.URL.Path)
 		http.Error(w, "wrong transport", http.StatusTeapot)
 		return
@@ -208,12 +210,15 @@ func serveBody(w http.ResponseWriter, r *http.Request, key string, body []byte, 
 // isFakeGoldenKey is the Worker's isGoldenKey.
 var isFakeGoldenKey = regexp.MustCompile(`^golden/(latest|manifests/[0-9a-f]{64}\.json|chunks/[0-9a-f]{64}\.zst)$`).MatchString
 
-// workerAPI is the Worker's /api/golden and /api/golden-list.
+// workerAPI is the Worker's golden-* routes, found and authorized from
+// wire's table as the real Worker does.
 func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
-	want := fakeReadToken
-	if r.Method == http.MethodPut || r.Method == http.MethodDelete || strings.HasPrefix(r.URL.Path, "/api/golden-list/") {
-		want = fakePushToken
+	route, params, _, found := wire.Match(r.Method, r.URL.Path)
+	if !found || !strings.HasPrefix(route.Name, "golden-") {
+		http.Error(w, `{"error":"no such endpoint"}`, http.StatusNotFound)
+		return
 	}
+	want := map[wire.Scope]string{wire.ScopeGoldenRead: fakeReadToken, wire.ScopeGoldenWrite: fakePushToken}[route.Scope]
 	if r.Header.Get("Authorization") != "Bearer "+want {
 		f.mu.Lock()
 		f.refused++
@@ -221,11 +226,11 @@ func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"refused: no valid bearer token"}`, http.StatusUnauthorized)
 		return
 	}
-	if kind, ok := strings.CutPrefix(r.URL.Path, "/api/golden-list/"); ok {
-		f.workerList(w, r, kind)
+	if route.Name == wire.RouteGoldenList {
+		f.workerList(w, r, params[0])
 		return
 	}
-	key := strings.TrimPrefix(r.URL.Path, "/api/golden/")
+	key := params[0]
 	if !isFakeGoldenKey(key) {
 		http.Error(w, `{"error":"not a golden-image key"}`, http.StatusNotFound)
 		return
@@ -237,9 +242,9 @@ func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		w.Header().Set("X-Golden-Size", fmt.Sprint(len(o.body)))
-		if z := o.meta["zsha256"]; z != "" {
-			w.Header().Set("X-Golden-Sha256", z)
+		w.Header().Set(wire.HeaderSize, fmt.Sprint(len(o.body)))
+		if z := o.meta[wire.MetaSHA256]; z != "" {
+			w.Header().Set(wire.HeaderSHA256, z)
 		}
 		if r.Method == http.MethodHead {
 			// As on Workers: an answer to HEAD keeps no Content-Length.
@@ -259,7 +264,7 @@ func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
 		if corrupt && len(body) > 0 {
 			body[len(body)/2] ^= 0xff
 		}
-		claim := r.Header.Get("X-Golden-Sha256")
+		claim := r.Header.Get(wire.HeaderSHA256)
 		if id, ok := strings.CutPrefix(key, "golden/manifests/"); ok && strings.TrimSuffix(id, ".json") != claim {
 			http.Error(w, `{"error":"a manifest is named by its SHA-256"}`, http.StatusBadRequest)
 			return
@@ -269,7 +274,7 @@ func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.mu.Lock()
-		f.objects[key] = fakeObject{body, map[string]string{"zsha256": claim}}
+		f.objects[key] = fakeObject{body, map[string]string{wire.MetaSHA256: claim}}
 		f.puts[key]++
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
@@ -286,7 +291,7 @@ func (f *fakeR2) workerAPI(w http.ResponseWriter, r *http.Request) {
 // workerList pages three keys at a time, so every listing in the tests
 // crosses a page boundary.
 func (f *fakeR2) workerList(w http.ResponseWriter, r *http.Request, kind string) {
-	prefix := map[string]string{"manifests": "golden/manifests/", "chunks": "golden/chunks/"}[kind]
+	prefix := wire.GoldenListKinds[kind]
 	if prefix == "" {
 		w.WriteHeader(http.StatusNotFound)
 		return

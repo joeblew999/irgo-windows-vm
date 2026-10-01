@@ -365,6 +365,16 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		Machines: []machineView{}, VMs: []vmView{}, Open: []openView{}, Recent: []Event{}}
 	machines := map[string]*machineView{}
 	vms := map[[2]string]*vmView{}
+	// Which ops were closed, worked out first: a command that ends in the
+	// millisecond it started has a start and an end with the same ts, and
+	// sorted by id the end can come first (measured live, 1 Oct 2026: an
+	// app-create refused in 0 ms showed as in use).
+	closed := map[string]bool{}
+	for _, e := range evs {
+		if e.Op != "" && closes[e.Type] {
+			closed[e.Op] = true
+		}
+	}
 	open := map[string]Event{} // op -> the event that opened it
 	for _, e := range evs {
 		m := machines[e.Machine]
@@ -378,13 +388,8 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		setIf(&m.LastOwner, e.Owner)
 		setIf(&m.Version, e.Version)
 		setIf(&m.LastCommand, e.Command)
-		if e.Op != "" {
-			switch {
-			case opens[e.Type]:
-				open[e.Op] = e
-			case closes[e.Type]:
-				delete(open, e.Op)
-			}
+		if e.Op != "" && opens[e.Type] && !closed[e.Op] {
+			open[e.Op] = e
 		}
 		if e.VM == "" {
 			continue

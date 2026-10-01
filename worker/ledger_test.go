@@ -172,7 +172,10 @@ func TestLedgerView(t *testing.T) {
 	deleted := ev("evt-del-0001", "vm-delete", "", "gone", hourAgo)
 	doctor := ev("evt-doc-0001", "start", "op-doc-001", "", now) // no VM: machine-level
 	doctor.Command = "doctor"
-	if w := postEvents(h, writeTok, running, orphan, leaseOK, leaseGone, done1, done2, created, deleted, doctor); w.Code != 200 {
+	// Started and ended in one millisecond, with the end's id sorting first.
+	quickEnd := ev("evt-aaa-0001", "end", "op-qck-001", "quick", fourAgo)
+	quickStart := ev("evt-zzz-0001", "start", "op-qck-001", "quick", fourAgo)
+	if w := postEvents(h, writeTok, running, orphan, leaseOK, leaseGone, done1, done2, created, deleted, doctor, quickEnd, quickStart); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
 
@@ -185,7 +188,7 @@ func TestLedgerView(t *testing.T) {
 	for _, vm := range v.VMs {
 		state[vm.VM] = vm.State
 	}
-	want := map[string]string{"busy": "in-use", "orphan": "stale", "leased": "in-use", "lapsed": "stale", "done": "idle", "gone": "deleted"}
+	want := map[string]string{"quick": "idle", "busy": "in-use", "orphan": "stale", "leased": "in-use", "lapsed": "stale", "done": "idle", "gone": "deleted"}
 	for k, s := range want {
 		if state[k] != s {
 			t.Errorf("VM %s: state %q, want %q (all: %v)", k, state[k], s, state)

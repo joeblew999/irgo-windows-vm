@@ -521,12 +521,18 @@ const keystrokeDelay = 90 * time.Millisecond
 // guest and every Go-driven boot silently failed at the shell prompt, while
 // hand-written osascript worked. %q, once, is the whole answer.
 
-// VMStageDir is where binaries built for the guest are kept.
+// stageRoot is bin/, where binaries built for the guest are kept, one
+// directory per caller (StageDir).
 //
 // Nothing stages them onto the install medium any more: app-create pushes a
 // binary to a running VM, and having two ways to get one there meant two
 // answers to "why is my binary not in the guest".
-func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
+func stageRoot() string { return filepath.Join(appRoot(), vmStageDirName) }
+
+// StageDir is one caller's part of bin/. Per caller, so app-delete removes
+// what that caller staged and never another's: a single bin/ meant one
+// agent's app-delete wiped every other agent's uploads mid-run.
+func StageDir(owner string) string { return filepath.Join(stageRoot(), ownerKey(owner)) }
 
 // BundlePath is where UTM keeps the bundle for a VM of this display name.
 func BundlePath(name string) (string, error) {

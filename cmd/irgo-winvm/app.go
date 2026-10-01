@@ -15,6 +15,7 @@ func appCreateFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("app-create", flag.ContinueOnError)
 	fs.Duration("timeout", 10*time.Minute, "how long to allow the guest command")
 	fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
+	ownerFlag(fs)
 	fs.Bool("gui", false, "run on the guest's desktop (required for anything with a window)")
 	fs.String("user", "dev", "guest account for -gui")
 	fs.Bool("detach", false, "leave it running and return, instead of waiting for it to exit")
@@ -75,6 +76,7 @@ func runAppCreate(v values, args []string) error {
 func appDeleteFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("app-delete", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
+	ownerFlag(fs)
 	return fs
 }
 
@@ -87,11 +89,13 @@ func runAppDelete(v values, args []string) error {
 		return fmt.Errorf("app-delete: -vm was given an empty name")
 	}
 	say := utmvm.Printer("app-delete")
-	// The stage is on the host, so it is cleared whether or not the VM exists.
-	if err := utmvm.ClearStage(); err != nil {
+	// The stage is on the host, so it is cleared whether or not the VM exists:
+	// this caller's part of it, never another's.
+	dir, err := utmvm.ClearStage(v.caller)
+	if err != nil {
 		return err
 	}
-	say("stage:  %s", utmvm.Home(utmvm.VMStageDir()))
+	say("stage:  %s (%s)", utmvm.Home(dir), v.caller)
 	say("vm:     %s", name)
 	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
 	e, found, err := findForUndo(name)
@@ -115,12 +119,14 @@ func appUploadFlags() *flag.FlagSet {
 	fs.Int64("total", 0, "size of the whole binary, in bytes")
 	fs.Int64("offset", 0, "byte offset of this chunk in the whole binary")
 	fs.String("data", "", "this chunk, base64-encoded (up to 2 MiB of binary per call)")
+	ownerFlag(fs)
 	return fs
 }
 
 // runAppUpload stages a binary for app-create from base64 chunks, for a remote
-// MCP client with no shared filesystem. The finished file is bin/<sha256>.exe,
-// and that path is what the client passes to app-create.
+// MCP client with no shared filesystem. The finished file is
+// bin/<caller>/<sha256>.exe, and that path is what the client passes to
+// app-create.
 func runAppUpload(v values, _ []string) error {
 	hash, total, offset := v.String("hash"), v.Int64("total"), v.Int64("offset")
 	data, err := base64.StdEncoding.DecodeString(v.String("data"))
@@ -129,7 +135,7 @@ func runAppUpload(v values, _ []string) error {
 	}
 	say := utmvm.Printer("app-upload")
 
-	staged, n, err := utmvm.Upload(hash, total, offset, data)
+	staged, n, err := utmvm.Upload(v.caller.ID, hash, total, offset, data)
 	if err != nil {
 		return err
 	}

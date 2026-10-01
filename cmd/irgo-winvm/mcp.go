@@ -65,10 +65,10 @@ func mcpDeps() mcpserver.Deps {
 			}
 			return nil
 		},
-		Run: func(_ context.Context, name string, args []string) (string, error) {
-			return utmvm.Capture(func() error { return runTool(name, args) })
+		Run: func(ctx context.Context, name string, args []string) (string, error) {
+			return utmvm.Capture(func() error { return runToolFor(mcpserver.ClientName(ctx), name, args) })
 		},
-		StartJob: func(name string, args []string) (string, error) {
+		StartJob: func(ctx context.Context, name string, args []string) (string, error) {
 			// Asked at call time so a second mutation hears "busy" now rather
 			// than after forking; the job child still takes the locks itself.
 			// Taken and released rather than queried, so the refusal names the
@@ -81,12 +81,16 @@ func mcpDeps() mcpserver.Deps {
 			if err != nil {
 				return "", err
 			}
+			v.caller = callerFor(v, mcpserver.ClientName(ctx))
+			if err := admit(c, v); err != nil {
+				return "", err
+			}
 			release, err := utmvm.Acquire(locksFor(c.Command, v)...)
 			if err != nil {
 				return "", err
 			}
 			release()
-			s, err := job.Start(name, args)
+			s, err := job.Start(name, jobArgs(v, args))
 			if err != nil {
 				return "", err
 			}
@@ -98,11 +102,11 @@ func mcpDeps() mcpserver.Deps {
 // screenshotForMCP runs vm-screen and returns the PNG's bytes, since a remote
 // agent cannot open a path on this machine. The file is removed afterwards
 // unless the caller passed -o and so asked for it.
-func screenshotForMCP(_ context.Context, args []string) ([]byte, string, error) {
+func screenshotForMCP(ctx context.Context, args []string) ([]byte, string, error) {
 	// -promote photographs nothing, so there is no image to return.
 	for _, a := range args {
 		if a == "-promote" || strings.HasPrefix(a, "-promote=") {
-			out, err := utmvm.Capture(func() error { return runTool("vm-screen", args) })
+			out, err := utmvm.Capture(func() error { return runToolFor(mcpserver.ClientName(ctx), "vm-screen", args) })
 			return nil, out, err
 		}
 	}
@@ -121,7 +125,7 @@ func screenshotForMCP(_ context.Context, args []string) ([]byte, string, error) 
 		defer func() { _ = os.Remove(dst) }()
 	}
 
-	out, err := utmvm.Capture(func() error { return runTool("vm-screen", args) })
+	out, err := utmvm.Capture(func() error { return runToolFor(mcpserver.ClientName(ctx), "vm-screen", args) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -143,4 +147,15 @@ func explicitOutput(args []string) (path string, given bool) {
 		}
 	}
 	return "", false
+}
+
+// jobArgs is the command line a job child runs with. The child is a new
+// process with no MCP client, so it is told who it runs for with -owner;
+// otherwise a job would record the person at the terminal as the owner of the
+// VM an agent asked for, and admit it to the owner's VM.
+func jobArgs(v values, args []string) []string {
+	if v.fs == nil || v.fs.Lookup("owner") == nil || v.String("owner") != "" {
+		return args
+	}
+	return append([]string{"-owner=" + v.caller.ID}, args...)
 }

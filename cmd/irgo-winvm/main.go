@@ -44,18 +44,28 @@ func run(args []string) error {
 	return nil
 }
 
-// runTool is the one path every command takes: the CLI, an MCP tool call, and
-// the detached job child, which re-runs this binary. A command that changes
-// state on disk takes its mutation locks after its flags parse, so -h is
-// answered even while another mutation holds them; a second mutation is
-// refused, never queued.
-func runTool(name string, args []string) error {
+// runTool is runToolFor with no MCP client: the command line, and the
+// detached job child, which re-runs this binary.
+func runTool(name string, args []string) error { return runToolFor("", name, args) }
+
+// runToolFor is the one path every command takes: the CLI, an MCP tool call
+// (mcpClient is the client's name from its initialize request), and the job
+// child. After the flags parse it decides who is calling, refuses a caller
+// other than the owner who would land on the owner's VM by default, and takes
+// the command's mutation locks. So -h is answered even
+// while another mutation holds the locks; a second mutation is refused, never
+// queued.
+func runToolFor(mcpClient, name string, args []string) error {
 	c, ok := find(name)
 	if !ok {
 		return fmt.Errorf("%w: no such command %q", errUsage, name)
 	}
 	v, rest, err := c.parse(args)
 	if err != nil {
+		return err
+	}
+	v.caller = callerFor(v, mcpClient)
+	if err := admit(c, v); err != nil {
 		return err
 	}
 	if c.Mutates() {
@@ -68,16 +78,65 @@ func runTool(name string, args []string) error {
 	return c.run(v, rest)
 }
 
+// callerFor is who is running this command: its -owner flag, if it has one,
+// else IRGO_WINVM_OWNER, else the MCP client, else the person at the terminal.
+func callerFor(v values, mcpClient string) utmvm.Caller {
+	owner := ""
+	if v.fs != nil {
+		if f := v.fs.Lookup("owner"); f != nil {
+			owner = f.Value.String()
+		}
+	}
+	return utmvm.CallerFromEnv(owner, mcpClient)
+}
+
+// vmFlag is the VM a command's -vm flag names, the default VM when it was
+// left empty, and whether it was passed at all. ok is false for a command
+// with no -vm flag, and for glaze-check without -windows, which touches no VM.
+func vmFlag(c cmd, v values) (vm string, given, ok bool) {
+	if v.fs == nil {
+		return "", false, false
+	}
+	f := v.fs.Lookup("vm")
+	if f == nil {
+		return "", false, false
+	}
+	if c.Name == "glaze-check" && !v.Bool("windows") {
+		return "", false, false
+	}
+	v.fs.Visit(func(set *flag.Flag) { given = given || set.Name == "vm" })
+	vm = f.Value.String()
+	if vm == "" {
+		if f.DefValue == "" {
+			// No default VM (vm-golden-create): the command asks for one.
+			return "", given, false
+		}
+		vm = utmvm.DefaultVMName
+	}
+	return vm, given, true
+}
+
+// admit refuses a call before it takes a lock or touches UTM: a caller other
+// than the owner who did not name a VM (utmvm.CheckVMChoice).
+func admit(c cmd, v values) error {
+	vm, given, ok := vmFlag(c, v)
+	if !ok {
+		return nil
+	}
+	return utmvm.CheckVMChoice(v.caller, vm, given)
+}
+
 // locksFor is the locks c takes with these parsed flags: LockVM becomes the
 // lock of the VM its -vm flag names, or of the default VM when it has no -vm
-// or it is empty, so `-vm a1`, `-vm=A1` and a UUID all land on one lock.
+// or it is empty, so `-vm a1`, `-vm=A1` and a UUID all land on one lock, and
+// LockStage the lock on the caller's own staged binaries.
 func locksFor(c command.Command, v values) []utmvm.Lock {
 	var locks []utmvm.Lock
 	if c.Locks&command.LockMachine != 0 {
 		locks = append(locks, utmvm.MachineLock)
 	}
 	if c.Locks&command.LockStage != 0 {
-		locks = append(locks, utmvm.StageLock)
+		locks = append(locks, utmvm.StageLockFor(v.caller.ID))
 	}
 	if c.Locks&command.LockVM != 0 {
 		vm := utmvm.DefaultVMName
@@ -127,7 +186,7 @@ func (c cmd) parse(args []string) (values, []string, error) {
 	if err := fs.Parse(args); err != nil {
 		return values{}, nil, err
 	}
-	return values{fs}, fs.Args(), nil
+	return values{fs: fs}, fs.Args(), nil
 }
 
 // commands is command.All, in its order, each joined to its implementation.

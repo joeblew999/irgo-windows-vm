@@ -12,6 +12,7 @@ import (
 func vmCreateFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
@@ -52,6 +53,7 @@ func runVMCreate(v values, _ []string) error {
 func vmDeleteFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-delete", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.Bool("force", false, "actually delete; without this it only lists")
 	return fs
 }
@@ -127,6 +129,7 @@ func findForUndo(name string) (e utmvm.Entry, found bool, err error) {
 func vmRepairFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-repair", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.String("user", "dev", "the AutoLogon user whose password must never expire")
 	fs.Bool("reboot", false, "restart the VM afterwards so AutoLogon runs again")
 	fs.Bool("share", true, "open the guest's SMB share that pushes go through at network speed; -share=false removes it")
@@ -169,6 +172,7 @@ func ensureAgent(e utmvm.Entry, say func(string, ...any)) error {
 func vmScreenFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-screen", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
+	ownerFlag(fs)
 	fs.String("o", "", "where to write the PNG (default: the shots directory)")
 	fs.String("promote", "", "copy the newest shot of each stage into this directory, named for the stage")
 	return fs

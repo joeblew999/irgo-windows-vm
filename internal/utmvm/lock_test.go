@@ -76,7 +76,7 @@ func TestVMLockNamesCannotCollide(t *testing.T) {
 		if strings.ContainsAny(string(l), `/\ `) {
 			t.Errorf("VMLock(%q) = %q, which is not a plain file name", n, l)
 		}
-		if l == MachineLock || l == StageLock {
+		if l == MachineLock || l == StageLockFor(n) {
 			t.Errorf("VMLock(%q) = %q, which is not a VM's lock", n, l)
 		}
 		if prev, ok := seen[l]; ok && !strings.EqualFold(prev, n) {
@@ -108,13 +108,13 @@ func TestAcquireIsAllOrNothing(t *testing.T) {
 	// other way round the free lock is never taken and the test proves nothing,
 	// as it did the first time it was written (with the machine lock, which
 	// sorts after "mutation-vm-").
-	if StageLock >= VMLock("busy") {
-		t.Fatalf("test assumes %q is taken before %q", StageLock, VMLock("busy"))
+	if StageLockFor("x") >= VMLock("busy") {
+		t.Fatalf("test assumes %q is taken before %q", StageLockFor("x"), VMLock("busy"))
 	}
-	if _, err := Acquire(VMLock("busy"), StageLock); !errors.Is(err, ErrMutationInProgress) {
+	if _, err := Acquire(VMLock("busy"), StageLockFor("x")); !errors.Is(err, ErrMutationInProgress) {
 		t.Fatalf("acquire with one busy lock = %v, want ErrMutationInProgress", err)
 	}
-	rs, err := Acquire(StageLock)
+	rs, err := Acquire(StageLockFor("x"))
 	if err != nil {
 		t.Fatalf("the stage lock was left held by a refused acquire: %v", err)
 	}

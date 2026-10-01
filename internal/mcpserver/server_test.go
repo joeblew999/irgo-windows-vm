@@ -458,7 +458,7 @@ func TestALongCallStartsAJobInsteadOfBlocking(t *testing.T) {
 					ran = true
 					return "finished inline", nil
 				},
-				StartJob: func(string, []string) (string, error) {
+				StartJob: func(context.Context, string, []string) (string, error) {
 					startedJob = true
 					return "vm-create-20260814-150000", nil
 				},
@@ -641,4 +641,28 @@ func TestTheReferenceResourceIsServedAndGenerated(t *testing.T) {
 		t.Error("a command with no flags is not described as having none")
 	}
 	t.Logf("%d bytes of generated reference", len(got))
+}
+
+// TestTheClientNameReachesTheProgram: several MCP clients share one Mac, and
+// the program tells them apart (and refuses them the owner's VM) by the name
+// each gave in its initialize request. Without it every MCP caller would look
+// like the person at the terminal.
+//
+// Negative control, run by hand: pass ctx instead of withClient(ctx, req) to
+// d.Run in handler, and the name arrives empty.
+func TestTheClientNameReachesTheProgram(t *testing.T) {
+	var got string
+	cs := connect(t, func(ctx context.Context, _ string, _ []string) (string, error) {
+		got = ClientName(ctx)
+		return "ok", nil
+	})
+	if _, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "doctor"}); err != nil {
+		t.Fatal(err)
+	}
+	if got != "test-client" {
+		t.Fatalf("the runner saw client %q, want test-client", got)
+	}
+	if ClientName(context.Background()) != "" {
+		t.Fatal("a context from outside a tool call names a client")
+	}
 }

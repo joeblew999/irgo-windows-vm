@@ -54,7 +54,10 @@ type Deps struct {
 	// vm-create -install is about 45 minutes; every client times out long
 	// before that, so blocking means the call is abandoned while the install
 	// carries on and the agent has nothing to ask about it.
-	StartJob func(name string, args []string) (id string, err error)
+	//
+	// It gets the call's context, so the job can be started as the client
+	// that asked for it (ClientName).
+	StartJob func(ctx context.Context, name string, args []string) (id string, err error)
 
 	// Flags returns a command's flag set, or nil if it takes none.
 	//
@@ -232,7 +235,7 @@ func handler(name string, d Deps) mcp.ToolHandler {
 		// on the command — see command.Command.Detach — not guessed from a
 		// duration nobody measures.
 		if c, ok := command.Find(name); ok && c.DetachedBy(args) && d.StartJob != nil {
-			id, sErr := d.StartJob(name, args)
+			id, sErr := d.StartJob(withClient(ctx, req), name, args)
 			if sErr != nil {
 				return failure(name, "", sErr, d.Classify), nil
 			}
@@ -245,7 +248,7 @@ func handler(name string, d Deps) mcp.ToolHandler {
 			return r, nil
 		}
 
-		out, rErr := d.Run(ctx, name, args)
+		out, rErr := d.Run(withClient(ctx, req), name, args)
 		if rErr != nil {
 			// The output is returned alongside the error, not instead of it.
 			// What a command printed before it failed is usually the answer to
@@ -270,7 +273,7 @@ func screenHandler(d Deps) mcp.ToolHandler {
 		if aErr != nil {
 			return errorResult(fmt.Sprintf("could not read the arguments for %s: %v", screenCommand, aErr)), nil
 		}
-		png, out, err := d.Screenshot(ctx, args)
+		png, out, err := d.Screenshot(withClient(ctx, req), args)
 		if err != nil {
 			return failure(screenCommand, out, err, d.Classify), nil
 		}
@@ -406,4 +409,29 @@ func Describe(d Deps) ([]*mcp.Tool, error) {
 // the protocol, so a command's progress cannot go there.
 func Serve(ctx context.Context, d Deps) error {
 	return New(d).Run(ctx, &mcp.StdioTransport{})
+}
+
+// clientKey carries the calling client's name through a tool call's context.
+type clientKey struct{}
+
+// withClient puts the name the client gave in its initialize request into
+// ctx, so the program can tell several clients sharing one machine apart
+// (utmvm.ResolveCaller). Plumbing, not behaviour: what is done with the name
+// is the program's.
+func withClient(ctx context.Context, req *mcp.CallToolRequest) context.Context {
+	if req == nil || req.Session == nil {
+		return ctx
+	}
+	p := req.Session.InitializeParams()
+	if p == nil || p.ClientInfo == nil || p.ClientInfo.Name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, clientKey{}, p.ClientInfo.Name)
+}
+
+// ClientName is the calling client's name from its initialize request, or ""
+// outside a tool call or when the client gave none.
+func ClientName(ctx context.Context) string {
+	s, _ := ctx.Value(clientKey{}).(string)
+	return s
 }

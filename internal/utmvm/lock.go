@@ -20,7 +20,9 @@ import (
 //   - VMLock(name): one VM. vm-create, vm-delete, vm-repair, app-create and
 //     app-delete on different VMs run side by side, which is what several
 //     agents each with their own VM need.
-//   - StageLock: bin/, which app-upload writes and app-delete clears.
+//   - StageLockFor(owner): one caller's part of bin/, which app-upload writes
+//     and app-delete clears. Per caller, so two agents uploading at once do
+//     not refuse each other (see owner.go).
 //
 // The primitive that releases on process death differs per platform, hence
 // lock_darwin.go and lock_other.go.
@@ -38,34 +40,43 @@ const (
 	// the split and one from after still exclude each other on the machine-wide
 	// work they both do.
 	MachineLock Lock = "mutation.lock"
-
-	// StageLock guards bin/, where app-upload stages binaries for app-create.
-	StageLock Lock = "mutation-stage.lock"
 )
 
-// vmLockPrefix is what every per-VM lock file starts with. "vm-" is part of it
-// so that no VM name can make a per-VM lock collide with StageLock: a VM named
-// "stage" locks mutation-vm-stage.lock.
-const vmLockPrefix = "mutation-vm-"
+// vmLockPrefix is what every per-VM lock file starts with, and stageLockPrefix
+// every per-caller stage lock. Each carries its kind, so no VM name and no
+// caller can make one collide with the other or with the fixed locks: a VM
+// named "stage" locks mutation-vm-stage.lock.
+const (
+	vmLockPrefix    = "mutation-vm-"
+	stageLockPrefix = "mutation-stage-"
+)
 
-// plainVMName is a VM name that can be a file name as it is.
-var plainVMName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+// plainKey is a name that can be part of a file name as it is.
+var plainKey = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// fileKey is a name made safe to be part of a file name, folded to lower case.
+// A name that cannot be used as it is — a slash, a space, anything outside
+// [a-z0-9._-] — is hashed instead of escaped, so no two names can map to one
+// key. VM locks, VM records and per-caller staging all use it, so one VM or
+// one caller has one key everywhere.
+func fileKey(name string) string {
+	n := strings.ToLower(name)
+	if plainKey.MatchString(n) {
+		return n
+	}
+	sum := sha256.Sum256([]byte(n))
+	return hex.EncodeToString(sum[:8])
+}
 
 // VMLock is the lock for one VM, by name.
 //
 // Folded to lower case, because UTM's names are matched case-insensitively
 // (Find uses EqualFold): `-vm A1` and `-vm a1` are one VM, and two locks for
-// it would let two commands mutate it at once. A name that cannot be a file
-// name as it is — a slash, a space, anything outside [a-z0-9._-] — is hashed
-// instead of escaped, so no two names can map to one file.
-func VMLock(name string) Lock {
-	n := strings.ToLower(name)
-	if plainVMName.MatchString(n) {
-		return Lock(vmLockPrefix + n + ".lock")
-	}
-	sum := sha256.Sum256([]byte(n))
-	return Lock(vmLockPrefix + hex.EncodeToString(sum[:8]) + ".lock")
-}
+// it would let two commands mutate it at once.
+func VMLock(name string) Lock { return Lock(vmLockPrefix + fileKey(name) + ".lock") }
+
+// StageLockFor is the lock on one caller's staged binaries, bin/<owner key>.
+func StageLockFor(owner string) Lock { return Lock(stageLockPrefix + ownerKey(owner) + ".lock") }
 
 // uuidRef is how utmctl prints a VM's UUID, which every -vm flag also accepts.
 var uuidRef = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
@@ -90,8 +101,8 @@ func (l Lock) String() string {
 	switch {
 	case l == MachineLock:
 		return "the machine-wide lock (media and golden image)"
-	case l == StageLock:
-		return "the staged binaries"
+	case strings.HasPrefix(string(l), stageLockPrefix):
+		return "the staged binaries of " + strings.TrimSuffix(strings.TrimPrefix(string(l), stageLockPrefix), ".lock")
 	case strings.HasPrefix(string(l), vmLockPrefix):
 		return "VM " + strings.TrimSuffix(strings.TrimPrefix(string(l), vmLockPrefix), ".lock")
 	}
@@ -118,3 +129,4 @@ func ordered(locks []Lock) []Lock {
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
+

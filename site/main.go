@@ -3,8 +3,8 @@
 // It generates; it does not author. Every sentence on the site comes from a
 // markdown file that already exists and is already the source of truth for that
 // subject — README for what this is, RESULTS for what was measured, UPSTREAM
-// for what was fixed where, AGENTS for how the code works. Writing the site by
-// hand would make a second copy of all four, and a second copy is a second
+// for what was fixed where, ARCHITECTURE for how the code works. Writing the
+// site by hand would make a second copy of every one, and a second copy is a second
 // thing to update and the one that goes stale: an example README in this
 // repository did exactly that, naming four tasks that no longer existed and a
 // command renamed two commits earlier.
@@ -55,43 +55,62 @@ var styleCSS []byte
 // becomes. Adding a page means adding a line here; there is nowhere else to
 // change, and nothing is discovered by scanning a directory — a site that
 // publishes whatever happens to be lying around would have published CLAUDE.md.
-// Nav is the label in the header, and an empty one means this page is the home
-// page — the wordmark already links there, so it takes no second entry. The
-// header used to carry both, two adjacent links reading "irgo-windows-vm" and
-// pointing at the same file.
+//
+// Nav is the label in the header. Under, instead, names the header entry a page
+// belongs to: it is not in the header itself, it lights that entry up, and it is
+// listed in the footer with every other page. That keeps the header to one line
+// at 1280 px while the docs grow page by page — fourteen labels do not fit, and
+// a nav that wraps or scrolls on a desktop hides the pages at its end.
+//
+// An entry with neither is the home page — the wordmark already links there, so
+// it takes no second entry. The header used to carry both, two adjacent links
+// reading "irgo-windows-vm" and pointing at the same file.
 //
 // A separate field rather than reusing Title, because Title is also the H1 of
 // this page in llms.txt and llms-full.txt (corpus.go:91): renaming it to fix the
 // header would have quietly changed the machine-readable corpus.
 var pages = []struct {
-	Src, Out, Title, Nav, Blurb string
+	Src, Out, Title, Nav, Under, Blurb string
 }{
-	{"README.md", "index.html", "irgo-windows-vm", "", "What it does, and how to get started"},
-	{"docs/RESULTS.md", "results.html", "Results", "Results", "What has been measured, and when"},
-	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "Status", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
-	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "Bugs found in glaze, native and UTM, and their status"},
-	{"docs/DEVELOPMENT.md", "development.html", "Development", "Development", "How the code works, its conventions, and the known traps"},
-	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "Set up, run the checks, land a change"},
+	{"README.md", "index.html", "irgo-windows-vm", "", "", "What it does, and how to get started"},
+	{"docs/GETTING-STARTED.md", "getting-started.html", "Getting started", "Get started", "", "Install it, make your first VM, run your first program"},
+	{"docs/USING.md", "using.html", "Using it", "Using it", "", "Each command, exit codes, costs, the golden image and the private cache"},
+	{"docs/FOR-AGENTS.md", "agents.html", "For agents", "Agents", "", "Drive it from an AI agent, over MCP or HTTP, and file issues"},
 
-	// The only page that states intent rather than fact, and it says so in its
-	// first line. The check that every command named in the docs exists in the
-	// binary exempts it by name (cmd/irgo-winvm/docs_test.go) — naming what does
-	// not exist yet is the point of a roadmap.
-	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "Roadmap", "What is next, and the one claim not yet verified"},
+	// Generated: built by listing a live MCP server, so the page cannot
+	// describe a tool the server does not offer.
+	{"", "mcp.html", "MCP", "", "agents.html", "The MCP server's tools, arguments and instructions, captured from a live server"},
 
-	// Written before the HTTP transport exists. Exempt from that check for the
-	// same reason as the roadmap: it names commands in the context of what an attacker could
-	// call, which is not the same as telling a reader to run them.
-	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "Threat model", "What anyone who reaches the HTTP port can do"},
+	// Exempt from the check that every command named in the docs exists
+	// (cmd/irgo-winvm/docs_test.go): it names commands in the context of what
+	// an attacker could call, which is not the same as telling a reader to run
+	// them.
+	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "", "agents.html", "What anyone who reaches the HTTP port can do"},
 
 	// Generated, not read from disk. Src is empty and reference.go builds the
 	// markdown by running the binary — see generateReference.
-	{"", "reference.html", "Commands", "Commands", "Every command and flag, captured from the binary"},
+	{"", "reference.html", "Commands", "Commands", "", "Every command and flag, captured from the binary"},
 
-	// Also generated: built by listing a live MCP server, so the page cannot
-	// describe a tool the server does not offer.
-	{"", "mcp.html", "MCP", "MCP", "Drive it from an AI agent; captured from a live server"},
+	{"docs/TESTING.md", "testing.html", "Testing", "Testing", "", "Does glaze work? The conformance suite, driving an app, the cycle tests"},
+	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "", "testing.html", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
+	{"docs/ARCHITECTURE.md", "architecture.html", "Architecture", "Architecture", "", "How the code is built: stages, packages, locks, jobs, data, the golden image"},
+	{"docs/WORKER.md", "worker.html", "The Cloudflare Worker", "", "architecture.html", "The Worker: the site, live glaze status and the golden image's private API"},
+	{"docs/TRAPS.md", "traps.html", "Known traps", "", "architecture.html", "What fails silently or misleadingly, one line each"},
+	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "", "Set up, run the checks, land a change, cut a release"},
+	{"docs/CONVENTIONS.md", "conventions.html", "Conventions", "", "contributing.html", "How code here is written, and the defect behind each rule"},
+
+	// The only page that states intent rather than fact, and it says so in its
+	// first line. Exempt from the command check for that reason — naming what
+	// does not exist yet is the point of a roadmap.
+	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "", "contributing.html", "What is next, and the one claim not yet verified"},
+
+	{"docs/RESULTS.md", "results.html", "Results", "Results", "", "What has been measured, and when"},
+	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "", "Bugs found in glaze, native and UTM, and their status"},
 }
+
+// isHome reports whether a pages entry is the home page: in neither the header
+// nor under an entry of it.
+func isHome(nav, under string) bool { return nav == "" && under == "" }
 
 // siteName is the project's name: the wordmark, and the tail of every page's
 // <title>.
@@ -104,7 +123,7 @@ var pages = []struct {
 // page and nobody would have been told.
 func siteName() string {
 	for _, p := range pages {
-		if p.Nav == "" {
+		if isHome(p.Nav, p.Under) {
 			return p.Title
 		}
 	}
@@ -116,12 +135,20 @@ func siteName() string {
 type nav struct {
 	Title, Href, Blurb string
 	Current            bool
+
+	// Section marks the header entry the current page is under, which is
+	// highlighted like the current page but is not it (aria-current="true").
+	Section bool
 }
 
 type page struct {
 	Title, Blurb string
 	Body         template.HTML
 	Nav          []nav
+
+	// All is every page but the home page, by title, for the footer: the one
+	// place a page that is under a header entry is linked from every page.
+	All []nav
 
 	// TOC is the page's own sections, from the same parse as Body. Empty on a
 	// page too short to need one, and the template then draws no sidebar.
@@ -312,16 +339,20 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 		corpus = append(corpus, corpusEntry{Title: p.Title, Out: p.Out, Blurb: p.Blurb, Markdown: body})
 
-		var navs []nav
+		var navs, all []nav
 		for _, q := range pages {
-			if q.Nav == "" {
-				continue // the home page; the wordmark is its link
+			if isHome(q.Nav, q.Under) {
+				continue // the wordmark is its link
 			}
-			navs = append(navs, nav{Title: q.Nav, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out})
+			all = append(all, nav{Title: q.Title, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out})
+			if q.Nav == "" {
+				continue // under another entry: in the footer, not the header
+			}
+			navs = append(navs, nav{Title: q.Nav, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out, Section: q.Out == p.Under})
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName(), Live: p.Out == livePage}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, All: all, Repo: repo, Source: p.Src, Build: stamp.line(), Home: isHome(p.Nav, p.Under), Site: siteName(), Live: p.Out == livePage}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}
@@ -420,7 +451,7 @@ var schemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
 // is once the site is built. Three destinations, and getting any of them wrong
 // is a 404 on a page that looked fine locally:
 //
-//   - a file that becomes a page  -> that page          (docs/DEVELOPMENT.md -> development.html)
+//   - a file that becomes a page  -> that page          (docs/USING.md -> using.html)
 //   - a published screenshot      -> the published copy (docs/screens/x.png -> screens/x.png)
 //   - anything else in the repo   -> the repository     (LICENSE -> github.com/.../blob/main/LICENSE)
 //

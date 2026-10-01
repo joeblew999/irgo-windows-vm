@@ -18,7 +18,7 @@ body:
         **Agents:** forms are web-only. Run `irgo-winvm report -issue bug > body.md`, fill
         it in, and file with `gh issue create --body-file body.md` (the exact command
         is at the top of that file and in
-        [CONTRIBUTING.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/CONTRIBUTING.md#reporting-issues-for-agents)).
+        [For agents](https://joeblew999.github.io/irgo-windows-vm/agents.html#reporting-issues)).
   - type: input
     id: reporter
     attributes:

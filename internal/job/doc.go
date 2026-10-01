@@ -16,7 +16,7 @@
 //
 // It is not iso, not vm, and not app. All three can start long work and the MCP
 // server asks about all three, so putting it in any one of them makes the other
-// two reach across a boundary docs/DEVELOPMENT.md draws deliberately. The rule against
+// two reach across a boundary docs/ARCHITECTURE.md draws deliberately. The rule against
 // splitting utmvm protects three stages that are genuinely coupled; it is not a
 // reason to move an unrelated concern in beside them.
 //
@@ -26,7 +26,7 @@
 //
 // A handle that answers "still running" forever because nothing checks is worse
 // than no handle at all: an agent waits on it, the install is gone, and nothing
-// says so. That is the failure docs/DEVELOPMENT.md names — nothing returns success
+// says so. That is the failure docs/CONVENTIONS.md names — nothing returns success
 // without checking it did the thing — and it decides the design. Whoever owns
 // this owns process liveness, which is why it is a package and not a struct
 // bolted onto a stage.

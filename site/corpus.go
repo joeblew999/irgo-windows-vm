@@ -81,7 +81,7 @@ func markdownName(out string) string {
 // two pages could share a title, they cannot share a URL.
 //
 // The markdown is stored exactly as the HTML rendering received it, which means
-// links have already been rewritten from `DEVELOPMENT.md` to `development.html`. That is
+// links have already been rewritten from `USING.md` to `using.html`. That is
 // deliberate: this file is served from the site root, so those relative links
 // resolve against its own URL. The raw markdown would carry `.md` targets that
 // point at nothing from a published text file.
@@ -93,10 +93,10 @@ func renderCorpusFull(entries []corpusEntry, base string, stamp buildStamp) []by
 		fmt.Fprintf(&b, "%s\n\n", l)
 	}
 	fmt.Fprintf(&b, "Every page of %s, concatenated in reading order.\n", base)
-	b.WriteString("Generated from the same source as the site. Five of these pages come from\n")
-	b.WriteString("markdown in the repository; the command reference has no source file and is\n")
-	b.WriteString("captured from the compiled binary, so a wrong flag there is a bug in Go, not\n")
-	b.WriteString("in any markdown.\n\n")
+	b.WriteString("Generated from the same source as the site. Every page but two comes from\n")
+	b.WriteString("markdown in the repository; the command reference and the MCP page have no\n")
+	b.WriteString("source file and are captured from the compiled binary, so a wrong flag there\n")
+	b.WriteString("is a bug in Go, not in any markdown.\n\n")
 	b.WriteString("Pages, in order:\n\n")
 	for _, e := range entries {
 		fmt.Fprintf(&b, "- %s — %s\n", e.Title, e.Blurb)
@@ -153,7 +153,7 @@ func renderCorpusIndex(entries []corpusEntry, base, summary string, stamp buildS
 	// Not a general preference for the site over the source: it is that one
 	// page has no source. Asked how an agent should read these docs, a capable
 	// model recommended fetching the .md files from raw.githubusercontent.com —
-	// which works for five of the six and silently drops the command reference,
+	// which works for every page but two and silently drops the command reference,
 	// producing documentation that looks complete with no flag reference in it.
 	b.WriteString("\n## How this is generated\n\n")
 	b.WriteString("Every page here is generated from markdown in the repository, so the source\n")
@@ -162,8 +162,8 @@ func renderCorpusIndex(entries []corpusEntry, base, summary string, stamp buildS
 	b.WriteString("fetching the raw markdown from GitHub: the command reference has **no source\n")
 	b.WriteString("file**. It is captured from the compiled binary at build time — `irgo-winvm\n")
 	b.WriteString("help` and `-h` for every command — so that no flag, default or usage string\n")
-	b.WriteString("is ever transcribed. Fetching the repository's .md files gets you five of the\n")
-	b.WriteString("six pages and silently omits it.\n")
+	b.WriteString("is ever transcribed. Fetching the repository's .md files gets you every other\n")
+	b.WriteString("page and silently omits it, and the MCP page with it.\n")
 	return b.Bytes()
 }
 

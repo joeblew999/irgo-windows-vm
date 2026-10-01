@@ -46,7 +46,7 @@ func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string 
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 func main() {
-	// The ledger (docs/DEVELOPMENT.md, "The ledger"): off unless
+	// The ledger (docs/ARCHITECTURE.md, "The ledger client"): off unless
 	// IRGO_LEDGER_URL and IRGO_LEDGER_TOKEN are set. At exit it gets at most
 	// 2 s to send; what it cannot send stays spooled for the next run.
 	ledger.Configure(ledger.FromEnv(utmvm.Root(), version))

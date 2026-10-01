@@ -52,7 +52,8 @@ func generateReference(root string) ([]byte, error) {
 	b.WriteString("Every command and flag, exactly as `irgo-winvm help` and `-h` print them.\n")
 	b.WriteString("This page is captured from the binary each time the site is built, so it\n")
 	b.WriteString("always matches the tool. If a flag is wrong here, fix the Go code.\n\n")
-	b.WriteString("For exit codes and what each step costs, see [Development](development.html).\n\n")
+	b.WriteString("For what each command is for, its exit codes and what each step costs, see\n")
+	b.WriteString("[Using it](using.html).\n\n")
 
 	overview, err := capture(bin, "help")
 	if err != nil {

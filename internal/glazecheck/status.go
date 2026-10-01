@@ -272,7 +272,7 @@ written by ` + "`irgo-winvm glaze-check`" + ` (` + "`mise run glaze:mac`" + ` an
 which also says whether it still describes the tree. Generated: do not edit it by
 hand. Each run replaces only its own section. Every row is one test of
 ` + "`examples/conformance`" + `, from its test2json events; what each checks is in its
-comment, and how the suite runs is in [CONTRIBUTING.md](CONTRIBUTING.md#does-glaze-work).
+comment, and how the suite runs is in [TESTING.md](TESTING.md#does-glaze-work).
 
 `
 

@@ -194,6 +194,11 @@ func TestLedgerView(t *testing.T) {
 			t.Errorf("VM %s: state %q, want %q (all: %v)", k, state[k], s, state)
 		}
 	}
+	for _, vm := range v.VMs {
+		if vm.VM == "quick" && vm.LastType != "end" {
+			t.Errorf("quick's last event is %q, want its end", vm.LastType)
+		}
+	}
 	why := map[string]string{}
 	for _, o := range v.Open {
 		why[o.Op] = o.Why

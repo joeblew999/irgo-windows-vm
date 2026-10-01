@@ -369,6 +369,23 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 	// millisecond it started has a start and an end with the same ts, and
 	// sorted by id the end can come first (measured live, 1 Oct 2026: an
 	// app-create refused in 0 ms showed as in use).
+	// And within one millisecond, opening before anything else before
+	// closing, so the last event of a VM is its end, not its start.
+	rank := func(t string) int {
+		switch {
+		case opens[t]:
+			return 0
+		case closes[t]:
+			return 2
+		}
+		return 1
+	}
+	sort.SliceStable(evs, func(i, j int) bool {
+		if evs[i].TS != evs[j].TS {
+			return evs[i].TS < evs[j].TS
+		}
+		return rank(evs[i].Type) < rank(evs[j].Type)
+	})
 	closed := map[string]bool{}
 	for _, e := range evs {
 		if e.Op != "" && closes[e.Type] {

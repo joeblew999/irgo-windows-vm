@@ -99,6 +99,8 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
   net/      the guest address the last SMB push reached, one file per VM
+  golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
+                manifest.json once finished, .parts/ while it is not
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -164,8 +166,8 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 
 ### Jobs
 
-`vm-create -install` (about 45 minutes) and `iso-create -fetch` start the work
-and return a job id instead of blocking on a connection that would time out.
+`vm-create -install` (about 45 minutes), `iso-create -fetch` and
+`vm-golden-push`/`vm-golden-pull` (always) start the work and return a job id instead of blocking on a connection that would time out.
 Over MCP, `glaze-check -windows` is a job too. The work outlives the client that
 started it; `status` reports what is running, what finished and how long it
 took. Whether a job is alive is answered by asking the operating system, not by
@@ -397,6 +399,113 @@ Every command that takes flags documents them with `-h`, and `irgo-winvm help`
 explains the sequence. No document lists flags, so none can go stale: the
 [command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html)
 is captured from the binary at build time.
+
+## The private R2 cache
+
+An optional, **owner-only** cache of the golden image in a private Cloudflare
+R2 bucket, so a machine of yours without one downloads it (about 7 to 8.5 GB
+compressed, an estimate until measured; minutes at the 55 MB/s measured from
+Cloudflare's edge) instead of installing Windows for 45 minutes.
+
+| command | what it does | undo |
+|---|---|---|
+| **`vm-golden-push -bundle <dir>`** | uploads a golden bundle directory | `vm-golden-push -delete -force [-id <manifest>]` |
+| **`vm-golden-pull`** | downloads it into `golden-pull/` under the runtime data | `vm-golden-pull -delete -force` |
+
+Both are transport only: a bundle directory goes up, the same bytes come down.
+`-bundle` must be a copy this process can read, because macOS refuses it UTM's
+container (see the traps). Over MCP both always run as jobs.
+
+> [!WARNING]
+> The Windows licence forbids redistribution (§2c), and every running clone
+> needs its own Windows 11 Pro licence (§2d(iv)). The bucket is for **your own**
+> licensed machines and CI. Never make it public, never share it or its
+> credentials. Both commands print this on every run.
+
+**Private by construction.** Before touching an object, push and pull ask the
+Cloudflare API for the bucket's two public routes, the r2.dev development URL
+(`domains/managed`) and custom domains (`domains/custom`), and go on only when
+both were read and both are off. On or **cannot tell** (no token, a 403, an
+answer without `enabled`) refuses. `-delete` does not ask: removing the image
+is what you would do if the bucket were public.
+
+**In the bucket**, under `golden/` (`internal/utmvm/vm_golden_cache.go`):
+
+- `chunks/<sha256>.zst`: one 64 MiB region of one file, zstd, named by the
+  SHA-256 of its **uncompressed** bytes. Equal regions are one object, and an
+  all-zero region is not stored, so holes stay holes when it comes back.
+  Regions are at fixed offsets, not content-defined: a disk image's blocks do
+  not move.
+- `manifests/<sha256>.json`: the files (path, size, mode, the chunk per
+  region), each chunk's compressed SHA-256 and size, golden.json, the tool
+  version and the date. Named by the SHA-256 of its own bytes, so a manifest
+  that does not hash to its name is refused.
+- `latest`: the newest manifest's id.
+
+**Push** sends only chunks the bucket lacks (a `HEAD` per region; the
+compressed digest is kept in the object's metadata), so a new image moves its
+delta. It checks every chunk the manifest names is there at its recorded size,
+writes the manifest, reads it back, then moves `latest`.
+
+**Pull** fetches every chunk through `isoDownload` (the ISO downloader, now
+taking a SHA-256) from a 30-minute presigned URL, which resumes a `.part` with
+`Range` and renames only after the compressed SHA-256 matches. A mismatch is
+fetched once more, then fails. Chunks already in `.parts/` are not fetched
+again. It then rebuilds each file at its offsets, checks each region's
+uncompressed SHA-256, and reads the file back for its **tree hash** (the
+SHA-256 of its regions' SHA-256s, so 40 GB of holes cost a zero check, not a
+hash). Only then is the bundle renamed into place and `manifest.json` written
+beside it, last, as the mark of a finished pull. Up to `-parallel` chunks
+move at once (4, about 100 MB of memory each).
+
+**`-delete` on push** removes the manifest, moves `latest` to the newest
+remaining manifest (or removes it), and removes every chunk no remaining
+manifest needs, including what an interrupted push left. Do not run it while a
+push to the same bucket is under way elsewhere: that push's chunks are
+unreferenced until its manifest is written.
+
+The S3 client is [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2)
+`service/s3`, which Cloudflare documents for R2. It and minio-go both add about
+2 MB to the binary (measured 30 Sep 2026, a stripped HEAD-and-presign program:
+7.80 MB against 7.59 MB, from 5.63 MB with neither), but aws-sdk-go-v2 brings
+only AWS's own modules, where minio-go brings 18 from other owners. Checksums
+are sent only when an operation requires them: by default the SDK uploads as
+`aws-chunked` with a trailing CRC, and the chunk's SHA-256 is the check that
+matters. zstd is [klauspost/compress](https://github.com/klauspost/compress),
+already in the build for go-diskfs.
+
+### Setting up the bucket
+
+Done once, by the owner, in the Cloudflare dashboard. This tool creates no
+Cloudflare resources.
+
+1. **R2 > Create bucket**, e.g. `irgo-golden`, location automatic, default
+   jurisdiction. In its **Settings**, leave **Public Development URL**
+   disabled and connect **no custom domain**.
+2. **R2 > Manage API tokens > Create API token** for the data, scoped to that
+   bucket only: **Object Read & Write** on the machine that pushes, **Object
+   Read only** on machines and CI that only pull. The page shows an Access Key
+   ID and a Secret Access Key once.
+3. A second token for the privacy check: **Admin Read only** (permission group
+   *Workers R2 Storage Read*, account-wide). Bucket settings are visible only
+   at account level, and this is the narrowest token that can read them. Use
+   its **token value**.
+4. The account ID is on the R2 overview page.
+5. Put them in **`.env.r2`** at the repository root. It is gitignored, and
+   `mise.toml` loads it (`_.file`, redacted), so it is in the environment of
+   every `mise run` and of a shell in this directory. Outside the repository,
+   export the same variables.
+
+```
+IRGO_R2_ACCOUNT_ID=<account id>
+IRGO_R2_BUCKET=irgo-golden
+IRGO_R2_ACCESS_KEY_ID=<from step 2>
+IRGO_R2_SECRET_ACCESS_KEY=<from step 2>
+IRGO_R2_API_TOKEN=<token value from step 3>
+```
+
+A variable that is missing is named, every one at once, with exit 2. In CI,
+set the same five as repository secrets.
 
 ## What it exits with
 
@@ -721,6 +830,9 @@ detail there and only the reminder here.
 | `ln` to an immutable file | `EPERM`, so protecting the ISO silently turned a hardlink into a 5 GB copy | clear the flag first, restore it after |
 | `rm` on a bundle holding that hardlink | `EPERM`, directory left behind, so every VM built from a protected ISO was undeletable | clear the flag first, restore it after |
 | a length check on a download | unreachable: `net/http` already rejects a short body | do not add one; it was proven dead by disabling it |
+| reading UTM's container | `Operation not permitted` for `ls` and `cat`, even unsandboxed (macOS App Data protection); `stat` on a known path works | `vm-golden-push -bundle` takes a copy UTM exported, not the bundle in place |
+| testing holes on a small file | APFS keeps an 8 MiB file fully allocated whatever its holes; at 64 MiB they are holes (measured 30 Sep 2026) | make a sparse test file 64 MiB or more |
+| aws-sdk-go-v2 `PutObject` with default settings | sends `aws-chunked` bodies with a trailing CRC, which a plain S3 server or fake does not expect | `RequestChecksumCalculation: WhenRequired` |
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |

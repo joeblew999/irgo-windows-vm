@@ -13,6 +13,9 @@ goreleaser = "2.18.2"
 UPSTREAM_DIR = "{{env.HOME}}/workspace/go/src/github.com/crgimenes"
 # irgo-winvm on PATH: .bin/irgo-winvm, built by go:tool.
 _.path = ["{{config_root}}/.bin"]
+# The private R2 cache's credentials, if this machine has them: gitignored,
+# redacted in mise's output, and absent is fine (measured with mise 2026.9.15).
+_.file = { path = ".env.r2", redact = true }
 
 [tasks."go:tool"]
 description = "Build irgo-winvm into .bin/ — the binary every task here runs"

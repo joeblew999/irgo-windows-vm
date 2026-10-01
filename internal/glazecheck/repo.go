@@ -110,16 +110,20 @@ type Tree struct {
 
 // ReadTree asks git. An error is returned rather than a guess: a verdict that
 // names no commit cannot be checked against anything.
-func ReadTree(root string) (Tree, error) {
+func ReadTree(root string) (Tree, error) { return readTree(root, "examples", StatusFile) }
+
+// readTree is ReadTree for a suite whose record is statusFile and whose
+// verdict depends on source; ExamplesDirty then means source is dirty.
+func readTree(root, source, statusFile string) (Tree, error) {
 	commit, err := run(root, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return Tree{}, err
 	}
-	dirty, err := run(root, "git", "status", "--porcelain", "--", ".", ":!"+StatusFile)
+	dirty, err := run(root, "git", "status", "--porcelain", "--", ".", ":!"+statusFile)
 	if err != nil {
 		return Tree{}, err
 	}
-	ex, err := run(root, "git", "status", "--porcelain", "--", "examples")
+	ex, err := run(root, "git", "status", "--porcelain", "--", source)
 	if err != nil {
 		return Tree{}, err
 	}

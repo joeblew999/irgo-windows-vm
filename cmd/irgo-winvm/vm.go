@@ -4,8 +4,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/joeblew999/irgo-windows-vm/internal/glazecheck"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -204,6 +206,7 @@ func vmRepairFlags() *flag.FlagSet {
 	fs.String("user", "dev", "the AutoLogon user whose password must never expire")
 	fs.Bool("reboot", false, "restart the VM afterwards so AutoLogon runs again")
 	fs.Bool("share", true, "open the guest's SMB share that pushes go through at network speed; -share=false removes it")
+	fs.Bool("check", false, "run the VM conformance suite before and after, and say which checks the repair fixed (needs the source checkout; not with -reboot)")
 	return fs
 }
 
@@ -222,7 +225,49 @@ func runVMRepair(v values, _ []string) error {
 		return err
 	}
 	say("vm:     %s", e.Name)
-	return utmvm.VMRepair(e.UUID, user, share, reboot, say)
+	if !v.Bool("check") {
+		return utmvm.VMRepair(e.UUID, user, share, reboot, say)
+	}
+	if reboot {
+		return fmt.Errorf("%w: -check runs the suite straight after the repair, and with -reboot the VM is restarting then; "+
+			"repair with -reboot, then run irgo-winvm vm-check -vm %s once it is back", errUsage, e.Name)
+	}
+	root, err := repo()
+	if err != nil {
+		return err
+	}
+	if err := glazecheck.NeedGo(); err != nil {
+		return err
+	}
+	return repairChecked(root, e, func() error { return utmvm.VMRepair(e.UUID, user, share, false, say) }, checkVM, say)
+}
+
+// repairChecked runs the VM suite, the repair, and the suite again, and says
+// what the repair fixed and what it broke. The second run is the one
+// recorded in docs/VM-STATUS.md. A repair that failed is still followed by
+// the check, so the record says where the VM was left.
+func repairChecked(root string, e utmvm.Entry, repair func() error,
+	check func(string, utmvm.Entry, func(string, ...any)) (glazecheck.Section, error), say func(string, ...any)) error {
+	say("checking %s before the repair", e.Name)
+	before, _ := check(root, e, say) // its verdict is only the baseline
+	rErr := repair()
+	say("checking %s after the repair", e.Name)
+	after, cErr := check(root, e, say)
+	fixed, broke := glazecheck.Changed(before, after)
+	say("fixed by the repair: %s", orNone(fixed))
+	say("broken since the repair: %s", orNone(broke))
+	say("now: %s", after.Verdict())
+	if rErr != nil {
+		return rErr
+	}
+	return cErr
+}
+
+func orNone(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
 }
 
 // ensureAgent recovers a VM whose guest agent is not answering. Windows

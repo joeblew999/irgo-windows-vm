@@ -28,7 +28,9 @@ const (
 )
 
 // Known is a failure recorded in docs/UPSTREAM.md (not necessarily reported upstream yet), expected on one target until
-// the fix is released.
+// the fix is released. For the VM suite it is a VM property known to be
+// missing, with the reason (KnownVM); there a Known with no Target holds on
+// every VM.
 //
 // It is still recorded as a FAIL, with Ref beside it, and the test itself
 // still fails: nothing is skipped, and anyone running the suite by hand sees
@@ -50,15 +52,6 @@ var KnownUpstream = []Known{
 	{Target: TargetWindows, Test: "TestAppScheme/absolute_subresources", Ref: "docs/UPSTREAM.md §1b"},
 }
 
-func knownRef(target, test string) string {
-	for _, k := range KnownUpstream {
-		if k.Target == target && k.Test == test {
-			return k.Ref
-		}
-	}
-	return ""
-}
-
 // event is one line of `go tool test2json` output.
 type event struct {
 	Action  string
@@ -71,8 +64,10 @@ type event struct {
 // test2json events, by running Go's own converter. The framing the binary
 // adds is for that tool, and its format is the toolchain's business, not
 // something to reimplement here.
-func toJSON(raw []byte) ([]byte, error) {
-	c := exec.Command("go", "tool", "test2json", "-t", "-p", SuitePackage)
+func toJSON(raw []byte) ([]byte, error) { return Glaze.toJSON(raw) }
+
+func (s *Suite) toJSON(raw []byte) ([]byte, error) {
+	c := exec.Command("go", "tool", "test2json", "-t", "-p", s.Package)
 	c.Stdin = bytes.NewReader(raw)
 	var stderr bytes.Buffer
 	c.Stderr = &stderr
@@ -83,11 +78,20 @@ func toJSON(raw []byte) ([]byte, error) {
 	return out, nil
 }
 
-// parseEvents turns test2json events into one Result per test and subtest, in
+// parseEvents is Glaze.parse without the facts, which glaze's tests log none of.
+func parseEvents(target string, stream []byte) ([]Result, error) {
+	rs, _, err := Glaze.parse(target, stream)
+	return rs, err
+}
+
+// parse turns test2json events into one Result per test and subtest, in
 // the order they started, and a Result named "(package)" when the binary
 // failed in a way no single test accounts for — a panic in TestMain, a
-// -test.timeout, a crash between tests.
-func parseEvents(target string, stream []byte) ([]Result, error) {
+// -test.timeout, a crash between tests. It also returns every fact a test
+// logged ("fact: key=value"), in order, a later value for a key replacing
+// an earlier one.
+func (s *Suite) parse(target string, stream []byte) ([]Result, []Fact, error) {
+	var facts []Fact
 	var (
 		order    []string
 		byName   = map[string]*Result{}
@@ -109,7 +113,7 @@ func parseEvents(target string, stream []byte) ([]Result, error) {
 		if err := dec.Decode(&e); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, fmt.Errorf("reading test2json output: %w", err)
+			return nil, nil, fmt.Errorf("reading test2json output: %w", err)
 		}
 		if e.Test == "" {
 			switch e.Action {
@@ -136,6 +140,19 @@ func parseEvents(target string, stream []byte) ([]Result, error) {
 			if shotLine(r, e.Output) {
 				continue
 			}
+			// So is a fact: it is about the machine, and goes in the record.
+			if k, v, ok := factLine(e.Output); ok {
+				facts = setFact(facts, k, v)
+				continue
+			}
+			// And what the test read, kept even when it passes.
+			if ev, ok := evidenceLine(e.Output); ok {
+				if r.Evidence != "" {
+					r.Evidence += " / "
+				}
+				r.Evidence += ev
+				continue
+			}
 			// So is a retry: recorded even on a pass, never the first message.
 			if retryLine(r, e.Output) {
 				continue
@@ -158,7 +175,7 @@ func parseEvents(target string, stream []byte) ([]Result, error) {
 		if r.Outcome == Unfinished && r.Detail == "" {
 			r.Detail = "started and never finished: the test binary exited or hung while it ran"
 		}
-		r.Known = knownRef(target, r.Name)
+		r.Known = s.knownRef(target, r.Name)
 		if r.Outcome == Fail || r.Outcome == Unfinished {
 			anyTestFailed = true
 		}
@@ -173,7 +190,7 @@ func parseEvents(target string, stream []byte) ([]Result, error) {
 		}
 		out = append(out, Result{Name: "(package)", Outcome: Fail, Detail: strings.Join(pkgLines, " / ")})
 	}
-	return out, nil
+	return out, facts, nil
 }
 
 // isFrame is a line the test runner prints about a test rather than one the
@@ -222,8 +239,8 @@ func rawTail(raw []byte, n int) string {
 	return strings.Join(lines, " / ")
 }
 
-// The lines examples/conformance logs about its screenshots (shots_test.go:
-// shotOK and shotNone), after the file:line prefix t.Logf adds. A picture's
+// The lines a suite logs about its screenshots (examples/shots: OK and
+// None), after the file:line prefix t.Logf adds. A picture's
 // line may end in a parenthesised note about it.
 var (
 	shotTaken  = regexp.MustCompile(`(?:^|: )screenshot: (\S+\.png)(?: \((.*)\))?$`)
@@ -259,4 +276,40 @@ func shotLine(r *Result, l string) bool {
 		return true
 	}
 	return false
+}
+
+// factMark is the line a test logs to put a fact in the record, after the
+// file:line prefix t.Logf adds: "fact: windows=26100.4349 (24H2)".
+var factMark = regexp.MustCompile(`(?:^|: )fact: ([A-Za-z0-9_.-]+)=(.*)$`)
+
+// factLine reads a fact from one line of a test's output.
+func factLine(l string) (key, value string, ok bool) {
+	m := factMark.FindStringSubmatch(strings.TrimSpace(l))
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], strings.TrimSpace(m[2]), true
+}
+
+// evidenceMark is the line a test logs to say what it read: "evidence: ...".
+var evidenceMark = regexp.MustCompile(`(?:^|: )evidence: (.+)$`)
+
+// evidenceLine reads what a test said it read from one line of its output.
+func evidenceLine(l string) (string, bool) {
+	m := evidenceMark.FindStringSubmatch(strings.TrimSpace(l))
+	if m == nil {
+		return "", false
+	}
+	return strings.TrimSpace(m[1]), true
+}
+
+// setFact sets key in facts, in place when it is there already.
+func setFact(facts []Fact, key, value string) []Fact {
+	for i := range facts {
+		if facts[i].Key == key {
+			facts[i].Value = value
+			return facts
+		}
+	}
+	return append(facts, Fact{key, value})
 }

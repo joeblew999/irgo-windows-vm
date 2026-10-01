@@ -266,6 +266,55 @@ img, err := s.Screenshot()               // native/screen, even behind other win
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
 not a test and nothing reads its output.
 
+## The VM conformance suite
+
+`examples/vmconformance` asserts every property of the Windows guest this
+project relies on, one named test each, with a failure message that says what
+is wrong and what sets it. `irgo-winvm vm-check [-vm <name>]` runs it and
+records the verdict in [VM-STATUS.md](VM-STATUS.md), one section per VM, and
+`irgo-winvm vm-status` reads it back. It is the glaze suite's machinery
+pointed at the VM: the same runner (`glazecheck.Check` with `glazecheck.VM`),
+the same verdicts (`YES`, `KNOWN ISSUES ONLY`, `NO`, `CANNOT TELL`,
+`UNEXPECTED PASS`; `glazecheck.KnownVM` is the known list, empty), the same
+log and test2json events in the log directory, the same pictures.
+
+**The checks only read.** Nothing in the suite or around it changes the VM
+beyond pushing and running the test binary, so it is safe on `irgo-win11`.
+The desktop is checked, not reset: `desktop-reset.ps1 -CheckOnly` is the
+reset's own detection, closing nothing, failing on anything but the shell.
+
+**It runs in two parts**, because Windows splits what can be seen:
+
+| part | how | tests |
+|---|---|---|
+| host | before and after, on the Mac | `Host/AgentAnswers` (the guest agent answers; a running VM that does not is a failure, then recovered), `Host/DesktopClean` (nothing left open, and the whole VM photographed with `vm-screen`) |
+| as SYSTEM | `app-create`, the guest agent, `-test.skip=^TestSession` | `TestWindowsBuild` (Windows 11 ARM64; recorded), `TestDevAccount` (exists, enabled, administrator, password never expires, `net accounts` unlimited), `TestAutoLogon` (configured with logons to spare, dev logged in), `TestWindowsUpdatePolicy` (no auto-restart, notify only, notifications and restart notifications off), `TestWindowsKeysDisabled` (both keys mapped to nothing, and in effect since boot), `TestOneDriveOff`, `TestDeviceEncryptionOff` (`PreventDeviceEncryption`, C: fully decrypted), `TestHibernationOff`, `TestFileShare` (irgo-drop for dev only, the rule TCP 445 from `LocalSubnet` only, the Restrictive rules off, the Server service running), `TestWebView2` (registered, folder there; version recorded), `TestNeverSleeps` (sleep and display timeout on AC), `TestUnattendComplete`, `TestFreeDiskSpace` (10 GiB, a choice; recorded) |
+| dev's session | `app-create -gui`, `-test.run=^TestSession` | `TestSessionDesktop` (dev's interactive session, the shell in it; the desktop photographed), `TestSessionNotificationsOff` (dev's toast policy, OneDrive not running), `TestSessionWebView2Renders` (a glaze window whose page runs and names its WebView2 version; photographed), `TestSessionEvidence/*` (each setting as dev can read it, photographed) |
+
+BitLocker's status, the share and the firewall need an administrator's token,
+which the session's scheduled task does not have, so those are SYSTEM's; a
+desktop, dev's own hive and a window are the session's. Each test skips
+outside its part and says where it belongs.
+
+- **What a check read is kept** (`evidence: ...` lines, a column of the
+  table), so a passing row says what it saw; facts about the VM (`fact:
+  windows=...`) go at the top of its section.
+- **Pictures, as glaze's**, through `examples/shots`: every session test with
+  something to see writes `vm/<Test>.png` under `-vmconformance.shots`,
+  pulled from `C:\Users\Public\irgo-vm-check-shots` into
+  `docs/screens/vm-conformance/<vm>/`, with a Screenshots table, a column per
+  VM. A setting is shown by running the commands anyone would type (`reg
+  query`, `powercfg`, `netsh`) as dev and drawing their output in a glaze
+  window like a console; a real console from the suite (`conhost.exe`) came up
+  in about half the attempts. `TestSessionEvidence` fails only when it cannot
+  show them; whether the setting is right is the SYSTEM test's verdict.
+- **Freshness** can only say whether the checks changed since the record
+  (`examples/vmconformance` against its commit) and how old it is; the VM
+  itself changes under any record.
+- **Where it is used:** `vm-golden-create` runs it on the verification clone
+  ([sealing](ARCHITECTURE.md#the-golden-image-sealing-and-cloning)); `vm-repair -check` runs it before
+  and after and names what the repair fixed.
+
 ## Desktop hygiene
 
 A check leaves nothing on a screen: not on the owner's Mac, where `glaze:mac`

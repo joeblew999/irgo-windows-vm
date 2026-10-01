@@ -19,6 +19,7 @@ project has had to clean up was written by an agent that did not check.
 | [docs/UPSTREAM.md](docs/UPSTREAM.md) | work around anything in glaze, native or UTM (don't: fix it there) |
 | [docs/RESULTS.md](docs/RESULTS.md) | state a number: what has been measured, dated |
 | [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | say whether glaze works (generated: never edit it) |
+| [docs/VM-STATUS.md](docs/VM-STATUS.md) | say whether a VM has what the project relies on (generated: never edit it) |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | pick up what is next |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | touch the HTTP transport |
 

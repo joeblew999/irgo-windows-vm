@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joeblew999/irgo-windows-vm/internal/glazecheck"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -14,7 +15,28 @@ func vmGoldenCreateFlags() *flag.FlagSet {
 	// No default, unlike every other -vm: the default is the shared VM.
 	fs.String("vm", "", "the installed, disposable VM to seal (required)")
 	fs.Bool("force", false, "allow sealing "+utmvm.DefaultVMName+", the shared VM")
+	fs.Bool("check", true, "run the VM conformance suite on the verification clone, and refuse an image that fails it (needs the source checkout)")
 	return fs
+}
+
+// verifyGoldenClone runs the VM suite on the golden image's verification
+// clone and records it in docs/VM-STATUS.md. Outside a checkout there is no
+// suite to build: that is the verdict, recorded in golden.json, and not a
+// refusal — vm-golden-create works on any machine.
+func verifyGoldenClone(vm string, say func(string, ...any)) (string, error) {
+	root, err := glazecheck.FindRepo()
+	if err != nil {
+		return "not run: not in a checkout of irgo-windows-vm, which the suite is built from", nil
+	}
+	if err := glazecheck.NeedGo(); err != nil {
+		return "not run: " + err.Error(), nil
+	}
+	e, err := utmvm.Find(vm)
+	if err != nil {
+		return "", err
+	}
+	sec, err := checkVM(root, e, say)
+	return sec.Verdict(), err
 }
 
 // runVMGoldenCreate seals a disposable VM into the golden image. The VM is
@@ -53,7 +75,11 @@ func runVMGoldenCreate(v values, _ []string) error {
 	say("from:     %s (%s)", e.Name, utmvm.Home(src))
 	say("golden:   %s (%s)", utmvm.GoldenVMName, utmvm.Home(golden))
 	say("manifest: %s", utmvm.Home(utmvm.GoldenManifestPath()))
-	if _, err := utmvm.GoldenCreate(utmvm.GoldenCreateOptions{Source: e.Name, ToolVersion: version}, say); err != nil {
+	opts := utmvm.GoldenCreateOptions{Source: e.Name, ToolVersion: version}
+	if v.Bool("check") {
+		opts.Verify = func(vm string) (string, error) { return verifyGoldenClone(vm, say) }
+	}
+	if _, err := utmvm.GoldenCreate(opts, say); err != nil {
 		return err
 	}
 	say("vm-create -vm <name> now clones %s instead of installing", utmvm.GoldenVMName)

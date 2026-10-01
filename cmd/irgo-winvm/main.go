@@ -275,6 +275,8 @@ func init() {
 		"status":       {flags: statusFlags, about: statusAbout, run: runStatus},
 		"glaze-check":  {flags: glazeCheckFlags, run: runGlazeCheck},
 		"glaze-status": {run: runGlazeStatus},
+		"vm-check":     {flags: vmCheckFlags, run: runVMCheck},
+		"vm-status":    {flags: vmStatusFlags, run: runVMStatus},
 		"help":         {run: runHelp},
 		"version":      {run: runVersion},
 		"commands":     {run: runCommands},

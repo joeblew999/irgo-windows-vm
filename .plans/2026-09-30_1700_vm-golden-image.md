@@ -1,6 +1,6 @@
 # A ready Windows VM in minutes: build a golden image once, then clone it
 
-Status: proposed, research only. Nothing is built yet · 2026-09-30
+Status: phase 2 (the R2 cache) built, unmerged; phases 0–1 elsewhere · 2026-10-01
 
 ## Symptom
 
@@ -357,6 +357,44 @@ way, about 45 minutes, and that install also closes ROADMAP's long-job item.
 - Chunk format as above. Download through `isoDownload` with SHA-256 added.
   Rebuild into `disk.img` with holes preserved, then register as in Phase 1.
 - No Cloudflare resources are created by this plan. The owner makes the bucket.
+
+**Built 30 Sep–1 Oct 2026** (branch `worktree-agent-a5ef843430003b858`, on
+main, independent of phase 1). Transport only: a bundle directory to the
+bucket and back. docs/DEVELOPMENT.md, "The private R2 cache", is the reference.
+
+- `vm-golden-push -bundle <dir>` / `vm-golden-pull [-dir] [-id]`, always jobs
+  over MCP. Undos: `vm-golden-push -delete -force [-id]` (manifest, `latest`
+  moved to the newest remaining, every unreferenced chunk collected) and
+  `vm-golden-pull -delete -force` (the pull directory). Both undos succeed on
+  nothing.
+- Format as proposed, with three changes. Regions are found by reading and a
+  zero check, not `SEEK_DATA`/`SEEK_HOLE` (portable; reading holes is fast).
+  The manifest records each chunk's compressed SHA-256 too, which is what
+  `isoDownload` verifies, and the uncompressed SHA-256 (the name) is checked
+  after decompressing. Each file also gets a tree hash (SHA-256 of its region
+  SHA-256s), checked by reading the rebuilt file back.
+- `isoDownload` takes a `digest` (SHA-1 or SHA-256); pull uses it with
+  presigned GET URLs, so there is still one downloader.
+- Privacy: the Cloudflare API's `domains/managed` and `domains/custom`; on or
+  cannot tell refuses. The unsigned-HEAD probe was not built: R2's behaviour
+  for an anonymous request to the S3 endpoint could not be measured here (a
+  made-up account id fails the TLS handshake), and the API answers the
+  question directly.
+- Pulled bundles land in `golden-pull/` under the runtime data, **not yet
+  registered with UTM**. Joining phase 1: have `vm-golden-create` (or a
+  `vm-golden-pull` step) import `golden-pull/<bundle>` as `irgo-golden` and
+  move its `golden.json` to `GoldenManifestPath`; then pull's undo becomes
+  `vm-golden-delete`, and `goldenJSONName` here merges with
+  `goldenManifestName` there. Push needs a readable copy (`-bundle`) because
+  of TCC; an AppleScript export from UTM would be the default source.
+- Tests against an in-process fake R2 (S3 subset and the two API calls):
+  round trip with holes and a repeated region, delta push (one chunk), corrupt
+  chunk (fetched twice, refused, nothing in place), altered manifest, wrong
+  file hash, interrupted download resumed with `Range`, public and unreadable
+  bucket refused before any S3 request, removal and its GC, manifest path
+  traversal. Negative controls run by hand for each.
+- Not verified: anything against a real R2 bucket. That is the acceptance test
+  once the owner has made one.
 
 Not doing: public hosting of any kind, GitHub Releases, ghcr.io, desync, qcow2
 conversion, sysprep.

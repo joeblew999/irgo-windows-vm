@@ -161,7 +161,14 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `iso-create` and removed by `iso-delete`, only when building media from scratch.
 
 - **Tools are generated from the command list** in `internal/command`, so they
-  are the commands and nothing else.
+  are the commands and nothing else. A tool's description is the command's
+  summary plus what the declaration says an agent must know first: that it
+  returns a job, that it needs `-force`, its undo (`describe`).
+- **The server sends instructions** with its initialize response
+  (`internal/mcpserver/instructions.go`): the order of the steps, jobs, which
+  failures to retry. `irgo-winvm mcp -h` prints them after how to register the
+  server, and the site's MCP page captures that, so the three cannot differ. A
+  test fails if they name a command or status that does not exist.
 - **The server holds no logic.** Behaviour reachable only over MCP is a second
   answer to a question already answered, and nobody tests it: the cycle tests
   and developers both drive the CLI. If a tool needs logic, it goes in `utmvm`,
@@ -396,7 +403,17 @@ reports what is installed and where, and **`status`** lists long-running
 [jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
-such, and offline it says "cannot tell" rather than failing.
+such, and offline it says "cannot tell" rather than failing. It ends with the
+next steps in order, each with its command (`nextSteps`): UTM, the installer
+(only when the VM will be installed from it), the VM (a clone, a pull from the
+private cache, or an install, with the one-time Automation dialog), then
+`app-create`, and how to register the MCP server. Rows that are optional or
+fetched by the command that needs them (Go, the guest tools, `wimlib` and
+`xorriso`) read `optional` or `not yet`, never `MISSING`.
+
+Nothing a release user runs assumes a checkout: messages link
+[the site](https://joeblew999.github.io/irgo-windows-vm/) (`utmvm.SiteURL`),
+never a `docs/` path, and the two commands that need the source say so.
 
 Two work only **in a checkout of this repository**, because they build and read
 `examples/`:
@@ -586,9 +603,42 @@ one Mac each have a VM without stopping anybody else's.
 | **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
 
 The first VM is still installed the slow way, under a throwaway name:
-`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`. With
-no golden image, `vm-create` says it is falling back to a full install and
-does that; `-golden=false` installs even when there is one.
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`.
+`-golden=false` installs even when there is a golden image.
+
+**A new VM on a machine with no golden image** (`VMCreate`, and
+`internal/utmvm/vm_golden_import.go`) depends on the
+[private cache](#the-private-r2-cache):
+
+| cache (`GoldenCacheFromEnv`) | `vm-create` | `vm-create -install` |
+|---|---|---|
+| none of its variables set | writes the bundle; says the install is next | installs from the ISO, and says how to make the next VM a clone |
+| configured (`IRGO_GOLDEN_URL` + `IRGO_GOLDEN_TOKEN`, or the S3 five) | stops and says `-install` pulls it, writing no bundle | pulls the image, has UTM import it as `irgo-golden`, clones it |
+| some set, not all | exit 2 naming what is missing, and `-golden=false` | the same |
+
+- **Only with `-install`**, because a pull is minutes (4 min 37 s for 8.4 GB,
+  [measured](RESULTS.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026))
+  and `-install` is what makes `vm-create` a job over MCP. Without it nothing is
+  written: a VM that exists is never cloned, so a bundle written now would make
+  the next `-install` install after all.
+- **Half a configuration is an error**, not a quiet 45-minute install for
+  someone who meant to pull.
+- **The pull runs under the machine lock**, like `vm-golden-pull`, and asks UTM
+  again first, so a golden image another process made meanwhile is cloned, not
+  pulled over. It is `GoldenPull` itself, licence notice and privacy check
+  included, into `golden-pull/`.
+- **The bundle's own name is checked** before the import (`plutil -extract
+  Information.Name`): UTM registers a bundle under the name in its
+  `config.plist`, so an image pushed from another VM would be left registered
+  under that name.
+- **The pull is kept** in `golden-pull/`. UTM's import is an APFS clone of it,
+  so it costs no more space, and after `vm-golden-delete` the next import needs
+  no download. `vm-golden-pull -delete -force` removes it. Its `golden.json` is
+  copied to the runtime root, where `doctor` reads it.
+
+The decisions are unit-tested with fakes for UTM, the bucket and the lock
+(`vm_golden_import_test.go`); the whole path against the real bucket and UTM is
+proven by running it.
 
 **Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
 the guest, as SYSTEM, one step at a time with the disk's allocation printed

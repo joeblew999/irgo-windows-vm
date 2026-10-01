@@ -251,7 +251,14 @@ git tag -a v0.1.2 -m "..." && git push origin v0.1.2
 ```
 
 The version comes from the tag and nowhere else, so nothing in the tree needs
-editing first.
+editing first. Use semver: a minor bump (v0.5.0) for new commands, flags or
+behaviour, a patch (v0.5.1) for fixes only.
+
+The release notes are the header in `.goreleaser.yaml` (install, first run, MCP,
+the golden image) and the commits since the last tag, grouped. Commit subjects
+starting `feat:`, `fix:` or `docs:` land in New, Fixes and Documentation; the
+rest are grouped by the area the subject starts with (`vm-create:`, `site:`,
+`conformance:` ...). Merges, `plans:` and `GLAZE-STATUS` commits are left out.
 
 ### How a release is built
 
@@ -261,7 +268,33 @@ The build is [GoReleaser](https://goreleaser.com), configured in
 - the targets (darwin arm64 and amd64 only);
 - the build flags;
 - the download names (`irgo-winvm-darwin-arm64`: raw binaries, not tarballs);
-- the install instructions in the release notes.
+- the install instructions in the release notes;
+- the Homebrew cask.
+
+What a release offers a user, and where each comes from:
+
+| install | from |
+|---|---|
+| `curl -fsSL …/install.sh \| sh` | `install.sh` at the root, also attached to each release (`release.extra_files`). It verifies the binary against `SHA256SUMS` before installing it |
+| `brew install --cask joeblew999/tap/irgo-winvm` | the cask GoReleaser writes and pushes to [joeblew999/homebrew-tap](https://github.com/joeblew999/homebrew-tap) |
+| `go install …/cmd/irgo-winvm@vX.Y.Z` | the module proxy; the binary reports the tag from its build info |
+| the raw binary | the release's assets |
+
+**The tap** needs, once: the public repository `joeblew999/homebrew-tap` (empty
+is fine; GoReleaser writes `Casks/irgo-winvm.rb`), and a repository secret
+`HOMEBREW_TAP_GITHUB_TOKEN` here holding a fine-grained token with Contents
+read and write on that repository. Without the secret the cask is not uploaded
+and the release notes leave the brew line out; everything else publishes. The
+cask clears the quarantine flag after install, because the binary is not
+signed with an Apple Developer ID and Homebrew quarantines what a cask
+downloads.
+
+**Gatekeeper.** The binaries are ad-hoc signed by the Go linker (arm64 requires
+a signature to run at all) and not notarized. A file with no quarantine flag
+runs; one a browser downloaded is refused until `xattr -d
+com.apple.quarantine` clears it. `curl`, `go install` and the cask's hook leave
+no flag. Signing and notarizing need an Apple Developer account, which this
+project does not have.
 
 `release.yml` then:
 
@@ -278,7 +311,12 @@ uploaded as an artefact, with nothing published.
 
 ### Build locally
 
-`mise run go:build` runs the same build into `dist/`.
+`mise run go:build` runs the same build into `dist/`: each binary is
+`dist/irgo-winvm_darwin_<arch>/irgo-winvm`, published as
+`irgo-winvm-darwin-<arch>`, and the cask is `dist/homebrew/Casks/irgo-winvm.rb`.
+To try `install.sh` against it, copy the binaries under their published names
+into a directory with `dist/SHA256SUMS` and run
+`IRGO_WINVM_BASE=file://<that directory> sh install.sh`.
 
 - On a clean checkout of a tag, it builds exactly what that release published.
 - Anywhere else it is a snapshot, and the binary reports `dev` (`dev-dirty` with

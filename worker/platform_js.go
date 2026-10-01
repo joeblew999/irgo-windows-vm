@@ -130,11 +130,12 @@ func (s jsBlobs) Put(key string, body io.Reader, size int64, sum string) (BlobIn
 	return blobInfo(o), nil
 }
 
-// isChecksumError is R2 refusing a put whose body does not match its sha256.
-// MEASURE: the message, under wrangler dev and live.
+// isChecksumError is R2 refusing a put whose body does not match its sha256:
+// "put: The SHA-256 checksum you specified did not match what we received.
+// [...] (10037)", measured 1 Oct 2026 under wrangler dev.
 func isChecksumError(err error) bool {
-	m := strings.ToLower(err.Error())
-	return strings.Contains(m, "checksum") || strings.Contains(m, "sha-256") || strings.Contains(m, "sha256")
+	m := err.Error()
+	return strings.Contains(m, "(10037)") || strings.Contains(m, "checksum you specified did not match")
 }
 
 func (s jsBlobs) Delete(key string) error {

@@ -116,6 +116,7 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
                 manifest.json once finished, .parts/ while it is not
+  ledger/   events not yet sent to the ledger, and this machine's random id
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -132,6 +133,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
+| `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
 | `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
@@ -1198,7 +1200,7 @@ process that owns it is not the one that was killed. See the traps below.
 
 `worker/` is one Cloudflare Worker, written in Go on
 [syumai/workers-go](https://github.com/syumai/workers-go) and deployed at
-`https://irgo-windows-vm.gedw99.workers.dev`, that serves three things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
+`https://irgo-windows-vm.gedw99.workers.dev`, that serves four things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
 the owner switches.
 
 - **The site.** `site/dist`, from `mise run site:build`, as Workers static
@@ -1226,6 +1228,8 @@ the owner switches.
   `<key>` is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
+- **The ledger** (`worker/ledger.go`), who used which VM where, in the D1
+  database bound as `LEDGER`: see [The ledger](#the-ledger).
 
 All of the handler is plain Go behind two small interfaces (`worker/api.go`).
 `go:check` builds and tests it for the host, where `workers.Serve` is an
@@ -1401,6 +1405,8 @@ Done on 1 Oct 2026 by these steps. In order:
    | `GLAZE_STATUS_TOKEN` | CI posting glaze runs |
    | `GOLDEN_TOKEN` | reading the golden image (`IRGO_GOLDEN_TOKEN`) |
    | `GOLDEN_PUSH_TOKEN` | writing and deleting it (`IRGO_GOLDEN_PUSH_TOKEN`) |
+   | `LEDGER_TOKEN` | the tool posting to [the ledger](#the-ledger) (`IRGO_LEDGER_TOKEN`) |
+   | `LEDGER_READ_TOKEN` | reading the ledger: its page and JSON (`IRGO_LEDGER_READ_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
    [Setting up the bucket](#setting-up-the-bucket)).
@@ -1418,6 +1424,89 @@ Done on 1 Oct 2026 by these steps. In order:
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part
 of these steps.
+
+## The ledger
+
+Several repositories' agents share one Mac's VMs, and there is more than one
+Mac. The mutation locks and leases on each machine are the authority: local,
+instant, offline. The ledger is the record of them that outlives a machine and
+can be read from anywhere: which agent used which VM, on which machine, doing
+what, and what was started and never finished. It decides nothing.
+
+**The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
+the start and end of every command (exit code, duration, the error text)
+except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build runs
+it as `glaze-status -h` a dozen times). Over MCP it records the
+client's name from its `initialize`. Each event carries a machine id, the
+hostname, the owner (`IRGO_WINVM_OWNER`, else the login name), the repository
+(`IRGO_WINVM_REPO`, else the checkout it runs in, read from its git config),
+the VM and the tool version. It is **off** unless `IRGO_LEDGER_URL` and
+`IRGO_LEDGER_TOKEN` are both set; on this Mac they are in `.env.r2`, with
+`IRGO_LEDGER_READ_TOKEN`.
+
+- **It never blocks or fails a command.** An event is appended to
+  `ledger/spool.jsonl` (instant, works offline) and sent in the background.
+  At exit, `main` gives it at most 2 s; what is not sent stays spooled and
+  goes with the next command. After a failed send nothing is tried for a
+  minute, so an offline machine pays nothing per command.
+  `TestWorkerOutageNeverChangesTheExitCode` runs commands against a hanging,
+  a failing and an unreachable Worker and compares each exit code with the
+  ledger off.
+- **Nothing is lost or doubled.** A flush renames the spool to
+  `inflight.jsonl` under `spool.lock`, so no append lands in a file already
+  read, and `flush.lock` lets one process flush at a time. Events go in
+  batches of 25; a 2xx, 400 or 413 removes a batch, anything else (a 401
+  included) keeps it. Every event has a random id and the Worker stores each
+  id once, so a batch sent twice is harmless. Past 4 MiB of spool, new events
+  are dropped.
+- **Redacted before it is written.** The home directory becomes `~`;
+  credentials in URLs, values after words such as `token` or `password`, and
+  any run of 32 or more key-like characters become `[redacted]`. The machine
+  id is 16 random hex digits kept in `ledger/machine-id`, not derived from
+  anything about the machine.
+
+For the lease code: `ledger.Emit(ledger.Event{...})` from anywhere, a no-op
+until `main` configures it. `Op` pairs an event that opens work with the one
+that closes it: `start`/`end`, `lease-acquire`/`lease-release`; `reap` closes
+the op it names and, like `vm-delete`, marks the VM deleted; `vm-create`
+marks it created. A lease sets `Expires` and is stale once past it.
+
+**The Worker** stores events in the D1 database `irgo-ledger`, schema in
+`worker/migrations/`. D1 rather than a Durable Object: workers-go opens a D1
+database as `database/sql` but cannot define a Durable Object class, and the
+questions asked are queries. On the host and in the tests the same migration
+runs on SQLite (modernc.org/sqlite, in the worker module only), so the tests
+run the real SQL. The d1 driver under TinyGo was measured with `wrangler dev`
+before it was used: inserts, nulls, `RowsAffected` for duplicates.
+
+| request | token | does |
+|---|---|---|
+| `POST /api/ledger/events` | `LEDGER_TOKEN` | `{"events":[...]}`, 1 to 25; answers `accepted`, `duplicates`, `rejected` |
+| `GET /api/ledger/events` | `LEDGER_READ_TOKEN` | history, newest first, filtered by `owner`, `vm`, `machine`, `host`, `type`, `op`, `repo`, `client`; `since` is RFC 3339 or a duration (default 7 days); `limit` up to 1000 |
+| `GET /api/ledger/vms` | `LEDGER_READ_TOKEN` | now: machines, VMs (`in-use`, `stale`, `idle`, `deleted`), open work, recent events; `since`, `stale` |
+| `GET /api/ledger/` | `LEDGER_READ_TOKEN`, as bearer or as the Basic password | the same, as a page |
+
+- **Stale** is open work never closed: a start with no end, or a lease with
+  no release, older than `stale` (3 h by default), or a lease past its
+  `Expires`. The view reads the last 14 days, at most 5,000 events, and says
+  when it was truncated. A start and an end in the same millisecond count as
+  closed whichever id sorts first; live, a refused `app-create` once showed as
+  in use.
+- **Never public.** It names hosts, users and repositories. The page is
+  rendered by the Worker, not a page of the site, because static assets are
+  served to anyone before the Worker runs. A browser cannot send a bearer
+  token on a navigation, so the page also takes the read token as an HTTP
+  Basic password and asks for one. The two tokens each do one job.
+- **Limits** are D1's on the Free plan: 50 queries per invocation (hence 25
+  events, one statement each) and a daily row budget, which the indexes on
+  `ts`, `op`, `(machine, vm, ts)` and `(owner, ts)` keep small.
+
+Set up on 1 Oct 2026: `wrangler d1 create irgo-ledger` (its id is in
+`wrangler.toml`), `wrangler d1 migrations apply irgo-ledger --remote`, the two
+secrets, then a deploy. Locally: `wrangler d1 migrations apply irgo-ledger
+--local`, then `wrangler dev --local --var LEDGER_TOKEN:local-lw --var
+LEDGER_READ_TOKEN:local-lr`. A schema change is a new numbered file in
+`worker/migrations/`, applied the same way.
 
 ## Known traps
 

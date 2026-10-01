@@ -12,8 +12,10 @@ import (
 	"os"
 	"regexp"
 	"runtime/debug"
+	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
+	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
@@ -41,7 +43,13 @@ func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string 
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	// The ledger (docs/DEVELOPMENT.md, "The ledger"): off unless
+	// IRGO_LEDGER_URL and IRGO_LEDGER_TOKEN are set. At exit it gets at most
+	// 2 s to send; what it cannot send stays spooled for the next run.
+	ledger.Configure(ledger.FromEnv(utmvm.Root(), version))
+	err := run(os.Args[1:])
+	ledger.DrainDefault(2 * time.Second)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(int(exitCode(err)))
 	}
@@ -91,6 +99,9 @@ func runToolFor(mcpClient, name string, args []string) (err error) {
 		return err
 	}
 	v.caller = callerFor(v, mcpClient)
+	// Recorded before admission, so a refusal is in the ledger too.
+	ended := recordCommand(mcpClient, c.Command, v)
+	defer func() { ended(err) }()
 	if err := admit(c, v); err != nil {
 		return err
 	}

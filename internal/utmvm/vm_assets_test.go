@@ -84,20 +84,6 @@ func TestStartupScriptPrefersInstalledWindows(t *testing.T) {
 	}
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // stripXMLComments removes <!-- ... --> so a comment warning about a mistake
 // cannot be mistaken for the mistake.
 func stripXMLComments(s string) string {

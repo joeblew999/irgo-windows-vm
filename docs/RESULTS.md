@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [a VM of your own in 23 s: install 12 min 24 s once, seal 2 min 49 s, then `vm-create` clones and boots](#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
 | 30 Sep 2026 | [pushes go over SMB: 49 MB in 1.6 s instead of 1 min 17 s; `glaze:windows` 31 s → 24 s](#pushes-go-over-smb--measured-30-sep-2026) |
 | 30 Sep 2026 | [GoReleaser rebuilds v0.4.1 byte for byte](#goreleaser-reproduces-the-published-v041-byte-for-byte--verified-30-sep-2026) |
 | 16 Aug 2026 | [an agent uploaded and ran a binary over HTTP](#an-agent-uploaded-pushed-and-ran-a-binary-over-http--verified-16-aug-2026) |
@@ -26,6 +27,64 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## A VM of your own in 23 s — measured 1 Oct 2026
+
+**Result:** after one unattended install and one seal, `vm-create -vm <name>`
+gives a new, answering Windows VM in **23 s**, without restarting UTM, while
+`irgo-win11` keeps running. Two clones run side by side with their own MAC and
+address, take `app-create` at the same time, and pass `glaze-check -windows`.
+
+M2 Pro, 16 GiB, macOS 27.0, UTM 4.7.5, Windows 11 Pro 26100.4349, run by an agent
+session with no Full Disk Access. Every VM below was disposable (`g1`, `a1`, `a2`);
+`irgo-win11` stayed `started` throughout and ran a program afterwards.
+
+| step | command | measured |
+|---|---|---|
+| install, end to end | `vm-create -vm g1 -install -golden=false` | **743.8 s (12 min 24 s)**, nothing typed: bundle written and imported by UTM in 0.95 s, Setup to desktop, agent, first-logon commands, shutdown, medium out, boot, agent |
+| installed disk | `stat` | 8.99 GB allocated of 64 GiB (NTFS: 21.5 GB used) |
+| BitLocker after install | seal's `facts` | **status 0, 0 % encrypted**: `PreventDeviceEncryption` in specialize worked (irgo-win11, installed without it: 100 % encrypted) |
+| seal, end to end | `vm-golden-create -vm g1` | **168.7 s**: vm-repair 45 s, facts 15 s, decrypt (nothing to do) 12 s, hibernation off 9 s, DISM `/ResetBase` 31 s, TRIM 15 s, shutdown 12 s |
+| TRIM on the host | `stat` around `Optimize-Volume -ReTrim` | 10,894,462,976 → 10,811,899,904 bytes: **QEMU on macOS does punch holes** (83 MB here; NTFS used fell 22.6 → 19.2 GB over the seal) |
+| golden image | `doctor` | **10.1 GB allocated** of 64 GB, only the NVMe disk |
+| clone (golden → new VM) | AppleScript `duplicate` | **0.76–1.7 s**; `df` unchanged |
+| clone boot to agent | `vm-create` | **21 s**, three times (verification clone, a1, a2) |
+| `vm-create -vm a1` from the golden image | | **22.9 s**; a2 23.4 s |
+| two clones at once | `utmctl ip-address`, UTM's configuration | MACs `52:54:00:B4:BD:7D` / `:8F:37:DB` (golden `:E3:D3:CD`), addresses 192.168.64.43 / .44 (irgo-win11 .40) |
+| `app-create` on both at once | two 20 s programs | **27 s for both**; each pushed over SMB to its own clone (1.9 s, 1.5 s), so the share came with the image. The same VM a second time: **exit 6**, "VM a1 is held by another command" |
+| `glaze-check -windows -vm a1` | | **KNOWN BUGS ONLY in 29 s** (irgo-win11: 32 s) |
+
+What it took to get there, each found by running it:
+
+- **A long comment in the answer file made Setup ignore it.** The first install
+  stopped at "Select language settings". The bundle was intact (`unattend.iso`
+  81,920 bytes in UTM's folder; UTM's scripting reports sizes in whole MiB, so it
+  said 0). A/B, each judged by whether the disk grew within 35 s: the answer
+  file from before 30 Sep installs; today's without the new specialize
+  component installs; the component under a one-line comment installs. Its
+  twelve-line comment was the only one in the file with `%` in it; which part
+  triggers it was not isolated.
+- **The install's eject stopped Windows mid first logon.** The firmware booted
+  Windows' own boot entry with the self-booting install CD still attached, so
+  the desktop was up while the guest tools were still installing. The stall
+  check read the quiet disk as a reboot, hard-stopped the VM (the guest tools
+  never installed, so no agent and no network), and after the restart typed
+  `fs2:\efi\microsoft\boot\bootmgfw.efi` into the Start menu's search box. Now
+  nothing is stopped or typed once Windows is on the disk; the medium comes
+  out after the agent answers and `C:\unattend-complete.txt` exists, by a
+  shutdown from inside.
+- **`drives of (configuration of vm)` fails in AppleScript** (-1700); the
+  configuration has to be fetched into a variable first.
+- **`New-Item -Force` on the existing BitLocker key fails** ("Cannot delete a
+  subkey tree"), so the seal creates it only when missing.
+- **This process can neither read nor write UTM's container**, so `vm-create`
+  writes the bundle under `vm/staging/` and UTM imports it (0.95 s), and the
+  guest tools ISO is downloaded to `vm/` (5.3 s). The guest-tools ISO carries an
+  `Autounattend.xml` of UTM's own; ours won on every install here.
+
+Not measured: how much a clone grows over a working day (`cloneHeadroomBytes`,
+10 GiB, is still an estimate; `df` did not move by a visible amount for two
+clones' boots and runs), and the compressed size of the golden image (phase 2).
 
 ## Pushes go over SMB — measured 30 Sep 2026
 

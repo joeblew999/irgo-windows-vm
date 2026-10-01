@@ -19,6 +19,30 @@ func TestInstructionsReachTheClient(t *testing.T) {
 	}
 }
 
+// TestDescriptionsSayWhatToKnowFirst: a long tool says it returns a job, a
+// destructive one that it needs -force, and every make names its undo, all
+// read from the declaration.
+//
+// Negative control, run by hand: drop the Detach switch from describe and the
+// job check names vm-create.
+func TestDescriptionsSayWhatToKnowFirst(t *testing.T) {
+	for _, c := range command.All {
+		d := describe(c)
+		if !strings.HasPrefix(d, c.Summary) {
+			t.Errorf("%s: %q does not start with its summary", c.Name, d)
+		}
+		if c.Detach != "" && !strings.Contains(d, "job id") {
+			t.Errorf("%s is long and its description does not say it returns a job: %q", c.Name, d)
+		}
+		if c.Destructive && !strings.Contains(d, "-force") {
+			t.Errorf("%s is destructive and does not say -force: %q", c.Name, d)
+		}
+		if c.Undo != "" && !strings.Contains(d, "Undo: "+c.Undo) {
+			t.Errorf("%s does not name its undo: %q", c.Name, d)
+		}
+	}
+}
+
 // TestInstructionsNameOnlyRealCommands: every hyphenated name in the
 // instructions is a command, an exit status or the project's own name, so a
 // renamed command cannot leave the agent told to call one that is gone; and

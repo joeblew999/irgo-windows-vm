@@ -99,6 +99,12 @@ var All = []Command{
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
 	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
+	// vm-check and vm-status work only in a checkout too: the suite is
+	// examples/vmconformance. vm-check runs it in the VM, as SYSTEM and in the
+	// desktop session, changing nothing there; a minute or two, so a job over
+	// MCP.
+	{Name: "vm-check", Summary: "does the VM have what this project relies on? run the VM suite in it, record every check", Locks: LockVM, Detach: DetachAlways, OverMCP: true},
+	{Name: "vm-status", Summary: "the recorded VM verdicts, one per VM, and how far each still holds", ReadOnly: true, OverMCP: true},
 	{Name: "help", Summary: "the three steps explained, and what your .exe has to be", ReadOnly: true},
 	{Name: "version", Summary: "what this binary is", ReadOnly: true},
 	{Name: "commands", Summary: "one command name per line, for tooling", ReadOnly: true},

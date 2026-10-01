@@ -88,6 +88,7 @@ type GoldenManifest struct {
 	Apparent    int64     `json:"apparent"`     // disk.img length, bytes
 	SealSeconds int       `json:"seal_seconds"` // how long sealing took
 	BootSeconds int       `json:"boot_seconds"` // how long its verification clone took to answer
+	VMCheck     string    `json:"vm_check"`     // the VM suite's verdict on that clone, or why it was not run
 }
 
 // GoldenManifestPath is where the manifest lives.
@@ -178,6 +179,12 @@ func goldenEntry() (Entry, bool, error) {
 type GoldenCreateOptions struct {
 	Source      string // the disposable VM to seal; it must exist and be installed
 	ToolVersion string // recorded in the manifest
+
+	// Verify, when set, checks the verification clone once it answers — the
+	// VM conformance suite, which lives outside this package — and returns
+	// its verdict. An error refuses the image (verifyGolden). Nil records
+	// that it was not checked.
+	Verify func(vm string) (verdict string, err error)
 }
 
 // GoldenCreate seals Source and registers the result as GoldenVMName.
@@ -326,6 +333,17 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	}
 	m.BootSeconds = int(boot.Seconds())
 	say("          %s answered %s after it was started", goldenVerifyName, boot.Round(time.Second))
+	if err := verifyGolden(opts.Verify, goldenVerifyName, &m, say); err != nil {
+		// Unregistered, so vm-create cannot clone an image that failed. Cheap
+		// to undo: the source is still sealed, and registering it again is a
+		// clone of seconds.
+		if dErr := GoldenDelete(func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
+			return m, fmt.Errorf("%w; and removing the golden image failed too: %v", err, dErr)
+		}
+		return m, fmt.Errorf("%w\n  the golden image is removed, so nothing clones it; %s is left to look at\n"+
+			"  (vm-screen -vm %s, vm-status), and %s is still sealed: fix it, then vm-golden-create -vm %s again",
+			err, goldenVerifyName, goldenVerifyName, src.Name, src.Name)
+	}
 	if _, err := Delete(goldenVerifyName, true, func(f string, a ...any) { say("          "+f, a...) }); err != nil {
 		return m, fmt.Errorf("deleting %s: %w", goldenVerifyName, err)
 	}
@@ -338,6 +356,34 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	say("          %s", Home(GoldenManifestPath()))
 	say("          sealed in %s, Windows %s, WebView2 %s", time.Duration(m.SealSeconds)*time.Second, m.Windows, m.WebView2)
 	return m, nil
+}
+
+// ErrGoldenUnverified is a golden image whose verification clone failed the
+// VM conformance suite.
+var ErrGoldenUnverified = errors.New("the golden image failed the VM conformance suite")
+
+// verifyGolden runs verify on the verification clone and records its verdict
+// in m. No verify is recorded as not run, and lets the image through: the
+// caller chose that (vm-golden-create -check=false, or no checkout to build
+// the suite from, which verify itself reports as a verdict). A verdict with
+// an error refuses it.
+func verifyGolden(verify func(string) (string, error), vm string, m *GoldenManifest, say func(string, ...any)) error {
+	if verify == nil {
+		m.VMCheck = "not run (vm-golden-create -check=false)"
+		say("          VM conformance suite: not run")
+		return nil
+	}
+	say("          running the VM conformance suite on %s", vm)
+	verdict, err := verify(vm)
+	m.VMCheck = verdict
+	if err != nil {
+		if verdict == "" {
+			verdict = err.Error()
+		}
+		return fmt.Errorf("%w: %s", ErrGoldenUnverified, verdict)
+	}
+	say("          VM conformance suite: %s", verdict)
+	return nil
 }
 
 // GoldenDelete removes the golden image and its manifest. Nothing there is

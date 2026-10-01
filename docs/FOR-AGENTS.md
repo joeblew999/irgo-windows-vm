@@ -95,7 +95,7 @@ irgo-winvm remote-submit -gui app.exe --flag value
 | **`remote-submit`** `[-gui] [-test] [-timeout 10m] [-wait=false] <app.exe> [args...]` | uploads, queues, follows the Mac's log, prints the program's output, saves the files under `irgo-remote/<job id>/`, exits with the job's code | `remote-cancel` |
 | **`remote-status`** `[<id>]` | state, place in the queue, exit code, files | |
 | **`remote-logs`** `[-f] <id>` | what the Mac said; `-f` follows it and exits with the job's code | |
-| **`remote-result`** `[-o dir] <id>` | downloads a finished job's files and exits with its code | |
+| **`remote-result`** `[-o dir] [-admin] <id>` | downloads a finished job's files and exits with its code; `-admin`, with `IRGO_REMOTE_ADMIN_TOKEN`, any caller's job that ended in the last day | |
 | **`remote-cancel`** `<id>` | at once if it is queued; a running job stops at its next step | |
 
 `irgo-winvm remote-submit` can also be typed as two words, `remote submit`.

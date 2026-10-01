@@ -1,13 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/joeblew999/irgo-windows-vm/internal/command"
 	"github.com/joeblew999/irgo-windows-vm/internal/remote"
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
@@ -91,6 +97,54 @@ func TestAJobsCodeIsTheExitCode(t *testing.T) {
 	}
 	if got := exitCode(remoteErr(fmt.Errorf("x: %w", remote.ErrAuth))); got != command.CodeUsage {
 		t.Errorf("a refused token exits %d, want %d", got, command.CodeUsage)
+	}
+}
+
+// remote-result -admin finds another caller's job in the admin's list and
+// reads its files through the admin route with IRGO_REMOTE_ADMIN_TOKEN
+// alone, exiting with the job's code; a job not in the list is a usage
+// error. The fake answers only the admin token, on only the admin's routes.
+//
+// Negative control (by hand, 1 Oct 2026): passing admin=false to
+// fetchAndReport from runRemoteResult fails this with exit 2 (the caller's
+// route, refused); restored.
+func TestRemoteResultAdminReadsAnotherCallersJob(t *testing.T) {
+	id := strings.Repeat("ab", 16)
+	one := 1
+	job := wire.JobView{Job: wire.Job{ID: id, Owner: "bob", State: wire.JobFinished, ExitCode: &one, Outcome: "failed",
+		Files: []wire.BlobInfo{{Key: "stdout.txt", Size: 3}}}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route, p, _, ok := wire.Match(r.Method, r.URL.Path)
+		switch {
+		case !ok || r.Header.Get("Authorization") != "Bearer adm" || route.Scope != wire.ScopeJobsAdmin:
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"refused: no valid bearer token","code":"unauthorized"}`))
+		case route.Name == wire.RouteJobList:
+			_ = json.NewEncoder(w).Encode(wire.JobList{Jobs: []wire.JobView{job}})
+		case p[0] == id && p[1] == "stdout.txt":
+			_, _ = w.Write([]byte("hi\n"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(wire.EnvRemoteURL, srv.URL)
+	t.Setenv("IRGO_REMOTE_TOKEN", "")
+	t.Setenv("IRGO_REMOTE_ADMIN_TOKEN", "adm")
+	dir := t.TempDir()
+
+	var err error
+	_, _ = utmvm.Capture(func() error { err = run([]string{"remote-result", "-admin", "-o", dir, id}); return nil })
+	if got := exitCode(err); got != command.CodeFailed {
+		t.Fatalf("remote-result -admin: exit %d (%v), want the job's %d", got, err, command.CodeFailed)
+	}
+	if b, rErr := os.ReadFile(filepath.Join(dir, id, "stdout.txt")); rErr != nil || string(b) != "hi\n" {
+		t.Fatalf("stdout.txt: %q %v", b, rErr)
+	}
+	_, _ = utmvm.Capture(func() error { err = run([]string{"remote-result", "-admin", "-o", dir, strings.Repeat("cd", 16)}); return nil })
+	if got := exitCode(err); got != command.CodeUsage || !errors.Is(err, remote.ErrNotFound) {
+		t.Fatalf("a job not in the list: exit %d (%v), want %d and not found", got, err, command.CodeUsage)
 	}
 }
 

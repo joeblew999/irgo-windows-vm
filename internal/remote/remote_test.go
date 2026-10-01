@@ -54,11 +54,11 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	if tok != "sub" && tok != "run" {
+	if tok != "sub" && tok != "run" && tok != "adm" {
 		send(401, map[string]string{"error": "refused: no valid bearer token"})
 		return
 	}
-	if (p[0] == "runner") != (tok == "run") {
+	if (p[0] == "runner") != (tok == "run") || (p[0] == "admin") != (tok == "adm") {
 		send(401, map[string]string{"error": "refused: no valid bearer token"})
 		return
 	}
@@ -102,6 +102,15 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Job-Sha256", hex.EncodeToString(s[:]))
 			_, _ = w.Write(b)
 		}
+	case p[0] == "admin" && len(p) == 5 && p[1] == "jobs" && p[3] == "files":
+		b, ok := f.files[p[2]+"/"+p[4]]
+		if !ok {
+			send(404, map[string]string{"error": "no such file"})
+			return
+		}
+		s := sha256.Sum256(b)
+		w.Header().Set("X-Job-Sha256", hex.EncodeToString(s[:]))
+		_, _ = w.Write(b)
 	case p[0] == "runner" && p[1] == "claim":
 		for _, j := range f.jobs {
 			if j.State == wire.JobQueued {
@@ -290,7 +299,7 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 		t.Fatalf("Wait did not print the Mac's log:\n%s", out.String())
 	}
 	dir := t.TempDir()
-	paths, err := Fetch(context.Background(), c, final, dir)
+	paths, err := Fetch(context.Background(), c, final, dir, false)
 	if err != nil || len(paths) != 3 {
 		t.Fatalf("fetch: %v %v (want stdout.txt, desktop.png, result.json)", err, paths)
 	}
@@ -299,6 +308,41 @@ func TestServeRunsAJobAndReportsIt(t *testing.T) {
 	}
 	if !strings.Contains(string(f.files[j.ID+"/result.json"]), `"outcome": "failed"`) {
 		t.Fatalf("result.json: %s", f.files[j.ID+"/result.json"])
+	}
+}
+
+// The admin token fetches a caller's job's files through the admin route,
+// and the two tokens do not stand in for each other: the caller's on the
+// admin route, and the admin's on the caller's, are refused.
+//
+// Negative control (by hand, 1 Oct 2026): making Fetch ignore admin (always
+// the caller's route) fails "the admin" with ErrAuth; restored.
+func TestAdminFetchesAnotherCallersFiles(t *testing.T) {
+	_, s := newFake(t)
+	c, j, _ := submitted(t, s, false)
+	ex := &fakeExec{out: Outcome{Code: command.CodeOK, Files: map[string][]byte{"stdout.txt": []byte("hi\n")}}}
+	if err := Serve(context.Background(), runner(s.URL, "run", ""), ex, ServeOptions{Once: true}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	final, err := c.Status(ctx, j.ID)
+	if err != nil || len(final.Files) != 2 {
+		t.Fatalf("final: %v %+v (want stdout.txt and result.json)", err, final)
+	}
+	adm := NewClient(s.URL, map[wire.Scope]string{wire.ScopeJobsAdmin: "adm"})
+	dir := t.TempDir()
+	paths, err := Fetch(ctx, adm, final, dir, true)
+	if err != nil || len(paths) != 2 {
+		t.Fatalf("the admin: %v %v", err, paths)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "stdout.txt")); string(got) != "hi\n" {
+		t.Fatalf("stdout.txt: %q", got)
+	}
+	if _, err := Fetch(ctx, c, final, t.TempDir(), true); !errors.Is(err, ErrAuth) {
+		t.Errorf("a caller's token on the admin route: %v, want ErrAuth", err)
+	}
+	if _, err := Fetch(ctx, adm, final, t.TempDir(), false); !errors.Is(err, ErrAuth) {
+		t.Errorf("the admin token on the caller's route: %v, want ErrAuth", err)
 	}
 }
 

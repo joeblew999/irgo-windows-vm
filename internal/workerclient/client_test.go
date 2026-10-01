@@ -88,6 +88,21 @@ func TestEachCallCarriesItsScopesToken(t *testing.T) {
 	if _, err := c.GlazePost(ctx, "mac", []byte(`{}`), map[string][]byte{"A.png": []byte("png")}); err != nil {
 		t.Fatal(err)
 	}
+	// A job's file, as its caller and as the admin: two routes, two tokens
+	// (making JobFile ignore admin fails the job-admin-file check below).
+	jobID := strings.Repeat("0f", 16)
+	for _, admin := range []bool{false, true} {
+		body, _, err := c.JobFile(ctx, jobID, "desktop.png", admin)
+		if err != nil {
+			t.Fatalf("job file (admin %v): %v", admin, err)
+		}
+		_ = body.Close()
+	}
+	for _, r := range []string{wire.RouteJobFile, wire.RouteJobAdminFile} {
+		if _, ok := f.seen[r]; !ok {
+			t.Errorf("%s was never reached", r)
+		}
+	}
 	for name, got := range f.seen {
 		want := tokens[wire.MustFind(name).Scope]
 		if got != want {

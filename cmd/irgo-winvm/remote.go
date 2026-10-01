@@ -101,13 +101,15 @@ func followAndFetch(ctx context.Context, c *remote.Client, id, dir string, asJSO
 	if err != nil {
 		return remoteErr(err)
 	}
-	return fetchAndReport(ctx, c, final, dir, asJSON, say)
+	return fetchAndReport(ctx, c, final, dir, asJSON, false, say)
 }
 
-func fetchAndReport(ctx context.Context, c *remote.Client, j remote.Job, dir string, asJSON bool, say func(string, ...any)) error {
+// fetchAndReport saves a final job's files, prints its output, and returns
+// its outcome. admin reads another caller's job's files with the admin token.
+func fetchAndReport(ctx context.Context, c *remote.Client, j remote.Job, dir string, asJSON, admin bool, say func(string, ...any)) error {
 	if len(j.Files) > 0 {
 		dst := filepath.Join(dir, j.ID)
-		paths, err := remote.Fetch(ctx, c, j, dst)
+		paths, err := remote.Fetch(ctx, c, j, dst, admin)
 		for _, p := range paths {
 			say("saved %s", p)
 		}
@@ -252,29 +254,55 @@ func remoteResultFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("remote-result", flag.ContinueOnError)
 	fs.String("o", "irgo-remote", "directory the result files are saved in, under <job id>/")
 	fs.Bool("json", false, "print the final job as JSON on the last line")
+	fs.Bool("admin", false, "any caller's job, with IRGO_REMOTE_ADMIN_TOKEN instead of IRGO_REMOTE_TOKEN: found in the queue's index (jobs that ended in the last day), its files read through the admin route")
 	return fs
 }
 
 // runRemoteResult downloads a final job's files and exits with its code, so
-// a script that submitted with -wait=false gets the same answer later.
+// a script that submitted with -wait=false gets the same answer later. With
+// -admin the job may be another caller's.
 func runRemoteResult(v values, args []string) error {
-	id, err := oneID(args, "remote result [-o dir]")
+	id, err := oneID(args, "remote result [-o dir] [-admin]")
 	if err != nil {
 		return err
 	}
-	c, err := remoteClient()
-	if err != nil {
+	admin := v.Bool("admin")
+	var c *remote.Client
+	if admin {
+		if c, err = remote.FromEnv(wire.ScopeJobsAdmin); err != nil {
+			return fmt.Errorf("%w: %w", errUsage, err)
+		}
+	} else if c, err = remoteClient(); err != nil {
 		return err
 	}
 	ctx := context.Background()
-	j, err := c.Status(ctx, id)
+	j, err := resultJob(ctx, c, id, admin)
 	if err != nil {
 		return remoteErr(err)
 	}
 	if !wire.JobFinal(j.State) {
 		return &remote.JobError{ID: id, Code: remote.Code(j), Msg: "still " + j.State + "; wait with: irgo-winvm remote logs -f " + id}
 	}
-	return fetchAndReport(ctx, c, j, v.String("o"), v.Bool("json"), utmvm.Printer("remote-result"))
+	return fetchAndReport(ctx, c, j, v.String("o"), v.Bool("json"), admin, utmvm.Printer("remote-result"))
+}
+
+// resultJob is the job remote-result fetches: the caller's own by its id, or
+// with admin any caller's, from the admin token's list, which has no route
+// for one job.
+func resultJob(ctx context.Context, c *remote.Client, id string, admin bool) (remote.Job, error) {
+	if !admin {
+		return c.Status(ctx, id)
+	}
+	jobs, err := c.List(ctx)
+	if err != nil {
+		return remote.Job{}, err
+	}
+	for _, j := range jobs {
+		if j.ID == id {
+			return j, nil
+		}
+	}
+	return remote.Job{}, fmt.Errorf("%w: %s is not in the queue's index, which keeps jobs for a day after they end", remote.ErrNotFound, id)
 }
 
 func runRemoteCancel(_ values, args []string) error {

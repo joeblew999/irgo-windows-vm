@@ -118,12 +118,13 @@ func (c *Client) Log(ctx context.Context, id string, offset int64) ([]byte, int6
 }
 
 // File downloads one result file into dir and returns where it went,
-// checked against the SHA-256 the Worker stored.
-func (c *Client) File(ctx context.Context, id, name, dir string) (string, error) {
+// checked against the SHA-256 the Worker stored. With admin the job may be
+// any caller's, read with the admin token.
+func (c *Client) File(ctx context.Context, id, name, dir string, admin bool) (string, error) {
 	if !wire.IsSafeName(name) {
 		return "", fmt.Errorf("%q is not a result file name", name)
 	}
-	body, sum, err := c.wc.JobFile(ctx, id, name)
+	body, sum, err := c.wc.JobFile(ctx, id, name, admin)
 	if err != nil {
 		return "", classify(err)
 	}

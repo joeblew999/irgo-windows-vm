@@ -61,14 +61,14 @@ func Wait(ctx context.Context, c *Client, id string, out io.Writer, poll time.Du
 }
 
 // Fetch downloads every result file of a final job into dir, and returns
-// their paths.
-func Fetch(ctx context.Context, c *Client, j Job, dir string) ([]string, error) {
+// their paths. With admin the job may be any caller's (Client.File).
+func Fetch(ctx context.Context, c *Client, j Job, dir string, admin bool) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	var paths []string
 	for _, f := range j.Files {
-		p, err := c.File(ctx, j.ID, f.Key, dir)
+		p, err := c.File(ctx, j.ID, f.Key, dir, admin)
 		if err != nil {
 			return paths, fmt.Errorf("%s: %w", f.Key, err)
 		}

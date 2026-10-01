@@ -17,6 +17,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -51,6 +52,7 @@ var eventTypes = map[string]bool{
 	"start": true, "end": true,
 	"lease-acquire": true, "lease-release": true,
 	"vm-create": true, "vm-delete": true, "reap": true,
+	"capacity": true,
 }
 
 var opens = map[string]bool{"start": true, "lease-acquire": true}
@@ -291,6 +293,44 @@ type machineView struct {
 	LastOwner   string `json:"last_owner"`
 	LastCommand string `json:"last_command"`
 	Version     string `json:"version"`
+
+	// Capacity is the machine's newest capacity snapshot, when it has sent
+	// one; CapacityAt is when, and CapacityErr says a snapshot was sent that
+	// could not be read (cannot tell, not zero).
+	Capacity    *capacityView `json:"capacity,omitempty"`
+	CapacityAt  int64         `json:"capacity_at,omitempty"`
+	CapacityErr string        `json:"capacity_error,omitempty"`
+}
+
+// capacityView is a "capacity" event's detail: one machine's disk, memory
+// and VM counts, written by the tool's cmd/irgo-winvm/capacity.go
+// (capacitySnapshot). The JSON names are the contract.
+type capacityView struct {
+	DiskFree      int64  `json:"disk_free"`
+	DiskTotal     int64  `json:"disk_total"`
+	Memory        int64  `json:"mem"`
+	RunningMemory int64  `json:"mem_running"`
+	VMs           int    `json:"vms"`
+	Running       int    `json:"running"`
+	Stale         int    `json:"stale"`
+	Promised      int64  `json:"promised"`
+	Tool          int64  `json:"tool"`
+	Clone         string `json:"clone"`
+	MoreClones    int    `json:"more_clones"`
+	MoreRunning   int    `json:"more_running"`
+}
+
+// readCapacity parses a capacity event's detail. A snapshot without a disk
+// size or a verdict is not one this code understands.
+func readCapacity(detail string) (*capacityView, error) {
+	var c capacityView
+	if err := json.Unmarshal([]byte(detail), &c); err != nil {
+		return nil, err
+	}
+	if c.DiskTotal <= 0 || c.Clone == "" {
+		return nil, errors.New("no disk size or verdict in it")
+	}
+	return &c, nil
 }
 
 type vmView struct {
@@ -405,6 +445,14 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		setIf(&m.LastOwner, e.Owner)
 		setIf(&m.Version, e.Version)
 		setIf(&m.LastCommand, e.Command)
+		if e.Type == "capacity" {
+			// Events are in time order, so the last one read is the newest.
+			c, err := readCapacity(e.Detail)
+			m.Capacity, m.CapacityAt, m.CapacityErr = c, e.TS, ""
+			if err != nil {
+				m.CapacityErr = "unreadable snapshot: " + err.Error()
+			}
+		}
 		if e.Op != "" && opens[e.Type] && !closed[e.Op] {
 			open[e.Op] = e
 		}

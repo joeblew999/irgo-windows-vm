@@ -132,5 +132,66 @@
   document.querySelectorAll(".prose h2[id], .prose h3[id]").forEach(function (h) { obs.observe(h); });
 })();
 </script>
+{{if .Live}}
+<!--
+  The Glaze status page only. Served by the Cloudflare Worker (worker/), this
+  asks it for the newest run CI posted and shows it above the recorded one, so
+  the page is current without a redeploy. Anywhere else, GitHub Pages
+  included, api/glaze-status is not there and nothing changes. Everything from
+  the response goes in as text or as an image URL under the API: never as HTML.
+-->
+<script>
+(function () {
+  var prose = document.querySelector(".prose");
+  if (!prose || !window.fetch) return;
+  fetch("api/glaze-status", { cache: "no-store" }).then(function (r) {
+    var ct = r.headers.get("Content-Type") || "";
+    return r.ok && ct.indexOf("application/json") === 0 ? r.json() : null;
+  }).then(function (all) {
+    if (!all) return;
+    var box = document.createElement("div");
+    box.className = "markdown-alert markdown-alert-note live";
+    var title = document.createElement("p");
+    title.className = "markdown-alert-title";
+    title.textContent = "Latest runs posted by CI, live";
+    box.appendChild(title);
+    var any = false;
+    ["mac", "windows"].forEach(function (target) {
+      var run = all[target];
+      if (!run || !run.manifest) return;
+      any = true;
+      var m = run.manifest;
+      var p = document.createElement("p");
+      var b = document.createElement("strong");
+      b.textContent = (target === "mac" ? "Mac" : "Windows") + ": ";
+      p.appendChild(b);
+      p.appendChild(document.createTextNode((m.Verdict || "") + " — " + (m.When || "") +
+        (m.Commit ? ", commit " + m.Commit.slice(0, 12) : "") + (m.Platform ? ", " + m.Platform : "")));
+      if (m.RunURL && /^https:\/\/github\.com\//.test(m.RunURL)) {
+        p.appendChild(document.createTextNode(" "));
+        var a = document.createElement("a");
+        a.href = m.RunURL;
+        a.textContent = "(run)";
+        p.appendChild(a);
+      }
+      box.appendChild(p);
+      var shots = document.createElement("p");
+      shots.className = "live-shots";
+      (m.Tests || []).forEach(function (t) {
+        if (!t.Picture) return;
+        var img = document.createElement("img");
+        img.src = run.base + encodeURIComponent(t.Picture);
+        img.alt = t.Test + ": " + t.Result;
+        img.title = img.alt;
+        img.loading = "lazy";
+        shots.appendChild(img);
+      });
+      box.appendChild(shots);
+    });
+    if (any) prose.insertBefore(box, prose.firstElementChild ? prose.firstElementChild.nextSibling : null);
+  }).catch(function () {});
+})();
+</script>
+{{end}}
 </body>
 </html>

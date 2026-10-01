@@ -151,7 +151,15 @@ type page struct {
 	// captured from the binary. Somebody finding a wrong default was being sent
 	// to edit a file that does not exist.
 	Source string
+
+	// Live is the Glaze status page, which also asks the Cloudflare Worker
+	// (worker/) for the newest run when it is served from there. On GitHub
+	// Pages the request finds nothing and the page stays as rendered.
+	Live bool
 }
+
+// livePage is the page that shows the Worker's latest glaze runs.
+const livePage = "glaze-status.html"
 
 func main() {
 	root := flag.String("root", "..", "repository root to read markdown from")
@@ -313,7 +321,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName()}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName(), Live: p.Out == livePage}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}

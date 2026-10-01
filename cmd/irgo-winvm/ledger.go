@@ -27,7 +27,7 @@ func recordCommand(client string, c command.Command, v values) func(error) {
 	op, vm, began := ledger.NewID(), vmOf(c, v), time.Now()
 	ledger.Emit(ledger.Event{Type: ledger.Start, Op: op, Client: client, VM: vm, Command: c.Name})
 	return func(err error) {
-		code := int(exitCode(err))
+		code := int64(exitCode(err))
 		took := time.Since(began).Milliseconds()
 		e := ledger.Event{Type: ledger.End, Op: op, Client: client, VM: vm, Command: c.Name, Exit: &code, DurationMS: &took}
 		if err != nil {

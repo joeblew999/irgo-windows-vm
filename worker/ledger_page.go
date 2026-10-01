@@ -39,7 +39,7 @@ func age(sec int64) string {
 	return fmt.Sprintf("%.1fd", d.Hours()/24)
 }
 
-func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request) {
+func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request, _ []string) {
 	v, code, err := env.view(r)
 	if err != nil {
 		fail(w, code, "%v", err)
@@ -84,7 +84,7 @@ func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request) {
 		head("state", "VM", "machine", "owner", "client", "repo", "last", "when", "created", "open")
 		for _, m := range v.VMs {
 			row(`<span class="state state-`+esc(m.State)+`">`+esc(m.State)+`</span>`, esc(m.VM), esc(m.Host)+" <small>"+esc(m.Machine)+"</small>",
-				esc(m.Owner), esc(m.Client), esc(m.Repo), esc(m.LastCommand)+" <small>"+esc(m.LastType)+"</small>",
+				esc(m.Owner), esc(m.Client), esc(m.Repo), esc(m.LastCommand)+" <small>"+esc(string(m.LastType))+"</small>",
 				esc(when(m.LastActivity)), esc(when(m.Created)), fmt.Sprint(m.Open))
 		}
 		b.WriteString("</tbody></table>\n")
@@ -100,7 +100,7 @@ func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request) {
 			if o.Stale {
 				flag = `<span class="state state-stale">stale</span> <small>` + esc(o.Why) + `</small>`
 			}
-			row(flag, esc(o.Command)+" <small>"+esc(o.Type)+"</small>", esc(o.VM), esc(o.Host), esc(o.Owner),
+			row(flag, esc(o.Command)+" <small>"+esc(string(o.Type))+"</small>", esc(o.VM), esc(o.Host), esc(o.Owner),
 				esc(o.Client), esc(o.Repo), esc(when(o.TS)), esc(age(o.AgeSeconds)))
 		}
 		b.WriteString("</tbody></table>\n")
@@ -126,7 +126,7 @@ func (env Env) ledgerPage(w http.ResponseWriter, r *http.Request) {
 		if e.DurationMS != nil {
 			took = (time.Duration(*e.DurationMS) * time.Millisecond).Round(time.Millisecond).String()
 		}
-		row(esc(when(e.TS)), esc(e.Type), esc(e.Command), esc(e.VM), esc(e.Host), esc(e.Owner), esc(e.Client), esc(exit), esc(took), esc(e.Detail))
+		row(esc(when(e.TS)), esc(string(e.Type)), esc(e.Command), esc(e.VM), esc(e.Host), esc(e.Owner), esc(e.Client), esc(exit), esc(took), esc(e.Detail))
 	}
 	b.WriteString("</tbody></table>\n<p><small>JSON: <code>/api/ledger/vms</code>, <code>/api/ledger/events?owner=&amp;vm=&amp;machine=&amp;since=24h</code>.</small></p>\n</main></body></html>\n")
 

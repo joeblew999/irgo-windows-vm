@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 const (
@@ -25,7 +27,7 @@ func ledgerEnv(t *testing.T, now *time.Time) Env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	vars := map[string]string{varLedgerToken: writeTok, varLedgerReadToken: readTok}
+	vars := map[string]string{secret(wire.ScopeLedgerWrite): writeTok, secret(wire.ScopeLedgerRead): readTok}
 	return Env{
 		Var:    func(n string) string { return vars[n] },
 		Ledger: func() (*sql.DB, error) { return db, nil },
@@ -36,7 +38,7 @@ func ledgerEnv(t *testing.T, now *time.Time) Env {
 func ms(t time.Time) int64 { return t.UnixMilli() }
 
 func ev(id, typ, op, vm string, at time.Time) Event {
-	return Event{ID: id, Type: typ, Op: op, VM: vm, TS: ms(at), Machine: "m0000001", Host: "mac-a",
+	return Event{ID: id, Type: wire.LedgerType(typ), Op: op, VM: vm, TS: ms(at), Machine: "m0000001", Host: "mac-a",
 		Owner: "alice", Client: "claude-code", Repo: "joeblew999/x", Command: "app-create", Version: "dev"}
 }
 
@@ -45,8 +47,8 @@ func postEvents(h http.Handler, token string, evs ...Event) *httptest.ResponseRe
 	return do(h, http.MethodPost, "/api/ledger/events", token, bytes.NewBuffer(b), "application/json")
 }
 
-// Negative control (by hand, 1 Oct 2026): making ledger() skip authorized for
-// the read paths fails the "want 401" cases below; restored.
+// Negative control (by hand, 1 Oct 2026): giving ledger-events and ledger-vms
+// ScopeNone in wire.Routes fails the "want 401" cases below; restored.
 func TestLedgerRefusals(t *testing.T) {
 	now := testNow
 	h := Handler(ledgerEnv(t, &now))
@@ -62,7 +64,7 @@ func TestLedgerRefusals(t *testing.T) {
 		{"GET", "/api/ledger/vms", writeTok, 401},
 		{"GET", "/api/ledger/", "", 401},
 		{"GET", "/api/ledger", "", 401},
-		{"GET", "/api/ledger/nothing", "", 401}, // no hint which paths exist
+		{"GET", "/api/ledger/nothing", "", 404}, // not a route; the routes are public in /api/openapi.json
 		{"GET", "/api/ledger/nothing", readTok, 404},
 		{"GET", "/api/ledger", readTok, 302},
 	} {
@@ -111,7 +113,7 @@ func TestLedgerIngestIdempotentAndValidated(t *testing.T) {
 	w := postEvents(h, writeTok, a, b, bad, weird)
 	var got struct {
 		Accepted, Duplicates int
-		Rejected             []rejected
+		Rejected             []wire.LedgerRejected
 	}
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Accepted != 2 || len(got.Rejected) != 2 {
 		t.Fatalf("first post: %d %s", w.Code, w.Body)
@@ -141,7 +143,7 @@ func TestLedgerIngestIdempotentAndValidated(t *testing.T) {
 	}
 
 	// Batch bounds and a body that is not the shape.
-	many := make([]Event, maxBatch+1)
+	many := make([]Event, wire.LedgerMaxBatch+1)
 	for i := range many {
 		many[i] = ev(fmt.Sprintf("evt-many-%04d", i), "start", "", "", now)
 	}

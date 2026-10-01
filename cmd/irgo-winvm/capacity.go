@@ -11,6 +11,7 @@ import (
 
 	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 func capacityFlags() *flag.FlagSet {
@@ -147,25 +148,11 @@ func capacitySummary(r utmvm.CapacityReport) doctorRow {
 	return row
 }
 
-// capacitySnapshot is the report as the compact JSON a ledger event carries:
-// under the 500 bytes the Worker keeps, and nothing in it is a name.
-type capacitySnapshot struct {
-	DiskFree      int64  `json:"disk_free"`
-	DiskTotal     int64  `json:"disk_total"`
-	Memory        int64  `json:"mem"`
-	RunningMemory int64  `json:"mem_running"`
-	VMs           int    `json:"vms"`
-	Running       int    `json:"running"`
-	Stale         int    `json:"stale"`
-	Promised      int64  `json:"promised"`
-	Tool          int64  `json:"tool"`
-	Clone         string `json:"clone"`
-	MoreClones    int    `json:"more_clones"`
-	MoreRunning   int    `json:"more_running"`
-}
-
-func snapshotOf(r utmvm.CapacityReport) capacitySnapshot {
-	s := capacitySnapshot{DiskFree: r.DiskFree, DiskTotal: r.DiskTotal, Memory: r.Memory, RunningMemory: r.RunningMemory,
+// snapshotOf is the report as the compact snapshot a ledger event carries
+// (wire.LedgerCapacitySnapshot): under the 500 bytes the Worker keeps, and
+// nothing in it is a name.
+func snapshotOf(r utmvm.CapacityReport) wire.LedgerCapacitySnapshot {
+	s := wire.LedgerCapacitySnapshot{DiskFree: r.DiskFree, DiskTotal: r.DiskTotal, Memory: r.Memory, RunningMemory: r.RunningMemory,
 		VMs: len(r.VMs), Promised: r.Promised, Clone: r.Room.Clone, MoreClones: r.Room.MoreClones, MoreRunning: r.Room.MoreRunning}
 	for _, vm := range r.VMs {
 		if !strings.EqualFold(vm.Status, "stopped") {

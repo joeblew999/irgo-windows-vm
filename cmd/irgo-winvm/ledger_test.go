@@ -59,7 +59,7 @@ func TestCommandsAreRecorded(t *testing.T) {
 		byType[e.Command+"/"+string(e.Type)] = e
 	}
 	s, e := byType["app-create/start"], byType["app-create/end"]
-	if s.Op == "" || s.Op != e.Op || s.VM == "" || e.Exit == nil || *e.Exit != int(exitCode(err)) || e.DurationMS == nil || e.Detail == "" {
+	if s.Op == "" || s.Op != e.Op || s.VM == "" || e.Exit == nil || *e.Exit != int64(exitCode(err)) || e.DurationMS == nil || e.Detail == "" {
 		t.Errorf("app-create: start %+v, end %+v", s, e)
 	}
 	if st := byType["status/end"]; st.Client != "claude-code" || st.VM != "" || st.Exit == nil || *st.Exit != 0 {

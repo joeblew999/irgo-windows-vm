@@ -1,0 +1,1947 @@
+{
+  "components": {
+    "schemas": {
+      "BlobInfo": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "size"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "$ref": "#/components/schemas/Error"
+      },
+      "GlazeLatest": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/GlazeRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": "object"
+      },
+      "GlazePosted": {
+        "properties": {
+          "pictures": {
+            "type": "integer"
+          },
+          "run": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "run",
+          "pictures"
+        ],
+        "type": "object"
+      },
+      "GlazeRun": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "manifest": {
+            "description": "any JSON, stored and returned as it was posted"
+          },
+          "received": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "run",
+          "received",
+          "base",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "GoldenList": {
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/BlobInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "objects",
+          "cursor"
+        ],
+        "type": "object"
+      },
+      "Health": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "LedgerBatch": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "LedgerCapacitySnapshot": {
+        "properties": {
+          "clone": {
+            "type": "string"
+          },
+          "disk_free": {
+            "type": "integer"
+          },
+          "disk_total": {
+            "type": "integer"
+          },
+          "mem": {
+            "type": "integer"
+          },
+          "mem_running": {
+            "type": "integer"
+          },
+          "more_clones": {
+            "type": "integer"
+          },
+          "more_running": {
+            "type": "integer"
+          },
+          "promised": {
+            "type": "integer"
+          },
+          "running": {
+            "type": "integer"
+          },
+          "stale": {
+            "type": "integer"
+          },
+          "tool": {
+            "type": "integer"
+          },
+          "vms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disk_free",
+          "disk_total",
+          "mem",
+          "mem_running",
+          "vms",
+          "running",
+          "stale",
+          "promised",
+          "tool",
+          "clone",
+          "more_clones",
+          "more_running"
+        ],
+        "type": "object"
+      },
+      "LedgerEvent": {
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "version": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "type",
+          "machine"
+        ],
+        "type": "object"
+      },
+      "LedgerEvents": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "events"
+        ],
+        "type": "object"
+      },
+      "LedgerMachine": {
+        "properties": {
+          "capacity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LedgerCapacitySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capacity_at": {
+            "type": "integer"
+          },
+          "capacity_error": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "last_command": {
+            "type": "string"
+          },
+          "last_owner": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "integer"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "host",
+          "last_seen",
+          "last_owner",
+          "last_command",
+          "version"
+        ],
+        "type": "object"
+      },
+      "LedgerOpen": {
+        "properties": {
+          "age_s": {
+            "type": "integer"
+          },
+          "client": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "ts": {
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "version": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "type",
+          "machine",
+          "age_s",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "LedgerPosted": {
+        "properties": {
+          "accepted": {
+            "type": "integer"
+          },
+          "duplicates": {
+            "type": "integer"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerRejected"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "accepted",
+          "duplicates",
+          "rejected"
+        ],
+        "type": "object"
+      },
+      "LedgerRejected": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "error"
+        ],
+        "type": "object"
+      },
+      "LedgerType": {
+        "type": "string"
+      },
+      "LedgerVM": {
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "created": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "integer"
+          },
+          "host": {
+            "type": "string"
+          },
+          "last_activity": {
+            "type": "integer"
+          },
+          "last_command": {
+            "type": "string"
+          },
+          "last_type": {
+            "$ref": "#/components/schemas/LedgerType"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "open": {
+            "type": "integer"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "vm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "host",
+          "vm",
+          "state",
+          "owner",
+          "client",
+          "repo",
+          "last_command",
+          "last_type",
+          "last_activity",
+          "open"
+        ],
+        "type": "object"
+      },
+      "LedgerView": {
+        "properties": {
+          "machines": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerMachine"
+            },
+            "type": "array"
+          },
+          "now": {
+            "type": "integer"
+          },
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerOpen"
+            },
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent"
+            },
+            "type": "array"
+          },
+          "since": {
+            "type": "integer"
+          },
+          "stale_after": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "vms": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerVM"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "now",
+          "since",
+          "stale_after",
+          "truncated",
+          "machines",
+          "vms",
+          "open",
+          "recent"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "glaze-status-write": {
+        "description": "CI's conformance job posting a glaze run. The Worker's secret GLAZE_STATUS_TOKEN; clients read it from GLAZE_STATUS_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "golden-read": {
+        "description": "reading the golden image: every machine that pulls. The Worker's secret GOLDEN_TOKEN; clients read it from IRGO_GOLDEN_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "golden-write": {
+        "description": "writing, deleting and listing it: only where you push. The Worker's secret GOLDEN_PUSH_TOKEN; clients read it from IRGO_GOLDEN_PUSH_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "ledger-read": {
+        "description": "reading the ledger: its page and its JSON. The Worker's secret LEDGER_READ_TOKEN; clients read it from IRGO_LEDGER_READ_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "ledger-write": {
+        "description": "the tool posting events to the ledger. The Worker's secret LEDGER_TOKEN; clients read it from IRGO_LEDGER_TOKEN.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "The Cloudflare Worker's API: live glaze status and the private golden image. Generated from the route table in wire/routes.go, the same table the Worker routes by and the clients build URLs from. Every error is an Error whose code is one of: `bad-request` (400): the request is malformed; the message says how; `digest-mismatch` (400): the body did not hash to X-Golden-Sha256; nothing was stored; `unauthorized` (401): no valid bearer token for this route's scope, whatever the path, so a caller without one learns nothing; `not-found` (404): no such route, object, target or key; `method-not-allowed` (405): the path exists, not with this method; Allow lists the ones it has; `conflict` (409): refused against what is stored: an older glaze run, an unreadable record, or an object replaced while being read; `length-required` (411): send Content-Length: R2 stores a stream only of known length; `too-large` (413): the body is over the route's limit; `unsupported-media-type` (415): the body is not the route's media type; `range-not-satisfiable` (416): the Range starts past the end of the object; `internal` (500): a bucket binding is missing, or an answer could not be encoded; `storage` (502): R2 failed, or a write did not read back as written; `not-configured` (503): the secret for this route's scope is not set on the Worker, so it refuses everything.",
+    "title": "irgo-windows-vm Worker",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/glaze-status": {
+      "get": {
+        "operationId": "glaze-latest",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlazeLatest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          }
+        },
+        "security": [],
+        "summary": "the newest glaze run per target (null for a target with none), read by the site's Glaze status page",
+        "x-scope": "none"
+      }
+    },
+    "/api/glaze-status/{target}": {
+      "post": {
+        "operationId": "glaze-post",
+        "parameters": [
+          {
+            "description": "mac or windows; must match the manifest's Target",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "additionalProperties": {
+                  "contentMediaType": "image/png",
+                  "type": "string"
+                },
+                "description": "one part named manifest holding shots.json, and one part per picture it names, named by its file name (at most 64, each a PNG of at most 4194304 bytes)",
+                "properties": {
+                  "manifest": {
+                    "contentMediaType": "application/json",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "manifest"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlazePosted"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code too-large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unsupported-media-type"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "glaze-status-write": []
+          }
+        ],
+        "summary": "record a run: its shots.json and every picture it names, as CI's conformance job sends them. Refused when older than the stored run, so a re-run of an old workflow cannot roll the page back",
+        "x-irgo-winvm-commands": [
+          "glaze-check"
+        ],
+        "x-max-body": 16777216,
+        "x-scope": "glaze-status-write"
+      }
+    },
+    "/api/glaze-status/{target}/runs/{run}/{file}": {
+      "get": {
+        "operationId": "glaze-file",
+        "parameters": [
+          {
+            "description": "mac or windows",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "the run's id: the first 8 bytes of its manifest's SHA-256, 16 hex digits",
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "shots.json or a picture the manifest names",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png or application/json": {
+                "schema": {
+                  "contentMediaType": "image/png or application/json",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          }
+        },
+        "security": [],
+        "summary": "one stored file of a run, served immutable: a run's id is the hash of its manifest",
+        "x-scope": "none"
+      }
+    },
+    "/api/golden-list/{kind}": {
+      "get": {
+        "operationId": "golden-list",
+        "parameters": [
+          {
+            "description": "manifests or chunks",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "the previous page's cursor; empty for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoldenList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "golden-write": []
+          }
+        ],
+        "summary": "one page of the manifests' or the chunks' keys and sizes, for vm-golden-push -delete, which must find every chunk no manifest names. The write token, so a machine that only pulls cannot enumerate the bucket",
+        "x-irgo-winvm-commands": [
+          "vm-golden-push"
+        ],
+        "x-scope": "golden-write"
+      }
+    },
+    "/api/golden/{key}": {
+      "delete": {
+        "operationId": "golden-delete",
+        "parameters": [
+          {
+            "description": "golden/latest, golden/manifests/\u003csha256\u003e.json or golden/chunks/\u003csha256\u003e.zst; anything else is 404 (spans path segments: its slashes are not escaped)",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "golden-write": []
+          }
+        ],
+        "summary": "remove an object; nothing there is success too",
+        "x-irgo-winvm-commands": [
+          "vm-golden-push"
+        ],
+        "x-scope": "golden-write"
+      },
+      "get": {
+        "operationId": "golden-get",
+        "parameters": [
+          {
+            "description": "golden/latest, golden/manifests/\u003csha256\u003e.json or golden/chunks/\u003csha256\u003e.zst; anything else is 404 (spans path segments: its slashes are not escaped)",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "optional, one range: bytes=\u003cfirst\u003e-[\u003clast\u003e] or bytes=-\u003cn\u003e",
+            "in": "header",
+            "name": "Range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "X-Golden-Sha256": {
+                "description": "its SHA-256 as verified when it was stored",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Golden-Size": {
+                "description": "the whole object's size",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "206": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Partial Content",
+            "headers": {
+              "X-Golden-Sha256": {
+                "description": "its SHA-256 as verified when it was stored",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Golden-Size": {
+                "description": "the whole object's size",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code conflict"
+          },
+          "416": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code range-not-satisfiable"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "golden-read": []
+          }
+        ],
+        "summary": "the object, streamed from R2 without passing through Go; a single byte Range answers 206, which is how a pull resumes",
+        "x-irgo-winvm-commands": [
+          "vm-golden-pull",
+          "vm-golden-push",
+          "vm-create"
+        ],
+        "x-scope": "golden-read"
+      },
+      "head": {
+        "operationId": "golden-head",
+        "parameters": [
+          {
+            "description": "golden/latest, golden/manifests/\u003csha256\u003e.json or golden/chunks/\u003csha256\u003e.zst; anything else is 404 (spans path segments: its slashes are not escaped)",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "X-Golden-Sha256": {
+                "description": "its SHA-256 as verified when it was stored; absent for one stored another way",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Golden-Size": {
+                "description": "the whole object's size (Workers drops Content-Length from an answer to HEAD)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "code unauthorized"
+          },
+          "404": {
+            "description": "code not-found"
+          },
+          "500": {
+            "description": "code internal"
+          },
+          "502": {
+            "description": "code storage"
+          },
+          "503": {
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "golden-read": []
+          }
+        ],
+        "summary": "an object's size and SHA-256, without its bytes; 404 with no body when it is not there",
+        "x-irgo-winvm-commands": [
+          "vm-golden-pull",
+          "vm-golden-push",
+          "vm-create"
+        ],
+        "x-scope": "golden-read"
+      },
+      "put": {
+        "operationId": "golden-put",
+        "parameters": [
+          {
+            "description": "golden/latest, golden/manifests/\u003csha256\u003e.json or golden/chunks/\u003csha256\u003e.zst; anything else is 404 (spans path segments: its slashes are not escaped)",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "required: the body's SHA-256, 64 lower-case hex digits",
+            "in": "header",
+            "name": "X-Golden-Sha256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobInfo"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request or digest-mismatch"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-found"
+          },
+          "411": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code length-required"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code too-large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "golden-write": []
+          }
+        ],
+        "summary": "store an object, only if it hashes to X-Golden-Sha256 (R2 checks it as the stream arrives); a manifest's claim must also be its name",
+        "x-irgo-winvm-commands": [
+          "vm-golden-push"
+        ],
+        "x-max-body": 83886080,
+        "x-scope": "golden-write"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [],
+        "summary": "the Worker is up; reads no secret and no bucket",
+        "x-scope": "none"
+      }
+    },
+    "/api/ledger": {
+      "get": {
+        "operationId": "ledger-bare",
+        "responses": {
+          "302": {
+            "description": "Found",
+            "headers": {
+              "Location": {
+                "description": "/api/ledger/",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "a redirect to the page, after the token check like every other ledger path",
+        "x-scope": "ledger-read"
+      }
+    },
+    "/api/ledger/": {
+      "get": {
+        "operationId": "ledger-page",
+        "parameters": [
+          {
+            "description": "as for ledger-vms",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "as for ledger-vms",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "contentMediaType": "text/html",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "ledger-vms as a page for a person",
+        "x-scope": "ledger-read"
+      }
+    },
+    "/api/ledger/events": {
+      "get": {
+        "operationId": "ledger-events",
+        "parameters": [
+          {
+            "description": "RFC 3339, or a duration back from now such as 24h; default 7 days",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 to 1000; default 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match; so are vm, machine, host, type, op, repo and client, all optional",
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "vm",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "machine",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "host",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "op",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exact match",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerEvents"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "history, newest first",
+        "x-scope": "ledger-read"
+      },
+      "post": {
+        "operationId": "ledger-post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LedgerBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerPosted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code too-large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-write": []
+          }
+        ],
+        "summary": "store a batch of 1 to 25 events; an id already stored is a duplicate, not an error, so a batch can be sent again. Each event is checked on its own: a bad one is rejected and the rest stored",
+        "x-max-body": 262144,
+        "x-scope": "ledger-write"
+      }
+    },
+    "/api/ledger/vms": {
+      "get": {
+        "operationId": "ledger-vms",
+        "parameters": [
+          {
+            "description": "the window, as for ledger-events; default 14 days",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "open work older than this, with no expiry, is stale; default 3h",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code bad-request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code internal"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code storage"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "code not-configured"
+          }
+        },
+        "security": [
+          {
+            "ledger-read": []
+          }
+        ],
+        "summary": "now: machines, VMs (in-use, stale, idle, deleted), open work and recent events",
+        "x-scope": "ledger-read"
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [],
+        "summary": "this API as an OpenAPI 3.1 document, generated from the same table as the Worker's routing",
+        "x-scope": "none"
+      }
+    }
+  }
+}

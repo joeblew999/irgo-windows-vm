@@ -5,10 +5,8 @@ package main
 // local lock files stay the authority; this is the record that survives a
 // machine and can be read from anywhere.
 //
-//	POST /api/ledger/events   a batch of events                       LEDGER_TOKEN
-//	GET  /api/ledger/events   history, filtered, newest first        LEDGER_READ_TOKEN
-//	GET  /api/ledger/vms      now: machines, VMs, open work, stale    LEDGER_READ_TOKEN
-//	GET  /api/ledger/         the same, as a page                     LEDGER_READ_TOKEN
+// The routes, their tokens and limits are the ledger-* entries of
+// wire.Routes, and the types are wire's Ledger*.
 //
 // Stored in D1 (migrations/0001_ledger.sql), reached as a database/sql DB: on
 // Workers through workers-go's d1 driver, on the host through SQLite, so the
@@ -17,72 +15,30 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
+// Limits beyond wire's (wire.LedgerMaxBatch and the rest).
 const (
-	varLedgerToken     = "LEDGER_TOKEN"      // secret: who may post events
-	varLedgerReadToken = "LEDGER_READ_TOKEN" // secret: who may read them
-)
-
-// Limits. A batch is at most maxBatch events because each is one statement,
-// and a Worker on the Free plan may make 50 D1 queries per invocation.
-const (
-	maxBatch      = 25
-	maxBodyBytes  = 256 << 10
-	maxField      = 200
-	maxDetail     = 500
 	defaultLimit  = 200
-	maxLimit      = 1000
 	defaultWindow = 14 * 24 * time.Hour // how far back /vms looks
 	defaultStale  = 3 * time.Hour       // open work older than this, with no expiry, is stale
 	maxViewRows   = 5000
 )
 
-// The event types. An op pairs the ones that open work with the ones that
-// close it: start with end, lease-acquire with lease-release; a reap closes
-// the op it names too.
-var eventTypes = map[string]bool{
-	"start": true, "end": true,
-	"lease-acquire": true, "lease-release": true,
-	"vm-create": true, "vm-delete": true, "reap": true,
-	"capacity": true,
-}
-
-var opens = map[string]bool{"start": true, "lease-acquire": true}
-var closes = map[string]bool{"end": true, "lease-release": true, "reap": true}
-
-// Event is one row, as posted and as read back. The client's definition is
-// internal/ledger.Event in the tool's module; the JSON names are the contract.
-type Event struct {
-	ID         string `json:"id"`
-	TS         int64  `json:"ts"`
-	Received   int64  `json:"received,omitempty"`
-	Type       string `json:"type"`
-	Op         string `json:"op,omitempty"`
-	Machine    string `json:"machine"`
-	Host       string `json:"host,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Client     string `json:"client,omitempty"`
-	Repo       string `json:"repo,omitempty"`
-	VM         string `json:"vm,omitempty"`
-	Command    string `json:"command,omitempty"`
-	Exit       *int64 `json:"exit,omitempty"`
-	DurationMS *int64 `json:"duration_ms,omitempty"`
-	Expires    *int64 `json:"expires,omitempty"`
-	Version    string `json:"version,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-}
+// Event is one row, as posted and as read back; the client is internal/ledger.
+type Event = wire.LedgerEvent
 
 const eventColumns = "id, ts, received, type, op, machine, host, owner, client, repo, vm, command, exit, duration_ms, expires, version, detail"
 
-func (e *Event) scan(rows *sql.Rows) error {
+func scanEvent(e *Event, rows *sql.Rows) error {
 	var exit, dur, exp sql.NullInt64
 	err := rows.Scan(&e.ID, &e.TS, &e.Received, &e.Type, &e.Op, &e.Machine, &e.Host, &e.Owner,
 		&e.Client, &e.Repo, &e.VM, &e.Command, &exit, &dur, &exp, &e.Version, &e.Detail)
@@ -99,18 +55,18 @@ func nullable(n sql.NullInt64) *int64 {
 
 // isID is an event or op id: 8 to 64 of [A-Za-z0-9_-].
 func isID(s string) bool {
-	return len(s) >= 8 && len(s) <= 64 && allBytes(s, func(c byte) bool {
+	return len(s) >= 8 && len(s) <= 64 && wire.AllBytes(s, func(c byte) bool {
 		return 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '_' || c == '-'
 	})
 }
 
 // validate says what is wrong with e, or "" when it may be stored. The
 // client redacts; the Worker only bounds what it keeps.
-func (e *Event) validate(now time.Time) string {
+func validate(e *Event, now time.Time) string {
 	switch {
 	case !isID(e.ID):
 		return "id must be 8-64 of [A-Za-z0-9_-]"
-	case !eventTypes[e.Type]:
+	case !e.Type.Known():
 		return fmt.Sprintf("unknown type %q", e.Type)
 	case e.Op != "" && !isID(e.Op):
 		return "op must be 8-64 of [A-Za-z0-9_-]"
@@ -118,74 +74,40 @@ func (e *Event) validate(now time.Time) string {
 		return "machine must be 1-64 bytes"
 	case e.TS < time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli() || e.TS > now.Add(24*time.Hour).UnixMilli():
 		return "ts is not a plausible time in Unix milliseconds"
-	case len(e.Detail) > maxDetail:
-		return fmt.Sprintf("detail is over %d bytes", maxDetail)
+	case len(e.Detail) > wire.LedgerMaxDetail:
+		return fmt.Sprintf("detail is over %d bytes", wire.LedgerMaxDetail)
 	}
 	for _, f := range []string{e.Host, e.Owner, e.Client, e.Repo, e.VM, e.Command, e.Version} {
-		if len(f) > maxField {
-			return fmt.Sprintf("a field is over %d bytes", maxField)
+		if len(f) > wire.LedgerMaxField {
+			return fmt.Sprintf("a field is over %d bytes", wire.LedgerMaxField)
 		}
 	}
 	return ""
 }
 
-func (env Env) ledger(w http.ResponseWriter, r *http.Request, rest string) {
-	switch {
-	case r.Method == http.MethodPost && rest == "events":
-		if env.authorized(w, r, varLedgerToken) {
-			env.ledgerPost(w, r)
-		}
-	case r.Method == http.MethodGet && rest == "events":
-		if env.authorized(w, r, varLedgerReadToken) {
-			env.ledgerEvents(w, r)
-		}
-	case r.Method == http.MethodGet && rest == "vms":
-		if env.authorized(w, r, varLedgerReadToken) {
-			env.ledgerVMs(w, r)
-		}
-	case r.Method == http.MethodGet && rest == "":
-		if env.authorizedPage(w, r, varLedgerReadToken) {
-			env.ledgerPage(w, r)
-		}
-	default:
-		// The token is checked first, so a caller without one learns nothing
-		// about which paths exist.
-		if env.authorized(w, r, varLedgerReadToken) {
-			fail(w, http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)
-		}
-	}
-}
-
-type rejected struct {
-	ID    string `json:"id"`
-	Error string `json:"error"`
-}
-
-func (env Env) ledgerPost(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Events []Event `json:"events"`
-	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+func (env Env) ledgerPost(w http.ResponseWriter, r *http.Request, _ []string) {
+	var in wire.LedgerBatch
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, wire.LedgerMaxBody))
 	if err := dec.Decode(&in); err != nil {
-		fail(w, http.StatusBadRequest, "the body is not {\"events\": [...]}: %v", err)
+		fail(w, wire.CodeBadRequest, "the body is not {\"events\": [...]}: %v", err)
 		return
 	}
-	if len(in.Events) == 0 || len(in.Events) > maxBatch {
-		fail(w, http.StatusBadRequest, "send 1 to %d events, not %d", maxBatch, len(in.Events))
+	if len(in.Events) == 0 || len(in.Events) > wire.LedgerMaxBatch {
+		fail(w, wire.CodeBadRequest, "send 1 to %d events, not %d", wire.LedgerMaxBatch, len(in.Events))
 		return
 	}
 	db, err := env.Ledger()
 	if err != nil {
-		fail(w, http.StatusInternalServerError, "the LEDGER database: %v", err)
+		fail(w, wire.CodeInternal, "the LEDGER database: %v", err)
 		return
 	}
 	now := env.Now()
 	accepted, dup := 0, 0
-	rej := []rejected{}
+	rej := []wire.LedgerRejected{}
 	for i := range in.Events {
 		e := &in.Events[i]
-		if why := e.validate(now); why != "" {
-			rej = append(rej, rejected{e.ID, why})
+		if why := validate(e, now); why != "" {
+			rej = append(rej, wire.LedgerRejected{ID: e.ID, Error: why})
 			continue
 		}
 		res, err := db.Exec("INSERT OR IGNORE INTO events ("+eventColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -195,7 +117,7 @@ func (env Env) ledgerPost(w http.ResponseWriter, r *http.Request) {
 			// Not the event's fault: answer 502 so the client keeps the batch
 			// and sends it again. What was stored stays stored; the ids make
 			// the retry harmless.
-			fail(w, http.StatusBadGateway, "storing %s: %v", e.ID, err)
+			fail(w, wire.CodeStorage, "storing %s: %v", e.ID, err)
 			return
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
@@ -204,7 +126,7 @@ func (env Env) ledgerPost(w http.ResponseWriter, r *http.Request) {
 			accepted++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "duplicates": dup, "rejected": rej})
+	writeJSON(w, http.StatusOK, wire.LedgerPosted{Accepted: accepted, Duplicates: dup, Rejected: rej})
 }
 
 // nullArg is a nullable column's argument. A nil *int64 must reach the driver
@@ -231,17 +153,17 @@ func since(q string, now time.Time, def time.Duration) (time.Time, error) {
 	return t, nil
 }
 
-func (env Env) ledgerEvents(w http.ResponseWriter, r *http.Request) {
+func (env Env) ledgerEvents(w http.ResponseWriter, r *http.Request, _ []string) {
 	q := r.URL.Query()
 	from, err := since(q.Get("since"), env.Now(), 7*24*time.Hour)
 	if err != nil {
-		fail(w, http.StatusBadRequest, "%v", err)
+		fail(w, wire.CodeBadRequest, "%v", err)
 		return
 	}
 	limit := defaultLimit
 	if s := q.Get("limit"); s != "" {
-		if limit, err = strconv.Atoi(s); err != nil || limit < 1 || limit > maxLimit {
-			fail(w, http.StatusBadRequest, "limit must be 1 to %d", maxLimit)
+		if limit, err = strconv.Atoi(s); err != nil || limit < 1 || limit > wire.LedgerMaxLimit {
+			fail(w, wire.CodeBadRequest, "limit must be 1 to %d", wire.LedgerMaxLimit)
 			return
 		}
 	}
@@ -254,17 +176,17 @@ func (env Env) ledgerEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	db, err := env.Ledger()
 	if err != nil {
-		fail(w, http.StatusInternalServerError, "the LEDGER database: %v", err)
+		fail(w, wire.CodeInternal, "the LEDGER database: %v", err)
 		return
 	}
 	evs, err := queryEvents(db, "SELECT "+eventColumns+" FROM events WHERE "+strings.Join(where, " AND ")+
 		" ORDER BY ts DESC, id LIMIT "+strconv.Itoa(limit), args...)
 	if err != nil {
-		fail(w, http.StatusBadGateway, "reading events: %v", err)
+		fail(w, wire.CodeStorage, "reading events: %v", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"since": from.UTC(), "events": evs})
+	writeJSON(w, http.StatusOK, wire.LedgerEvents{Since: from.UTC(), Events: evs})
 }
 
 func queryEvents(db *sql.DB, query string, args ...any) ([]Event, error) {
@@ -276,7 +198,7 @@ func queryEvents(db *sql.DB, query string, args ...any) ([]Event, error) {
 	out := []Event{}
 	for rows.Next() {
 		var e Event
-		if err := e.scan(rows); err != nil {
+		if err := scanEvent(&e, rows); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -286,114 +208,40 @@ func queryEvents(db *sql.DB, query string, args ...any) ([]Event, error) {
 
 // The view: what is true now, worked out from the events in the window.
 
-type machineView struct {
-	Machine     string `json:"machine"`
-	Host        string `json:"host"`
-	LastSeen    int64  `json:"last_seen"`
-	LastOwner   string `json:"last_owner"`
-	LastCommand string `json:"last_command"`
-	Version     string `json:"version"`
+type (
+	machineView = wire.LedgerMachine
+	vmView      = wire.LedgerVM
+	openView    = wire.LedgerOpen
+	ledgerView  = wire.LedgerView
+)
 
-	// Capacity is the machine's newest capacity snapshot, when it has sent
-	// one; CapacityAt is when, and CapacityErr says a snapshot was sent that
-	// could not be read (cannot tell, not zero).
-	Capacity    *capacityView `json:"capacity,omitempty"`
-	CapacityAt  int64         `json:"capacity_at,omitempty"`
-	CapacityErr string        `json:"capacity_error,omitempty"`
-}
-
-// capacityView is a "capacity" event's detail: one machine's disk, memory
-// and VM counts, written by the tool's cmd/irgo-winvm/capacity.go
-// (capacitySnapshot). The JSON names are the contract.
-type capacityView struct {
-	DiskFree      int64  `json:"disk_free"`
-	DiskTotal     int64  `json:"disk_total"`
-	Memory        int64  `json:"mem"`
-	RunningMemory int64  `json:"mem_running"`
-	VMs           int    `json:"vms"`
-	Running       int    `json:"running"`
-	Stale         int    `json:"stale"`
-	Promised      int64  `json:"promised"`
-	Tool          int64  `json:"tool"`
-	Clone         string `json:"clone"`
-	MoreClones    int    `json:"more_clones"`
-	MoreRunning   int    `json:"more_running"`
-}
-
-// readCapacity parses a capacity event's detail. A snapshot without a disk
-// size or a verdict is not one this code understands.
-func readCapacity(detail string) (*capacityView, error) {
-	var c capacityView
-	if err := json.Unmarshal([]byte(detail), &c); err != nil {
-		return nil, err
-	}
-	if c.DiskTotal <= 0 || c.Clone == "" {
-		return nil, errors.New("no disk size or verdict in it")
-	}
-	return &c, nil
-}
-
-type vmView struct {
-	Machine      string `json:"machine"`
-	Host         string `json:"host"`
-	VM           string `json:"vm"`
-	State        string `json:"state"` // in-use, stale, idle or deleted
-	Owner        string `json:"owner"` // of the last event
-	Client       string `json:"client"`
-	Repo         string `json:"repo"`
-	LastCommand  string `json:"last_command"`
-	LastType     string `json:"last_type"`
-	LastActivity int64  `json:"last_activity"`
-	Created      int64  `json:"created,omitempty"`
-	Deleted      int64  `json:"deleted,omitempty"`
-	Open         int    `json:"open"`
-}
-
-type openView struct {
-	Event
-	AgeSeconds int64  `json:"age_s"`
-	Stale      bool   `json:"stale"`
-	Why        string `json:"why,omitempty"`
-}
-
-type ledgerView struct {
-	Now        int64         `json:"now"`
-	Since      int64         `json:"since"`
-	StaleAfter string        `json:"stale_after"`
-	Truncated  bool          `json:"truncated"`
-	Machines   []machineView `json:"machines"`
-	VMs        []vmView      `json:"vms"`
-	Open       []openView    `json:"open"`
-	Recent     []Event       `json:"recent"`
-}
-
-func (env Env) view(r *http.Request) (ledgerView, int, error) {
+func (env Env) view(r *http.Request) (ledgerView, wire.Code, error) {
 	q := r.URL.Query()
 	now := env.Now()
 	from, err := since(q.Get("since"), now, defaultWindow)
 	if err != nil {
-		return ledgerView{}, http.StatusBadRequest, err
+		return ledgerView{}, wire.CodeBadRequest, err
 	}
 	stale := defaultStale
 	if s := q.Get("stale"); s != "" {
 		if stale, err = time.ParseDuration(s); err != nil || stale <= 0 {
-			return ledgerView{}, http.StatusBadRequest, fmt.Errorf("stale: %q is not a positive duration such as 90m", s)
+			return ledgerView{}, wire.CodeBadRequest, fmt.Errorf("stale: %q is not a positive duration such as 90m", s)
 		}
 	}
 	db, err := env.Ledger()
 	if err != nil {
-		return ledgerView{}, http.StatusInternalServerError, fmt.Errorf("the LEDGER database: %v", err)
+		return ledgerView{}, wire.CodeInternal, fmt.Errorf("the LEDGER database: %v", err)
 	}
 	evs, err := queryEvents(db, "SELECT "+eventColumns+" FROM events WHERE ts >= ? ORDER BY ts, id LIMIT "+strconv.Itoa(maxViewRows+1), from.UnixMilli())
 	if err != nil {
-		return ledgerView{}, http.StatusBadGateway, fmt.Errorf("reading events: %v", err)
+		return ledgerView{}, wire.CodeStorage, fmt.Errorf("reading events: %v", err)
 	}
 	v := buildView(evs, now, stale)
 	v.Since = from.UnixMilli()
 	if len(evs) > maxViewRows {
 		v.Truncated = true
 	}
-	return v, http.StatusOK, nil
+	return v, "", nil
 }
 
 // buildView works out the current state from events in time order.
@@ -411,11 +259,11 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 	// app-create refused in 0 ms showed as in use).
 	// And within one millisecond, opening before anything else before
 	// closing, so the last event of a VM is its end, not its start.
-	rank := func(t string) int {
+	rank := func(t wire.LedgerType) int {
 		switch {
-		case opens[t]:
+		case t.Opens():
 			return 0
-		case closes[t]:
+		case t.Closes():
 			return 2
 		}
 		return 1
@@ -428,7 +276,7 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 	})
 	closed := map[string]bool{}
 	for _, e := range evs {
-		if e.Op != "" && closes[e.Type] {
+		if e.Op != "" && e.Type.Closes() {
 			closed[e.Op] = true
 		}
 	}
@@ -445,15 +293,15 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		setIf(&m.LastOwner, e.Owner)
 		setIf(&m.Version, e.Version)
 		setIf(&m.LastCommand, e.Command)
-		if e.Type == "capacity" {
+		if e.Type == wire.LedgerCapacity {
 			// Events are in time order, so the last one read is the newest.
-			c, err := readCapacity(e.Detail)
+			c, err := wire.ParseLedgerCapacity(e.Detail)
 			m.Capacity, m.CapacityAt, m.CapacityErr = c, e.TS, ""
 			if err != nil {
 				m.CapacityErr = "unreadable snapshot: " + err.Error()
 			}
 		}
-		if e.Op != "" && opens[e.Type] && !closed[e.Op] {
+		if e.Op != "" && e.Type.Opens() && !closed[e.Op] {
 			open[e.Op] = e
 		}
 		if e.VM == "" {
@@ -479,7 +327,7 @@ func buildView(evs []Event, now time.Time, stale time.Duration) ledgerView {
 		}
 	}
 	for _, e := range open {
-		o := openView{Event: e, AgeSeconds: (now.UnixMilli() - e.TS) / 1000}
+		o := openView{LedgerEvent: e, AgeSeconds: (now.UnixMilli() - e.TS) / 1000}
 		switch {
 		case e.Expires != nil && *e.Expires < now.UnixMilli():
 			o.Stale, o.Why = true, "lease expired, never released"
@@ -529,7 +377,7 @@ func setIf(dst *string, v string) {
 	}
 }
 
-func (env Env) ledgerVMs(w http.ResponseWriter, r *http.Request) {
+func (env Env) ledgerVMs(w http.ResponseWriter, r *http.Request, _ []string) {
 	v, code, err := env.view(r)
 	if err != nil {
 		fail(w, code, "%v", err)

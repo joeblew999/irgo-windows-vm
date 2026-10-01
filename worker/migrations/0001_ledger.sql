@@ -1,5 +1,5 @@
 -- The ledger: which agent used which VM, on which machine, doing what.
--- docs/DEVELOPMENT.md, "The ledger". Applied to D1 with
+-- docs/WORKER.md, "The ledger". Applied to D1 with
 -- `wrangler d1 migrations apply irgo-ledger --remote`, and to the in-memory
 -- SQLite of the host build and the tests (worker/platform_other.go), so both
 -- run exactly this file.

@@ -278,7 +278,7 @@ func collapse(html string) string {
 // page get the binary sentence fails it on the other five.
 func TestFooterNamesTheRealSource(t *testing.T) {
 	out := buildToTemp(t)
-	const capturedClaim = "Captured from the compiled binary at build time"
+	const capturedClaim = "Built from the Go code at build time"
 
 	for _, p := range pages {
 		t.Run(p.Out, func(t *testing.T) {

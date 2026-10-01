@@ -126,10 +126,10 @@ changelog:
       regexp: '^feat(\(.+\))?!?:'
       order: 0
     - title: Fixes
-      regexp: '^fix(\(.+\))?!?:'
+      regexp: '^(?i:fix)(\(.+\))?!?[: ]'
       order: 1
     - title: The tool
-      regexp: '^(vm-|iso-|app|doctor|mcp|status|glaze-check|golden|utmvm|cmd|internal|RunInstall|registerBundle|autounattend|desktop reset|first run|Split|join)'
+      regexp: '^(vm-|iso-|app|doctor|mcp|status|glaze-check|golden|utmvm|cmd|internal|RunInstall|registerBundle|autounattend|desktop reset|Desktop reset|first run|Split|join|Push|The server|Mutation lock|RestartUTM|Windows keys|file-share|utm-|lock.go)'
       order: 2
     - title: Documentation
       regexp: '^(docs(\(.+\))?:|README|RESULTS|ROADMAP|CONTRIBUTING|THREAT-MODEL|DEVELOPMENT|UPSTREAM|site)'

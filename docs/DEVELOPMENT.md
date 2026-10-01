@@ -69,8 +69,9 @@ Each top-level directory has one job:
 cmd/irgo-winvm/   the CLI: flags, handlers, exit codes. The one thing users install
 internal/         the CLI's packages (see Architecture). internal/ so nothing outside can import them
 examples/         conformance, the glaze and native test suite (mise run glaze:mac /
-                  glaze:windows), drive, which its interaction tests click and
-                  type with, and glaze-all, the demo you drive by hand
+                  glaze:windows), vmconformance, the VM's (vm-check), shots, how
+                  both take pictures, drive, which the interaction tests click
+                  and type with, and glaze-all, the demo you drive by hand
 site/             renders docs/ into the website
 worker/           the Cloudflare Worker: the site, live glaze status, golden-image links
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
@@ -134,7 +135,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
-| `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
+| `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create`, record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
@@ -194,7 +195,7 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `vm-create -install` (about 45 minutes), `iso-create -fetch` and
 `vm-golden-create`, `vm-golden-push` and `vm-golden-pull` (always) start the work and return a job id instead of
 blocking on a connection that would time out.
-Over MCP, `glaze-check -windows` is a job too. The work outlives the client that
+Over MCP, `glaze-check -windows` and `vm-check` are jobs too. The work outlives the client that
 started it; `status` reports what is running, what finished and how long it
 took. Whether a job is alive is answered by asking the operating system, not by
 reading a file that says so. Job records live in `jobs/` under the runtime data
@@ -428,8 +429,10 @@ Nothing a release user runs assumes a checkout: messages link
 [the site](https://joeblew999.github.io/irgo-windows-vm/) (`utmvm.SiteURL`),
 never a `docs/` path, and the two commands that need the source say so.
 
-Two work only **in a checkout of this repository**, because they build and read
-`examples/`:
+Four work only **in a checkout of this repository**, because they build and
+read `examples/`: `glaze-check` and `glaze-status` below, and `vm-check` and
+`vm-status`, which do the same for the VM ([the VM conformance
+suite](#the-vm-conformance-suite)).
 
 - **`glaze-check`** builds [the conformance suite](#the-conformance-suite) into
   one test binary and runs it, natively on this machine (macOS, or Windows —
@@ -447,7 +450,7 @@ Two work only **in a checkout of this repository**, because they build and read
 - **`glaze-status`** prints the recorded file and says, per section, whether it
   still describes the tree: current, stale (and why), or cannot tell.
 
-Outside a checkout both exit 2 and say where they looked. They ship in the
+Outside a checkout they exit 2 and say where they looked. They ship in the
 binary anyway because an MCP tool can only be a command, and the agent most
 likely to ask "does glaze work on Windows?" is the one `.mcp.json` starts in
 this repository; the reasoning is in `internal/glazecheck/doc.go`. glaze and
@@ -678,9 +681,15 @@ after each):
 4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
    (the install, answer-file and guest-tools CDs are dropped);
 5. clone the golden image once more, boot that clone until its agent answers,
-   and delete it, so an image that does not boot is never reported made;
+   run [the VM conformance suite](#the-vm-conformance-suite) on it (`-check`,
+   on by default; outside a checkout it records that it could not), and
+   delete it, so an image that does not boot is never reported made. An image
+   whose clone fails the suite is unregistered again, so nothing clones it;
+   the clone is left to look at, and the sealed source stays, so making the
+   image again is a clone of seconds;
 6. write `golden.json`: source, Windows build, WebView2 version, allocated and
-   apparent size, seal and boot times, tool version. `doctor` reports it.
+   apparent size, seal and boot times, the suite's verdict (`vm_check`), tool
+   version. `doctor` reports it.
 
 It refuses `irgo-win11` without `-force`, and refuses when it cannot find out
 which VM it was given. The source is left sealed and stopped, an ordinary VM
@@ -1142,6 +1151,55 @@ img, err := s.Screenshot()               // native/screen, even behind other win
 `examples/glaze-all` is the demo: every capability is a button, and
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
 not a test and nothing reads its output.
+
+## The VM conformance suite
+
+`examples/vmconformance` asserts every property of the Windows guest this
+project relies on, one named test each, with a failure message that says what
+is wrong and what sets it. `irgo-winvm vm-check [-vm <name>]` runs it and
+records the verdict in [VM-STATUS.md](VM-STATUS.md), one section per VM, and
+`irgo-winvm vm-status` reads it back. It is the glaze suite's machinery
+pointed at the VM: the same runner (`glazecheck.Check` with `glazecheck.VM`),
+the same verdicts (`YES`, `KNOWN ISSUES ONLY`, `NO`, `CANNOT TELL`,
+`UNEXPECTED PASS`; `glazecheck.KnownVM` is the known list, empty), the same
+log and test2json events in the log directory, the same pictures.
+
+**The checks only read.** Nothing in the suite or around it changes the VM
+beyond pushing and running the test binary, so it is safe on `irgo-win11`.
+The desktop is checked, not reset: `desktop-reset.ps1 -CheckOnly` is the
+reset's own detection, closing nothing, failing on anything but the shell.
+
+**It runs in two parts**, because Windows splits what can be seen:
+
+| part | how | tests |
+|---|---|---|
+| host | before and after, on the Mac | `Host/AgentAnswers` (the guest agent answers; a running VM that does not is a failure, then recovered), `Host/DesktopClean` (nothing left open, and the whole VM photographed with `vm-screen`) |
+| as SYSTEM | `app-create`, the guest agent, `-test.skip=^TestSession` | `TestWindowsBuild` (Windows 11 ARM64; recorded), `TestDevAccount` (exists, enabled, administrator, password never expires, `net accounts` unlimited), `TestAutoLogon` (configured with logons to spare, dev logged in), `TestWindowsUpdatePolicy` (no auto-restart, notify only, notifications and restart notifications off), `TestWindowsKeysDisabled` (both keys mapped to nothing, and in effect since boot), `TestOneDriveOff`, `TestDeviceEncryptionOff` (`PreventDeviceEncryption`, C: fully decrypted), `TestHibernationOff`, `TestFileShare` (irgo-drop for dev only, the rule TCP 445 from `LocalSubnet` only, the Restrictive rules off, the Server service running), `TestWebView2` (registered, folder there; version recorded), `TestNeverSleeps` (sleep and display timeout on AC), `TestUnattendComplete`, `TestFreeDiskSpace` (10 GiB, a choice; recorded) |
+| dev's session | `app-create -gui`, `-test.run=^TestSession` | `TestSessionDesktop` (dev's interactive session, the shell in it; the desktop photographed), `TestSessionNotificationsOff` (dev's toast policy, OneDrive not running), `TestSessionWebView2Renders` (a glaze window whose page runs and names its WebView2 version; photographed), `TestSessionEvidence/*` (each setting as dev can read it, photographed) |
+
+BitLocker's status, the share and the firewall need an administrator's token,
+which the session's scheduled task does not have, so those are SYSTEM's; a
+desktop, dev's own hive and a window are the session's. Each test skips
+outside its part and says where it belongs.
+
+- **What a check read is kept** (`evidence: ...` lines, a column of the
+  table), so a passing row says what it saw; facts about the VM (`fact:
+  windows=...`) go at the top of its section.
+- **Pictures, as glaze's**, through `examples/shots`: every session test with
+  something to see writes `vm/<Test>.png` under `-vmconformance.shots`,
+  pulled from `C:\Users\Public\irgo-vm-check-shots` into
+  `docs/screens/vm-conformance/<vm>/`, with a Screenshots table, a column per
+  VM. A setting is shown by running the commands anyone would type (`reg
+  query`, `powercfg`, `netsh`) as dev and drawing their output in a glaze
+  window like a console; a real console from the suite (`conhost.exe`) came up
+  in about half the attempts. `TestSessionEvidence` fails only when it cannot
+  show them; whether the setting is right is the SYSTEM test's verdict.
+- **Freshness** can only say whether the checks changed since the record
+  (`examples/vmconformance` against its commit) and how old it is; the VM
+  itself changes under any record.
+- **Where it is used:** `vm-golden-create` runs it on the verification clone
+  ([the golden image](#the-golden-image)); `vm-repair -check` runs it before
+  and after and names what the repair fixed.
 
 ## Desktop hygiene
 

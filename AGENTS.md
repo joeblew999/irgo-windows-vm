@@ -13,6 +13,7 @@ exists before adding anything.
 | [docs/UPSTREAM.md](docs/UPSTREAM.md) | bugs found in glaze, native and UTM, and their status |
 | [docs/RESULTS.md](docs/RESULTS.md) | what has been measured, dated |
 | [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | the last recorded glaze run on the Mac and on Windows (generated) |
+| [docs/VM-STATUS.md](docs/VM-STATUS.md) | the last recorded VM conformance check of each VM, with pictures (generated) |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | what is next |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | what the HTTP transport exposes |
 

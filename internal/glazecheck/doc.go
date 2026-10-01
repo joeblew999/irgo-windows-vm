@@ -1,4 +1,8 @@
-// Package glazecheck answers "does glaze work?" and writes the answer down.
+// Package glazecheck answers "does glaze work?" and writes the answer down —
+// and, with the same runner, "does this VM have what the project relies
+// on?" (the VM suite, vm.go: examples/vmconformance, docs/VM-STATUS.md). What
+// differs between the two is a Suite value; everything below describes both,
+// in glaze's words.
 //
 // The question is examples/conformance, a go test suite. `glaze-check`
 // compiles it with `go test -c`, runs the binary with -test.v=test2json — on

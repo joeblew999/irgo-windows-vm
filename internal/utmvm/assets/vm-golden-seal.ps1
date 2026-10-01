@@ -62,7 +62,10 @@ switch ($Step) {
     # The same value autounattend.xml sets in specialize, for a VM installed
     # before it did: without it Windows may encrypt again on the next boot.
     $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker'
-    New-Item -Path $key -Force | Out-Null
+    # Not New-Item -Force: on this key, which exists and has subkeys, it fails
+    # with "Cannot delete a subkey tree because the subkey does not exist"
+    # (measured on 26100.4349).
+    if (-not (Test-Path $key)) { New-Item -Path $key | Out-Null }
     Set-ItemProperty -Path $key -Name PreventDeviceEncryption -Value 1 -Type DWord
     $v = Get-SystemVolume
     if (-not $v) { 'bitlocker: not available, nothing to decrypt'; break }

@@ -55,6 +55,8 @@ When something is wrong:
                   WebView2 registration; -reboot restarts it afterwards
      doctor       what is installed, what is missing, and where this run
                   wrote its log and screenshots
+     report       all of that and the last errors, redacted, as markdown
+                  to paste into an issue
 
 Your .exe is anything you built with GOOS=windows GOARCH=arm64. The programs
 in examples/ are examples of that, and what this repository

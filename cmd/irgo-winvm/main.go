@@ -49,10 +49,15 @@ func run(args []string) error {
 // state on disk takes its mutation locks after its flags parse, so -h is
 // answered even while another mutation holds them; a second mutation is
 // refused, never queued.
-func runTool(name string, args []string) error {
+func runTool(name string, args []string) (err error) {
 	c, ok := find(name)
 	if !ok {
 		return fmt.Errorf("%w: no such command %q", errUsage, name)
+	}
+	if c.OverMCP && recordExits {
+		// Recorded for `report`, which names the last commands and how they
+		// ended. Before this, an error reached stderr and nowhere else.
+		defer func() { logExit(utmvm.Logger(), name, args, err) }()
 	}
 	v, rest, err := c.parse(args)
 	if err != nil {
@@ -155,6 +160,7 @@ func init() {
 		"vm-screen":    {flags: vmScreenFlags, run: runVMScreen},
 		"vm-repair":    {flags: vmRepairFlags, run: runVMRepair},
 		"doctor":       {flags: doctorFlags, run: runDoctor},
+		"report":       {flags: reportFlags, about: reportAbout, run: runReport},
 		"status":       {flags: statusFlags, about: statusAbout, run: runStatus},
 		"glaze-check":  {flags: glazeCheckFlags, run: runGlazeCheck},
 		"glaze-status": {run: runGlazeStatus},

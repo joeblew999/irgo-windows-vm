@@ -11,8 +11,11 @@ import (
 )
 
 // TestMain keeps every test in this package off the network: doctor, run by
-// several of them, would otherwise ask GitHub for UTM's releases.
+// several of them, would otherwise ask GitHub for UTM's releases. It also
+// keeps their exits out of the log, where report would list them as the
+// user's last commands.
 func TestMain(m *testing.M) {
+	recordExits = false
 	checkUTMReleases = func() utmvm.UTMReleaseCheck {
 		return utmvm.UTMReleaseCheck{Err: "network disabled in tests"}
 	}

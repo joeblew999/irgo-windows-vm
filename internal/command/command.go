@@ -92,6 +92,8 @@ var All = []Command{
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
 	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
+	// report gathers what an issue needs, redacted, for pasting into one.
+	{Name: "report", Summary: "a redacted, paste-ready diagnostic block for an issue: versions, doctor, the last errors, glaze", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
 	// glaze-check and glaze-status work only in a checkout of this repository.
 	// glaze-check takes no lock here: the Mac run touches no VM, and a lock

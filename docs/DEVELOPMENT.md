@@ -391,9 +391,9 @@ Once one VM has been installed, **`vm-golden-create`** (undo
 **`vm-golden-delete`**) seals it into a [golden image](#the-golden-image), and
 `vm-create` then clones that instead of installing.
 
-Three commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
-reports what is installed and where, and **`status`** lists long-running
-[jobs](#jobs). `doctor` also names the installed UTM, the latest stable and
+Four commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
+reports what is installed and where, **`status`** lists long-running
+[jobs](#jobs), and **`report`** prints the redacted block an issue needs. `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
 such, and offline it says "cannot tell" rather than failing.
@@ -426,6 +426,20 @@ Over MCP, `glaze-check -windows` is a job: call `status`, then `glaze-status`.
 
 Your `.exe` is anything built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`.
 That is the whole contract.
+
+**`irgo-winvm report`** gathers, as one markdown block: the version, macOS and
+hardware, free disk, UTM, the golden image, the last five commands and how
+they exited, the log around the last error, glaze-status's verdict lines, and
+`doctor -json`. Every command an agent can run logs its exit (`msg=exit`, with
+the code, its outcome name, its arguments cut to 80 characters, and the error
+at level ERROR) through `logExit` in `runTool`, so a failure reached over MCP
+is recorded as well as one on a terminal; before this, an error reached stderr
+and nothing else. Redaction is in `cmd/irgo-winvm/report.go`: values of
+credential-named and `IRGO_` environment variables and of `.env.r2`, then
+credential-shaped strings (GitHub tokens, bearer headers, AWS key ids, signed
+URL parameters, emails), then home directories. It does not redact hashes or
+module versions, which triage needs. `report_test.go` plants a secret down each
+road and checks none comes out.
 
 Every command that takes flags documents them with `-h`, and `irgo-winvm help`
 explains the sequence. No document lists flags, so none can go stale: the

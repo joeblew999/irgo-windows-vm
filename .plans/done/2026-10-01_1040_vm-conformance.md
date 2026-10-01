@@ -40,3 +40,7 @@ Live on irgo-win11 (read-only) and a disposable clone; glaze suite unchanged.
 - The disposable-clone run: Z's capacity guard refuses vc1 while irgo-win11 runs on this
   16 GiB Mac (8 + 8 leaves 0 of the 4 GiB macOS reserve), and -overcommit was not allowed.
   Run `vm-create -vm vc1`, `vm-check -vm vc1`, `vm-delete -vm vc1 -force` with irgo-win11 stopped.
+
+## Closed — 1 Oct 2026
+
+Done: VM suite (44 tests) with per-test screenshots, vm-check/vm-status, golden-create gate, VM status page. irgo-win11 re-check after decryption → follow-ups.

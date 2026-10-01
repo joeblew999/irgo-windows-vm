@@ -81,3 +81,7 @@ Left:
   falls back to `go install` at its own ref (about 85 s on a hosted runner).
 - `serve` calls the clone and run code directly, so no ledger event names a remote job yet.
 - The admin token only lists; reading another caller's files would need a route of its own.
+
+## Closed — 1 Oct 2026
+
+Done: serve / remote-* / Worker MCP / GitHub action, proven from a Linux container and GitHub ubuntu+windows runners; Linux/Windows clients released in v0.5.0. Leftovers → follow-ups.

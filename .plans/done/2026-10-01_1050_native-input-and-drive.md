@@ -15,3 +15,7 @@ Status: done (P, T, U, W) · 2026-10-01; upstreaming pending
 
 ## Verify
 `mise run glaze:mac`; conformance CI on windows-11-arm.
+
+## Closed — 1 Oct 2026
+
+Done: fork PRs #1 (macOS) and #2 (Windows) green; examples/drive with real OS input, reliable on Windows CI. Owner merges the fork PRs → follow-ups.

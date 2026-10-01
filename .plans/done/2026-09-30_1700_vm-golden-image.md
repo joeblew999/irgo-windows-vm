@@ -471,3 +471,7 @@ Everything is gone again: the applied Pro tree (12.2 GiB), `pro.tar` (13.3 GB),
 the clone and `rand.bin` (2 GiB), all deleted. Free space was 62 GiB before and
 59 GiB after; APFS lags. The tools `zm` (zstd measurer) and `hs` (SHA-256
 timer) were Go programs in the session scratchpad and were not added to the repo.
+
+## Closed — 1 Oct 2026
+
+Done: golden image, a new VM in 23 s (verified), private R2 cache through the Worker (8.4 GB, pulled byte-identical in 4 min 37 s), vm-create auto-pull. Live test of auto-pull on a fresh Mac → follow-ups.

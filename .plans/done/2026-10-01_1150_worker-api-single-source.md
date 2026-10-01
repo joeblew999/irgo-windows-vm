@@ -30,3 +30,7 @@ main session tells AA, CC, DD to define their routes in it before they merge.
 ## Verify
 go:check; route-table tests both directions with negative controls; deployed Worker answers
 the OpenAPI document; site page generated.
+
+## Closed — 1 Oct 2026
+
+Done: wire/ route table (24 OpenAPI paths), one client, scope tests both ways, generated API page and OpenAPI, deployed.

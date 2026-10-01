@@ -24,3 +24,7 @@ user-facing guide for MCP clients.
 ## Verify
 `goreleaser check`; snapshot build run from outside the repo (`help`, `doctor`, `mcp -list`);
 `go:check`/`go:lint`/`site:build`; the main session tests the golden auto-pull live, then tags v0.5.0.
+
+## Closed — 1 Oct 2026
+
+Done: v0.5.0 released 1 Oct (macOS + Linux/Windows clients, install.sh verified from a clean dir, cask in Casks/, agent guide, doctor next steps).

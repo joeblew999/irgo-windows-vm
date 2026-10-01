@@ -24,3 +24,7 @@ structure, then merges main repeatedly and folds each new section in before fini
 
 ## Verify
 site:build; link + anchor tests; every command documented; a newcomer read-through with screenshots.
+
+## Closed — 1 Oct 2026
+
+Done: nine pages by audience; link and anchor tests including site links in Go messages.

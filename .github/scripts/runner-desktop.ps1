@@ -90,10 +90,8 @@ Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { ($_.Actions | O
 # sign-in prompt, notification toasts (an uncloaked CoreWindow of
 # ShellExperienceHost), Widgets, OneDrive and Teams, and what the image's
 # provisioning leaves open — a "System Properties" (performance options)
-# dialog, and on some runners a wsl.exe console that Windows later hands to a
-# new Windows Terminal window, which takes the foreground mid-run (both
-# measured 1 Oct 2026). Nothing in the job uses WSL. The runner's own
-# hosted-compute-agent console stays.
+# dialog — and WSL's updater with its Windows Terminal window (below). The
+# runner's own hosted-compute-agent console stays.
 $covering = 'WWAHost', 'ShellExperienceHost', 'Widgets', 'WidgetService', 'OneDrive', 'ms-teams', 'msteams',
   'SystemPropertiesPerformance', 'wsl', 'wslhost', 'WindowsTerminal', 'OpenConsole'
 $session = (Get-Process -Id $PID).SessionId
@@ -104,18 +102,29 @@ function StopNamed($names) {
 }
 StopNamed $covering
 
-# The wsl.exe is the image's own WSL updater, `wsl.exe --update --confirm
-# --prompt-before-exit`, which Windows relaunches (30 s after it was stopped,
-# measured; every ~90 s for the whole job, actions/runner-images#14264) until
-# WSL is up to date, each time in a new Windows Terminal window that takes the
-# foreground. Stopping it is not enough. So run the update to the end, here,
-# in this step's own console, and say how it went.
-'== updating WSL, so the image stops relaunching its updater'
-$t = [Diagnostics.Stopwatch]::StartNew()
-$u = Start-Process wsl.exe -ArgumentList '--update', '--web-download' -NoNewWindow -PassThru
-if (-not $u.WaitForExit(300000)) { $u | Stop-Process -Force; "wsl --update did not finish in 300 s; stopped" }
-else { "wsl --update exited $($u.ExitCode) after $([int]$t.Elapsed.TotalSeconds) s" }
-StopNamed $covering
+# The wsl.exe window is WSL's updater, `wsl.exe --update --confirm
+# --prompt-before-exit`, and stopping it is not enough: it is back within
+# 30 s, in a new Windows Terminal window that takes the foreground, and every
+# ~90 s for the whole job (actions/runner-images#14264). Traced with -Watch on
+# 1 Oct 2026: the runner's provisioning daemon (provjobd.exe, a child of
+# hosted-compute-agent) runs wsl.exe every 30 s; WSL is not installed on the
+# image, so that inbox wsl.exe starts the updater in a console of its own
+# whenever none is running, and the updater waits about 60 s on its prompt.
+# `wsl --update` cannot finish it ("not installed", exit 1, measured). So
+# wsl.exe is made to do nothing for the rest of the job: an Image File
+# Execution Options entry runs `cmd /c exit 1` in its place, which inherits
+# the caller's console and opens no window. Nothing in this job uses WSL, and
+# the daemon's call already failed. Then the updater that is up is stopped.
+'== WSL: wsl.exe made a no-op, so the runner stops starting its updater'
+$ifeo = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\wsl.exe'
+New-Item -Path $ifeo -Force | Out-Null
+Set-ItemProperty -Path $ifeo -Name Debugger -Value "$env:SystemRoot\System32\cmd.exe /c exit 1"
+"wsl.exe Debugger: $((Get-ItemProperty -Path $ifeo).Debugger)"
+
+# OneDrive's first-run setup is in the user's Run key and starts OneDrive a
+# minute after logon (traced, same run); it is not wanted on a runner.
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name OneDriveSetup -ErrorAction SilentlyContinue
+StopNamed ($covering + 'OneDriveSetup')
 Start-Sleep -Seconds 2
 
 # Start and Search: the sign-in prompt sits over an open Start menu, and with

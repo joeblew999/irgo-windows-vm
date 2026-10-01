@@ -97,6 +97,15 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	defer release()
 
 	say("vm:     %s, a clone of %s for this job alone", vm, utmvm.GoldenVMName)
+	// The shared Mac's admission, as vm-create's: refused with no-room when
+	// another VM would leave too little memory or disk, and the clone
+	// recorded as the job's caller's, so status and vm-reap see whose it is.
+	owner := utmvm.Caller{ID: "remote:" + j.Owner + "/" + j.ID[:12], Source: "remote job"}
+	finish, err := utmvm.BeginCreate(vm, owner, false, false, say)
+	if err != nil {
+		return fail(err, "admitting a VM for the job")
+	}
+	defer finish()
 	t0 := time.Now()
 	ok, err := utmvm.CloneFromGolden(vm, say)
 	// Deleted whatever happened from here on, cancellation included: a
@@ -281,6 +290,9 @@ func (e macExecutor) deleteVM(vm string, say func(string, ...any)) {
 		say("%s is still registered after deleting it (%v) — remove it with: irgo-winvm vm-delete -vm %s -force", vm, err, vm)
 		e.say("job VM %s is still there after vm-delete", vm)
 		return
+	}
+	if err := utmvm.ForgetVM(vm); err != nil {
+		say("forgetting %s's owner record: %v", vm, err)
 	}
 	say("deleted %s", vm)
 }

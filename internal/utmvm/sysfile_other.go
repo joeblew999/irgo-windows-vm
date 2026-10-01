@@ -60,3 +60,12 @@ const immutableSupported = false
 func cloneFile(_, _ string) error {
 	return errors.New("utmvm: file clones are macOS-only (host is " + runtime.GOOS + ")")
 }
+
+// hostMemory is unimplemented off macOS, where no VM runs; the capacity check
+// treats the error as "cannot tell" and refuses.
+func hostMemory() (uint64, error) {
+	return 0, errors.New("utmvm: physical memory is read only on macOS")
+}
+
+// processAlive is false off macOS, where no vm-create can be running.
+func processAlive(_ int) bool { return false }

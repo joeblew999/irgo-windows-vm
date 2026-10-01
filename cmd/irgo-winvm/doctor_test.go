@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -115,5 +116,60 @@ func TestDoctorJSON(t *testing.T) {
 		if r.Present != (sErr == nil) {
 			t.Errorf("%s: present=%v but stat(%s) err=%v", r.What, r.Present, r.Path, sErr)
 		}
+	}
+}
+
+// TestNextSteps: doctor tells a newcomer what to run next, in order, and the
+// first step not done is the one marked; nothing in it needs a checkout.
+//
+// Negative controls, run by hand: drop the golden case from nextSteps (the
+// golden machine is told to install for 45 minutes); drop the !s.vm guard on
+// the installer step (a machine with a VM is sent to download 4.2 GB).
+func TestNextSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		s         setup
+		next      string   // the line after the → mark
+		want, not []string // in the output, or not
+	}{
+		{"nothing", setup{}, "UTM, the hypervisor",
+			[]string{"brew install --cask utm", "iso-create -fetch", "https://brew.sh", "vm-create -install", "Automation", "app-create"},
+			[]string{"✓"}},
+		{"UTM only", setup{utm: "4.7.5", brew: true}, "the Windows installer",
+			[]string{"✓ UTM, the hypervisor (4.7.5)", "about 45 minutes"}, []string{"https://brew.sh"}},
+		{"media", setup{utm: "4.7.5", media: true}, "a Windows VM",
+			[]string{"✓ the Windows installer", "vm-create -install"}, nil},
+		{"golden image", setup{utm: "4.7.5", golden: true}, "a Windows VM",
+			[]string{"clones the golden image"}, []string{"iso-create", "45 minutes"}},
+		{"private cache", setup{utm: "4.7.5", cache: "https://x.workers.dev"}, "a Windows VM",
+			[]string{"pulls the golden image from your private cache (https://x.workers.dev)"}, []string{"iso-create"}},
+		{"VM", setup{utm: "4.7.5", media: true, vm: true}, "your program, on Windows",
+			[]string{"✓ a Windows VM", "GOOS=windows GOARCH=arm64"}, []string{"Automation"}},
+		{"half a cache", setup{utm: "4.7.5", cacheError: errors.New("IRGO_GOLDEN_TOKEN not set")}, "the Windows installer",
+			[]string{"half configured", "IRGO_GOLDEN_TOKEN not set"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := nextSteps(tc.s)
+			out := strings.Join(lines, "\n")
+			var marked []string
+			for _, l := range lines {
+				if strings.HasPrefix(l, " → ") {
+					marked = append(marked, strings.TrimPrefix(l, " → "))
+				}
+			}
+			if len(marked) != 1 || marked[0] != tc.next {
+				t.Errorf("marked %q as next, want only %q\n%s", marked, tc.next, out)
+			}
+			for _, w := range append(tc.want, "claude mcp add irgo-winvm -- irgo-winvm mcp", utmvm.SiteURL) {
+				if !strings.Contains(out, w) {
+					t.Errorf("does not say %q\n%s", w, out)
+				}
+			}
+			for _, n := range append(tc.not, "docs/", "mise ") {
+				if strings.Contains(out, n) {
+					t.Errorf("says %q\n%s", n, out)
+				}
+			}
+		})
 	}
 }

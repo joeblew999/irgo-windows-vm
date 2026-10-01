@@ -62,8 +62,13 @@ const (
 	LockMachine Locks = 1 << iota
 	// LockVM guards the one VM the command's -vm flag names.
 	LockVM
-	// LockStage guards bin/, the binaries staged for app-create.
+	// LockStage guards the caller's part of bin/, the binaries it staged for
+	// app-create.
 	LockStage
+	// LockEachVM is a command that takes each VM's lock itself, one at a time,
+	// as it works through them (vm-reap), so it holds up no VM it is not
+	// touching. The dispatcher takes nothing for it.
+	LockEachVM
 )
 
 // Mutates reports whether c changes state on disk, which is whether it takes
@@ -77,9 +82,9 @@ const DetachAlways = "(always)"
 // All is every command, in the order the usage prints them. A command that is
 // not here does not exist.
 var All = []Command{
-	{Name: "iso-create", Summary: "the Windows installer", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a VM with Windows on it, from that", Undo: "vm-delete", Locks: LockVM, Detach: "-install", MacOnly: true, OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed to that VM and run", Undo: "app-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "iso-create", Summary: "the Windows installer, from Microsoft with -fetch", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
+	{Name: "vm-create", Summary: "a Windows VM, cloned from the golden image or -install", Undo: "vm-delete", Locks: LockVM, Detach: "-install", MacOnly: true, OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed into that VM and run, output back", Undo: "app-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, MacOnly: true, OverMCP: true},
 	// Sealing is many minutes even with nothing to decrypt, so it is always a
 	// job over MCP.
@@ -87,7 +92,7 @@ var All = []Command{
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
 	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
-	{Name: "vm-golden-pull", Summary: "download it from there instead of installing", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	{Name: "vm-golden-pull", Summary: "pull the golden image from your private R2 bucket", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
 	// The remote job queue: from any OS, through the Worker, to a Mac running
 	// serve. Nothing local changes, so no locks; the Mac's own commands take
 	// theirs when it runs the job.
@@ -98,19 +103,22 @@ var All = []Command{
 	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, OverMCP: true},
 	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
 	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
+	// Not an undo of one command: it removes whatever clones callers left
+	// behind. Dry run unless -force, like every destructive command.
+	{Name: "vm-reap", Summary: "remove clones idle past their lease; never irgo-win11 or the golden image", Locks: LockEachVM, Destructive: true, MacOnly: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, MacOnly: true, OverMCP: true},
 	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	// report gathers what an issue needs, redacted, for pasting into one.
 	{Name: "report", Summary: "a redacted, paste-ready diagnostic block for an issue: versions, doctor, the last errors, glaze", ReadOnly: true, OverMCP: true},
-	{Name: "status", Summary: "long-running work: what is going, what finished, how long", ReadOnly: true, OverMCP: true},
+	{Name: "status", Summary: "every VM with its owner and last use, and long-running work: what is going, what finished", ReadOnly: true, OverMCP: true},
 	// glaze-check and glaze-status work only in a checkout of this repository.
 	// glaze-check takes no lock here: the Mac run touches no VM, and a lock
 	// would block it for the whole of an install. -windows takes that VM's lock
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
-	{Name: "glaze-check", Summary: "does glaze work? run the conformance suite here or -windows, record every test", Detach: "-windows", OverMCP: true},
-	{Name: "glaze-status", Summary: "the recorded glaze verdict, Mac and Windows, and whether it still holds", ReadOnly: true, OverMCP: true},
+	{Name: "glaze-check", Summary: "does glaze work? its conformance suite, here or -windows (needs the source checkout)", Detach: "-windows", OverMCP: true},
+	{Name: "glaze-status", Summary: "the recorded glaze verdict and whether it still holds (needs the source checkout)", ReadOnly: true, OverMCP: true},
 	{Name: "remote-status", Summary: "a remote job's state and place in the queue; with the admin token and no id, every job", ReadOnly: true, OverMCP: true},
 	{Name: "remote-logs", Summary: "what the Mac said while it ran a remote job", ReadOnly: true, OverMCP: true},
 	{Name: "remote-result", Summary: "download a finished remote job's files: result.json, output, test2json, screenshots", OverMCP: true},
@@ -178,6 +186,7 @@ func UsageText() string {
 		}
 		fmt.Fprintf(&b, "  %-*s %s\n", name, c.Name, c.Summary)
 	}
-	b.WriteString("\nRun them in the order above. Each takes -h for its flags.\n")
+	b.WriteString("\nNew here? Run `irgo-winvm doctor`: it says what to do next, in order.\n" +
+		"`irgo-winvm help` explains the steps, and every command takes -h for its flags.\n")
 	return b.String()
 }

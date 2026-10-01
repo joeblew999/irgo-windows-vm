@@ -401,6 +401,12 @@ func registerBundle(staged, name string) error {
 	// success, and a half-registered nothing on failure. Removed through
 	// removeStaged, which clears the immutable flag first.
 	defer removeStaged(staged)
+	return importBundle(staged, name)
+}
+
+// importBundle has UTM import the bundle at staged, leaving staged where it
+// is, and checks it registered as name with every file at its staged length.
+func importBundle(staged, name string) error {
 	// Every file UTM is about to copy, and its length, so the copy can be
 	// checked file by file afterwards (stat works in UTM's folder).
 	want := map[string]int64{}
@@ -521,12 +527,18 @@ const keystrokeDelay = 90 * time.Millisecond
 // guest and every Go-driven boot silently failed at the shell prompt, while
 // hand-written osascript worked. %q, once, is the whole answer.
 
-// VMStageDir is where binaries built for the guest are kept.
+// stageRoot is bin/, where binaries built for the guest are kept, one
+// directory per caller (StageDir).
 //
 // Nothing stages them onto the install medium any more: app-create pushes a
 // binary to a running VM, and having two ways to get one there meant two
 // answers to "why is my binary not in the guest".
-func VMStageDir() string { return filepath.Join(appRoot(), vmStageDirName) }
+func stageRoot() string { return filepath.Join(appRoot(), vmStageDirName) }
+
+// StageDir is one caller's part of bin/. Per caller, so app-delete removes
+// what that caller staged and never another's: a single bin/ meant one
+// agent's app-delete wiped every other agent's uploads mid-run.
+func StageDir(owner string) string { return filepath.Join(stageRoot(), ownerKey(owner)) }
 
 // BundlePath is where UTM keeps the bundle for a VM of this display name.
 func BundlePath(name string) (string, error) {

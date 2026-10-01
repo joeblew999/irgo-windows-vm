@@ -37,3 +37,14 @@ bucket_name = "irgo-golden"
 [[r2_buckets]]
 binding = "JOBS"
 bucket_name = "irgo-jobs"
+
+# The ledger: which agent used which VM, on which machine, doing what. Private,
+# reached only through /api/ledger/*, behind LEDGER_TOKEN (write) and
+# LEDGER_READ_TOKEN (read). The schema is migrations/, applied with
+# `wrangler d1 migrations apply irgo-ledger --remote` (docs/DEVELOPMENT.md,
+# "The ledger").
+[[d1_databases]]
+binding = "LEDGER"
+database_name = "irgo-ledger"
+database_id = "36624b6c-42b1-48f5-a173-be1d157f66ed"
+migrations_dir = "migrations"

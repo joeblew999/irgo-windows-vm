@@ -27,6 +27,7 @@ func glazeCheckFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("glaze-check", flag.ContinueOnError)
 	fs.Bool("windows", false, "run the suite on the VM, through app-create, instead of natively on this machine")
 	fs.String("vm", utmvm.DefaultVMName, "VM name, with -windows")
+	ownerFlag(fs)
 	fs.String("import", "", "record runs made elsewhere instead of running the suite: a directory holding the conformance CI job's downloaded artifacts, whose sections and screenshots replace this checkout's")
 	return fs
 }
@@ -98,7 +99,7 @@ func runGlazeCheck(v values, _ []string) error {
 		// answer to "which guest account" and "how long".
 		defaults := appCreateFlags()
 		user := defaults.Lookup("user").DefValue
-		timeout := values{defaults}.Duration("timeout")
+		timeout := values{fs: defaults}.Duration("timeout")
 
 		o.Target = glazecheck.TargetWindows
 		o.Platform = "windows/arm64, VM " + e.Name + " (through app-create -gui)"

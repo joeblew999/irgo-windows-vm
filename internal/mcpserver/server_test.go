@@ -312,9 +312,10 @@ func TestTheFailureIsMachineReadable(t *testing.T) {
 // Retryable is advice an agent acts on: it will wait and call again. Marking a
 // permanent code retryable — "no such VM", say — would have it retry forever
 // against a VM that will never exist. The retryable outcomes are the transient
-// ones: a guest agent that is away, a mutation lock someone else holds, and a
-// remote job that never ran to the end (no Mac took it, or its Mac went away),
-// which submitting again can change.
+// ones: a guest agent that is away, a mutation lock someone else holds, no
+// room for another VM until one stops, and a remote job that never ran to
+// the end (no Mac took it, or its Mac went away), which submitting again
+// can change.
 func TestOnlyTransientOutcomesAreRetryable(t *testing.T) {
 	var retryable []string
 	for _, o := range command.Outcomes {
@@ -322,8 +323,8 @@ func TestOnlyTransientOutcomesAreRetryable(t *testing.T) {
 			retryable = append(retryable, o.Name)
 		}
 	}
-	if strings.Join(retryable, " ") != "no-agent busy not-run" {
-		t.Errorf("retryable outcomes are %v; want exactly [no-agent busy not-run] — only "+
+	if strings.Join(retryable, " ") != "no-agent busy no-room not-run" {
+		t.Errorf("retryable outcomes are %v; want exactly [no-agent busy no-room not-run] — only "+
 			"transient states, where waiting changes the answer", retryable)
 	}
 }
@@ -460,7 +461,7 @@ func TestALongCallStartsAJobInsteadOfBlocking(t *testing.T) {
 					ran = true
 					return "finished inline", nil
 				},
-				StartJob: func(string, []string) (string, error) {
+				StartJob: func(context.Context, string, []string) (string, error) {
 					startedJob = true
 					return "vm-create-20260814-150000", nil
 				},
@@ -643,4 +644,28 @@ func TestTheReferenceResourceIsServedAndGenerated(t *testing.T) {
 		t.Error("a command with no flags is not described as having none")
 	}
 	t.Logf("%d bytes of generated reference", len(got))
+}
+
+// TestTheClientNameReachesTheProgram: several MCP clients share one Mac, and
+// the program tells them apart (and refuses them the owner's VM) by the name
+// each gave in its initialize request. Without it every MCP caller would look
+// like the person at the terminal.
+//
+// Negative control, run by hand: pass ctx instead of withClient(ctx, req) to
+// d.Run in handler, and the name arrives empty.
+func TestTheClientNameReachesTheProgram(t *testing.T) {
+	var got string
+	cs := connect(t, func(ctx context.Context, _ string, _ []string) (string, error) {
+		got = ClientName(ctx)
+		return "ok", nil
+	})
+	if _, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "doctor"}); err != nil {
+		t.Fatal(err)
+	}
+	if got != "test-client" {
+		t.Fatalf("the runner saw client %q, want test-client", got)
+	}
+	if ClientName(context.Background()) != "" {
+		t.Fatal("a context from outside a tool call names a client")
+	}
 }

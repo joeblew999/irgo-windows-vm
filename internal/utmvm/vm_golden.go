@@ -37,7 +37,8 @@ const goldenVerifyName = GoldenVMName + "-verify"
 // cannot write (see above).
 const goldenManifestName = "golden.json"
 
-// cloneHeadroomBytes is the free space vm-create wants before it clones.
+// cloneHeadroomBytes is the free space a clone is given room to grow into,
+// on top of hostDiskReserveBytes (vm_capacity.go).
 //
 // A clone costs nothing until the guest writes, and then every write is a new
 // block: the pagefile coming back, updates, whatever the agent runs. Running
@@ -384,13 +385,8 @@ func CloneFromGolden(name string, say func(string, ...any)) (bool, error) {
 	if err := CheckAutomation(); err != nil {
 		return true, err
 	}
-	if dir, dErr := DefaultVMDir(); dErr == nil {
-		if free, fErr := FreeBytes(dir); fErr == nil && free < cloneHeadroomBytes {
-			return true, fmt.Errorf("not enough disk space to clone: %s free, want %s.\n"+
-				"  A clone costs nothing until the guest writes, and running out then corrupts it",
-				HumanBytes(free), HumanBytes(cloneHeadroomBytes))
-		}
-	}
+	// Free memory and disk are vm-create's to check, before it gets here
+	// (BeginCreate, vm_capacity.go), in one place for clones and installs.
 	release, err := Acquire(MachineLock)
 	if err != nil {
 		return true, err

@@ -103,17 +103,20 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
 ```
 ~/Library/Application Support/irgo-winvm/
   media/    the ISO, the .esd it was built from, and scratch
-  bin/      binaries staged into a VM
+  bin/      binaries staged into a VM, one directory per caller
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
   vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
   golden.json            what is known about the golden image
-  mutation*.lock         the mutation locks, one machine-wide, one per VM, one for bin/
+  vms/      who made each VM and when it was last used, one record per VM
+  mutation*.lock         the mutation locks: one machine-wide, one per VM, one per
+                         caller's part of bin/, and the capacity check's
   net/      the guest address the last SMB push reached, one file per VM
   utm-releases.json   doctor's cache of UTM's latest releases, trusted for 12 hours
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
                 manifest.json once finished, .parts/ while it is not
+  ledger/   events not yet sent to the ledger, and this machine's random id
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -130,6 +133,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/command` | which commands exist, and nothing about what they do. Imported by anything that must know the list in-process |
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
+| `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
 | `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
@@ -161,14 +165,22 @@ signed `.dmg` if it is missing. `wimlib` and `xorriso` are installed by
 `iso-create` and removed by `iso-delete`, only when building media from scratch.
 
 - **Tools are generated from the command list** in `internal/command`, so they
-  are the commands and nothing else.
+  are the commands and nothing else. A tool's description is the command's
+  summary plus what the declaration says an agent must know first: that it
+  returns a job, that it needs `-force`, its undo (`describe`).
+- **The server sends instructions** with its initialize response
+  (`internal/mcpserver/instructions.go`): the order of the steps, jobs, which
+  failures to retry. `irgo-winvm mcp -h` prints them after how to register the
+  server, and the site's MCP page captures that, so the three cannot differ. A
+  test fails if they name a command or status that does not exist.
 - **The server holds no logic.** Behaviour reachable only over MCP is a second
   answer to a question already answered, and nobody tests it: the cycle tests
   and developers both drive the CLI. If a tool needs logic, it goes in `utmvm`,
   where both callers get it.
 - **Uploads.** Over HTTP, an agent with no shared filesystem can send a
   cross-compiled `.exe` in chunks with `app-upload`. It is staged
-  content-addressed under `bin/`, verified by SHA-256 before it is committed,
+  content-addressed under the caller's own `bin/<caller>/` (see
+  [Sharing one Mac](#sharing-one-mac)), verified by SHA-256 before it is committed,
   and then passed to `app-create` by path.
 - **Remote access.** Binding wider than loopback requires `-allow-remote` and
   `IRGO_WINVM_TOKEN`. Read the [threat model](THREAT-MODEL.md) first.
@@ -191,13 +203,17 @@ directory.
 ### The mutation locks
 
 Every command that changes state takes the locks it declares in
-`command.All` (`Locks`), from three kinds (`internal/utmvm/lock.go`):
+`command.All` (`Locks`), from these kinds (`internal/utmvm/lock.go`):
 
 | lock | guards | taken by |
 |---|---|---|
 | machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
 | per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
-| stage (`mutation-stage.lock`) | `bin/`, the staged binaries | `app-upload`, `app-delete` |
+| stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
+| capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
+
+`vm-reap` takes each VM's lock itself, one at a time, without waiting, and
+keeps a VM whose lock is held: that VM is in use.
 
 So `app-create` on two VMs runs side by side, and a second mutation of the same
 VM is **refused, not queued**, with exit code 6 and a message naming the busy
@@ -392,12 +408,25 @@ Once one VM has been installed, **`vm-golden-create`** (undo
 `vm-create` then clones that instead of installing.
 
 Four commands change nothing: **`vm-screen`** photographs the VM, **`doctor`**
-reports what is installed and where, **`status`** lists long-running
-[jobs](#jobs), and **`report`** prints the redacted block an issue needs
-([Reporting issues](CONTRIBUTING.md#reporting-issues-for-agents)). `doctor` also names the installed UTM, the latest stable and
+reports what is installed and where, **`status`** lists every VM with its
+owner and last use, then long-running [jobs](#jobs), and **`report`** prints
+the redacted block an issue needs
+([Reporting issues](CONTRIBUTING.md#reporting-issues-for-agents)).
+**`vm-reap`** removes the clones callers left behind
+([Sharing one Mac](#sharing-one-mac)). `doctor` also names the installed UTM, the latest stable and
 pre-release on GitHub, and whether an update is available. It answers from a
 12-hour cache, else GitHub within 3 seconds, else an older cache marked as
-such, and offline it says "cannot tell" rather than failing.
+such, and offline it says "cannot tell" rather than failing. It ends with the
+next steps in order, each with its command (`nextSteps`): UTM, the installer
+(only when the VM will be installed from it), the VM (a clone, a pull from the
+private cache, or an install, with the one-time Automation dialog), then
+`app-create`, and how to register the MCP server. Rows that are optional or
+fetched by the command that needs them (Go, the guest tools, `wimlib` and
+`xorriso`) read `optional` or `not yet`, never `MISSING`.
+
+Nothing a release user runs assumes a checkout: messages link
+[the site](https://joeblew999.github.io/irgo-windows-vm/) (`utmvm.SiteURL`),
+never a `docs/` path, and the two commands that need the source say so.
 
 Two work only **in a checkout of this repository**, because they build and read
 `examples/`:
@@ -601,9 +630,42 @@ one Mac each have a VM without stopping anybody else's.
 | **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
 
 The first VM is still installed the slow way, under a throwaway name:
-`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`. With
-no golden image, `vm-create` says it is falling back to a full install and
-does that; `-golden=false` installs even when there is one.
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`.
+`-golden=false` installs even when there is a golden image.
+
+**A new VM on a machine with no golden image** (`VMCreate`, and
+`internal/utmvm/vm_golden_import.go`) depends on the
+[private cache](#the-private-r2-cache):
+
+| cache (`GoldenCacheFromEnv`) | `vm-create` | `vm-create -install` |
+|---|---|---|
+| none of its variables set | writes the bundle; says the install is next | installs from the ISO, and says how to make the next VM a clone |
+| configured (`IRGO_GOLDEN_URL` + `IRGO_GOLDEN_TOKEN`, or the S3 five) | stops and says `-install` pulls it, writing no bundle | pulls the image, has UTM import it as `irgo-golden`, clones it |
+| some set, not all | exit 2 naming what is missing, and `-golden=false` | the same |
+
+- **Only with `-install`**, because a pull is minutes (4 min 37 s for 8.4 GB,
+  [measured](RESULTS.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026))
+  and `-install` is what makes `vm-create` a job over MCP. Without it nothing is
+  written: a VM that exists is never cloned, so a bundle written now would make
+  the next `-install` install after all.
+- **Half a configuration is an error**, not a quiet 45-minute install for
+  someone who meant to pull.
+- **The pull runs under the machine lock**, like `vm-golden-pull`, and asks UTM
+  again first, so a golden image another process made meanwhile is cloned, not
+  pulled over. It is `GoldenPull` itself, licence notice and privacy check
+  included, into `golden-pull/`.
+- **The bundle's own name is checked** before the import (`plutil -extract
+  Information.Name`): UTM registers a bundle under the name in its
+  `config.plist`, so an image pushed from another VM would be left registered
+  under that name.
+- **The pull is kept** in `golden-pull/`. UTM's import is an APFS clone of it,
+  so it costs no more space, and after `vm-golden-delete` the next import needs
+  no download. `vm-golden-pull -delete -force` removes it. Its `golden.json` is
+  copied to the runtime root, where `doctor` reads it.
+
+The decisions are unit-tested with fakes for UTM, the bucket and the lock
+(`vm_golden_import_test.go`); the whole path against the real bucket and UTM is
+proven by running it.
 
 **Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
 the guest, as SYSTEM, one step at a time with the disk's allocation printed
@@ -628,8 +690,9 @@ that `vm-delete` removes.
 seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new
 VM's lock only. It refuses when the golden image is running (it must stay
 stopped: UTM will not clone a running VM, and a golden image that has booted is
-no longer the one its manifest describes) and when free space is below 10 GiB,
-an estimate of how much a clone grows until it is measured.
+no longer the one its manifest describes). Whether there is memory and disk
+for another VM is `vm-create`'s question, asked before any of this
+([Sharing one Mac](#sharing-one-mac)).
 
 Why it is built this way:
 
@@ -659,6 +722,106 @@ Why it is built this way:
 The research, and what is measured and what is not, is in
 `.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
 
+## Sharing one Mac
+
+One Mac is used by several independent callers at once: the owner at a
+terminal, agents working in this repository, and agents from other
+repositories through the CLI or `irgo-winvm mcp`. Before 1 Oct 2026 they all
+defaulted to the owner's VM, queued on its lock and left their binaries in it;
+any of them could create clones until the Mac ran out of memory; `app-delete`
+emptied every caller's uploads; and `vm-delete` and `app-delete` exited 0 when
+`utmctl` itself had failed.
+
+**Who is calling** (`internal/utmvm/owner.go`) is, in order: `-owner` on the
+command, else `IRGO_WINVM_OWNER`, else the MCP client's name from its
+`initialize` request followed by `/user@host:repo`, else `user@host:repo` for
+the person at the terminal (the repository is the nearest directory up from
+the working directory holding `.git`). The repository is added to the MCP name
+because every Claude Code session calls itself `claude-code`; over stdio the
+server runs in the agent's own repository, so two agents from two repositories
+differ. It is a label, not authentication: anyone can claim any name. An MCP
+job is started with `-owner` set to its caller, because the job is a new
+process with no client.
+
+**The owner's VM is not anyone else's default.** Only the person at the
+terminal — no `-owner`, no `IRGO_WINVM_OWNER`, not over MCP — gets
+`irgo-win11` by leaving `-vm` out, so `irgo-winvm app-create x.exe` keeps
+working. Anyone else who leaves it out is refused with exit 2 before any lock
+is taken, and told to make a VM of their own:
+`irgo-winvm vm-create -vm <name>`, about 23 s from the golden image. Passing
+`-vm irgo-win11` explicitly is allowed; that is a choice, not a default.
+`glaze-check` without `-windows` touches no VM and is not affected.
+
+**Every VM `vm-create` makes has a record** in `vms/<name>.json`: owner, where
+the identity came from, created, last used, and the pid of the `vm-create`
+still making it. It is written before the clone or install starts, so a create
+that is killed still leaves an owner, and removed again if no VM came of it.
+`app-create`, `app-delete`, `vm-repair`, `vm-screen` and `glaze-check -windows`
+move "last used"; `vm-delete` removes the record. A VM without a record —
+`irgo-win11`, the golden image, anything made before records — has no known
+owner and is never reaped. `status` lists every VM UTM knows with its owner,
+last use and idle time, and any record whose VM is gone; `doctor` counts the
+records.
+
+**`vm-reap`** removes clones nobody is using (`internal/utmvm/vm_lease.go`).
+A VM goes only when all of these hold: it has a record; it is not
+`irgo-win11`, `irgo-golden` or the golden image's verification clone (decided
+without even taking their locks, so the owner's commands are never refused for
+it); its creator is not alive; its lock is free (taken without waiting and held
+through the delete, so nothing can start using it in between); UTM lists it; and
+its last use is older than `-stale` (default 24 h). A record whose VM UTM says
+is gone is forgotten. Anything it cannot tell — an unreadable lock, UTM not
+answering, an unreadable record — is kept and said. Without `-force` it lists
+the verdicts and exits 5, like every destructive command.
+
+**Is there room?** (`internal/utmvm/vm_capacity.go`). `vm-create` asks before
+it makes or boots a VM, under the capacity lock, and answers yes, no or cannot
+tell; no and cannot tell refuse with exit 7, the numbers, and the running VMs by
+name.
+
+- **Memory:** `hw.memsize`, less the memory UTM says each VM that is not
+  stopped is configured with (AppleScript `memory of configuration`, which
+  needs no Full Disk Access; paused VMs keep theirs), less the VMs other
+  `vm-create`s are still making (their records' live pids), less the new VM's,
+  must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the owner's own
+  work. Configured, not current use, because the guest commits it: on 1 Oct
+  2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of it dirty,
+  with 6.3 GB of the Mac's 7 GB swap in use. So a 16 GiB Mac holds one VM and
+  refuses a second; 32 GiB holds three. `-overcommit` skips the memory half for
+  a person who accepts swapping: three VMs did boot and pass `glaze-check` on
+  16 GiB for a few minutes ([RESULTS](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026)).
+- **Disk:** free space on the volume holding UTM's VMs (`statfs`, which works
+  there without Full Disk Access) must cover the new VM's growth plus
+  `hostDiskReserveBytes`, **10 GiB**, which keeps macOS, whose swap lives on
+  that volume, out of its low-space warnings. The growth is `cloneHeadroomBytes`,
+  **10 GiB**, for a clone (still an estimate; a clone's boot and one run moved
+  `df` by about 1 GiB) and `installHeadroomBytes`, **30 GiB**, for an install,
+  or for pulling the golden image from the private cache when there is none
+  here (8.4 GB down, then the bundle rebuilt). So a clone wants 20 GiB free and
+  an install 40 GiB. An existing stopped VM being booted needs no disk check.
+
+**Staging is per caller.** `app-upload` writes `bin/<caller>/<sha256>.exe`,
+under a stage lock of that caller's own, so two agents uploading at once do not
+refuse each other, and `app-delete` removes only its caller's directory. The
+directory name is the identity made readable, with a short hash when it had to
+be changed (`claude-code-apple-mac-repo-1a2b3c4d`). Files directly in `bin/`,
+from before this, are cleared only by the owner.
+
+**Undo commands tell "no such VM" from "no answer".** `vm-delete` and
+`app-delete` succeed with nothing to do only when UTM answered that there is no
+such VM (`ErrNoVM`); when `utmctl` could not be asked they fail and say
+nothing was deleted.
+
+**For an agent from another repository**, the whole contract:
+
+1. Set `IRGO_WINVM_OWNER` (or pass `-owner`) to something that names you, or
+   rely on the MCP client name.
+2. `irgo-winvm vm-create -vm <name>`. Exit 7 means no room: wait, or ask
+   whoever `status` names.
+3. Pass `-vm <name>` to `app-create`, `vm-screen` and the rest.
+4. `irgo-winvm vm-delete -vm <name> -force` when done. If you go away, a clone
+   idle for a day is removed by whoever runs `vm-reap -force`.
+
 ## What it exits with
 
 `utmctl` exits 0 when it fails (see [UPSTREAM.md](UPSTREAM.md#utm)), so this
@@ -674,6 +837,7 @@ thing:
 | **4** | the VM is there, the guest agent is not answering |
 | **5** | refused — a destructive command without `-force` |
 | **6** | refused — another mutation is in progress |
+| **7** | refused — another VM would leave this Mac too little memory or disk, or that could not be determined |
 
 **1 is your program, not this tool.** The guest's exit code is *not* passed
 through: a binary exiting 3 makes `app-create` exit **1**, and the message names
@@ -684,7 +848,9 @@ script.
 minutes at a time while the VM is fine. `app-create` already waits and tries to
 recover before giving up, which is why it can take several minutes to return 4.
 6 means another mutation holds a [lock](#the-mutation-locks) this one needs,
-and the message names which; the holder finishes on its own schedule.
+and the message names which; the holder finishes on its own schedule. **7 is
+worth retrying once a VM stops**: the message gives the numbers and names the
+running VMs, and `status` says whose they are.
 
 `-detach` exits 0 once the program is running, since it is for windows nobody
 intends to close.
@@ -720,9 +886,9 @@ records *why* these particular numbers were chosen, only that they are fixed.
 
 | | value | |
 |---|---|---|
-| name | `irgo-win11` | `utmvm.DefaultVMName`; `-vm` overrides, for a disposable VM |
+| name | `irgo-win11` | `utmvm.DefaultVMName`, the machine owner's; `-vm` overrides, and every other caller must pass it ([Sharing one Mac](#sharing-one-mac)) |
 | disk | **64 GiB, sparse** | costs kilobytes until the guest writes; see [what it costs](#what-it-costs) |
-| RAM | **8192 MiB** | |
+| RAM | **8192 MiB** | `vmMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds one ([Sharing one Mac](#sharing-one-mac)) |
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 
 The guest logs itself in as **`dev`**, an administrator, with the password
@@ -1034,7 +1200,7 @@ process that owns it is not the one that was killed. See the traps below.
 
 `worker/` is one Cloudflare Worker, written in Go on
 [syumai/workers-go](https://github.com/syumai/workers-go) and deployed at
-`https://irgo-windows-vm.gedw99.workers.dev`, that serves three things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
+`https://irgo-windows-vm.gedw99.workers.dev`, that serves four things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
 the owner switches.
 
 - **The site.** `site/dist`, from `mise run site:build`, as Workers static
@@ -1062,6 +1228,8 @@ the owner switches.
   `<key>` is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
+- **The ledger** (`worker/ledger.go`), who used which VM where, in the D1
+  database bound as `LEDGER`: see [The ledger](#the-ledger).
 
 All of the handler is plain Go behind two small interfaces (`worker/api.go`).
 `go:check` builds and tests it for the host, where `workers.Serve` is an
@@ -1237,6 +1405,8 @@ Done on 1 Oct 2026 by these steps. In order:
    | `GLAZE_STATUS_TOKEN` | CI posting glaze runs |
    | `GOLDEN_TOKEN` | reading the golden image (`IRGO_GOLDEN_TOKEN`) |
    | `GOLDEN_PUSH_TOKEN` | writing and deleting it (`IRGO_GOLDEN_PUSH_TOKEN`) |
+   | `LEDGER_TOKEN` | the tool posting to [the ledger](#the-ledger) (`IRGO_LEDGER_TOKEN`) |
+   | `LEDGER_READ_TOKEN` | reading the ledger: its page and JSON (`IRGO_LEDGER_READ_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
    [Setting up the bucket](#setting-up-the-bucket)).
@@ -1254,6 +1424,89 @@ Done on 1 Oct 2026 by these steps. In order:
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part
 of these steps.
+
+## The ledger
+
+Several repositories' agents share one Mac's VMs, and there is more than one
+Mac. The mutation locks and leases on each machine are the authority: local,
+instant, offline. The ledger is the record of them that outlives a machine and
+can be read from anywhere: which agent used which VM, on which machine, doing
+what, and what was started and never finished. It decides nothing.
+
+**The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
+the start and end of every command (exit code, duration, the error text)
+except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build runs
+it as `glaze-status -h` a dozen times). Over MCP it records the
+client's name from its `initialize`. Each event carries a machine id, the
+hostname, the owner (`IRGO_WINVM_OWNER`, else the login name), the repository
+(`IRGO_WINVM_REPO`, else the checkout it runs in, read from its git config),
+the VM and the tool version. It is **off** unless `IRGO_LEDGER_URL` and
+`IRGO_LEDGER_TOKEN` are both set; on this Mac they are in `.env.r2`, with
+`IRGO_LEDGER_READ_TOKEN`.
+
+- **It never blocks or fails a command.** An event is appended to
+  `ledger/spool.jsonl` (instant, works offline) and sent in the background.
+  At exit, `main` gives it at most 2 s; what is not sent stays spooled and
+  goes with the next command. After a failed send nothing is tried for a
+  minute, so an offline machine pays nothing per command.
+  `TestWorkerOutageNeverChangesTheExitCode` runs commands against a hanging,
+  a failing and an unreachable Worker and compares each exit code with the
+  ledger off.
+- **Nothing is lost or doubled.** A flush renames the spool to
+  `inflight.jsonl` under `spool.lock`, so no append lands in a file already
+  read, and `flush.lock` lets one process flush at a time. Events go in
+  batches of 25; a 2xx, 400 or 413 removes a batch, anything else (a 401
+  included) keeps it. Every event has a random id and the Worker stores each
+  id once, so a batch sent twice is harmless. Past 4 MiB of spool, new events
+  are dropped.
+- **Redacted before it is written.** The home directory becomes `~`;
+  credentials in URLs, values after words such as `token` or `password`, and
+  any run of 32 or more key-like characters become `[redacted]`. The machine
+  id is 16 random hex digits kept in `ledger/machine-id`, not derived from
+  anything about the machine.
+
+For the lease code: `ledger.Emit(ledger.Event{...})` from anywhere, a no-op
+until `main` configures it. `Op` pairs an event that opens work with the one
+that closes it: `start`/`end`, `lease-acquire`/`lease-release`; `reap` closes
+the op it names and, like `vm-delete`, marks the VM deleted; `vm-create`
+marks it created. A lease sets `Expires` and is stale once past it.
+
+**The Worker** stores events in the D1 database `irgo-ledger`, schema in
+`worker/migrations/`. D1 rather than a Durable Object: workers-go opens a D1
+database as `database/sql` but cannot define a Durable Object class, and the
+questions asked are queries. On the host and in the tests the same migration
+runs on SQLite (modernc.org/sqlite, in the worker module only), so the tests
+run the real SQL. The d1 driver under TinyGo was measured with `wrangler dev`
+before it was used: inserts, nulls, `RowsAffected` for duplicates.
+
+| request | token | does |
+|---|---|---|
+| `POST /api/ledger/events` | `LEDGER_TOKEN` | `{"events":[...]}`, 1 to 25; answers `accepted`, `duplicates`, `rejected` |
+| `GET /api/ledger/events` | `LEDGER_READ_TOKEN` | history, newest first, filtered by `owner`, `vm`, `machine`, `host`, `type`, `op`, `repo`, `client`; `since` is RFC 3339 or a duration (default 7 days); `limit` up to 1000 |
+| `GET /api/ledger/vms` | `LEDGER_READ_TOKEN` | now: machines, VMs (`in-use`, `stale`, `idle`, `deleted`), open work, recent events; `since`, `stale` |
+| `GET /api/ledger/` | `LEDGER_READ_TOKEN`, as bearer or as the Basic password | the same, as a page |
+
+- **Stale** is open work never closed: a start with no end, or a lease with
+  no release, older than `stale` (3 h by default), or a lease past its
+  `Expires`. The view reads the last 14 days, at most 5,000 events, and says
+  when it was truncated. A start and an end in the same millisecond count as
+  closed whichever id sorts first; live, a refused `app-create` once showed as
+  in use.
+- **Never public.** It names hosts, users and repositories. The page is
+  rendered by the Worker, not a page of the site, because static assets are
+  served to anyone before the Worker runs. A browser cannot send a bearer
+  token on a navigation, so the page also takes the read token as an HTTP
+  Basic password and asks for one. The two tokens each do one job.
+- **Limits** are D1's on the Free plan: 50 queries per invocation (hence 25
+  events, one statement each) and a daily row budget, which the indexes on
+  `ts`, `op`, `(machine, vm, ts)` and `(owner, ts)` keep small.
+
+Set up on 1 Oct 2026: `wrangler d1 create irgo-ledger` (its id is in
+`wrangler.toml`), `wrangler d1 migrations apply irgo-ledger --remote`, the two
+secrets, then a deploy. Locally: `wrangler d1 migrations apply irgo-ledger
+--local`, then `wrangler dev --local --var LEDGER_TOKEN:local-lw --var
+LEDGER_READ_TOKEN:local-lr`. A schema change is a new numbered file in
+`worker/migrations/`, applied the same way.
 
 ## Known traps
 

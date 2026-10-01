@@ -1,0 +1,63 @@
+# The GitHub action (.github/actions/run) proved from both client OSes: a
+# hosted Linux and a hosted Windows runner each build a small Windows ARM64
+# program and send it to the Mac running `irgo-winvm serve`, which runs it on
+# a fresh clone and deletes it. It needs the Mac serving, so it never runs on
+# its own: by hand (workflow_dispatch), or on a push to a scratch/remote-*
+# branch. It is also the example docs/DEVELOPMENT.md ("From GitHub Actions")
+# points at.
+name: remote
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["scratch/remote-*"]
+
+permissions:
+  contents: read
+
+env:
+  MISE_TASK_RUN_AUTO_INSTALL: false
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build a Windows ARM64 program
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/hello"
+          cat > "$RUNNER_TEMP/hello/main.go" <<'EOF'
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+          	"runtime"
+          )
+
+          func main() {
+          	h, _ := os.Hostname()
+          	fmt.Printf("hello from %s/%s on %s, args %q\n", runtime.GOOS, runtime.GOARCH, h, os.Args[1:])
+          }
+          EOF
+          cd "$RUNNER_TEMP/hello"
+          go mod init hello >/dev/null 2>&1
+          GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/hello.exe" .
+
+      - uses: ./.github/actions/run
+        with:
+          binary: hello.exe
+          args: |
+            sent-from-${{ matrix.os }}
+          token: ${{ secrets.IRGO_REMOTE_TOKEN }}
+          artifact: result-${{ matrix.os }}

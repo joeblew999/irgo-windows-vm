@@ -1,0 +1,157 @@
+# Run a Windows ARM64 binary on a real Windows 11 VM on a Mac, from any
+# workflow: the binary goes through the irgo-windows-vm Worker to a Mac
+# running `irgo-winvm serve`, which runs it on a fresh clone of its golden
+# image and deletes the clone. The step passes or fails on the job's exit code
+# (docs/DEVELOPMENT.md, "What it exits with"), and the result files —
+# result.json, stdout.txt, test2json.json, the desktop and any screenshots —
+# are uploaded as an artifact.
+#
+#   - uses: joeblew999/irgo-windows-vm/.github/actions/run@main
+#     with:
+#       binary: dist/app.exe        # GOOS=windows GOARCH=arm64 CGO_ENABLED=0
+#       gui: true
+#       token: ${{ secrets.IRGO_REMOTE_TOKEN }}
+#
+# The whole example is in docs/DEVELOPMENT.md, "From GitHub Actions".
+name: irgo-windows-vm run
+description: Run a Windows ARM64 binary or go test -c binary on a fresh Windows 11 VM on a Mac, and pass or fail on its exit code.
+branding:
+  icon: monitor
+  color: blue
+
+inputs:
+  binary:
+    description: Path to the .exe (GOOS=windows GOARCH=arm64 CGO_ENABLED=0), or a `go test -c` binary with test=true.
+    required: true
+  args:
+    description: Arguments for the program, one per line. {out} is a directory in the guest whose screenshots come back.
+    default: ""
+  gui:
+    description: Run on the guest's desktop; required for anything that opens a window.
+    default: "false"
+  test:
+    description: The binary is a `go test -c` binary; run it with -test.v=test2json and return the events.
+    default: "false"
+  timeout:
+    description: How long the program may run in the guest (a Go duration, at most 1h).
+    default: 10m
+  token:
+    description: Your caller token for the Worker's job queue (IRGO_REMOTE_TOKEN).
+    required: true
+  url:
+    description: The Worker.
+    default: https://irgo-windows-vm.gedw99.workers.dev
+  version:
+    description: The irgo-winvm release to run the client from ("latest" or a tag). When it has no build for this runner, the client is built from this action's own ref with Go.
+    default: latest
+  artifact:
+    description: Name of the uploaded artifact holding the result files ("" for none).
+    default: irgo-windows-vm-result
+
+outputs:
+  job-id:
+    description: The job's id at the Worker.
+    value: ${{ steps.run.outputs.job-id }}
+  exit-code:
+    description: The job's exit code on the tool's table (0 ok, 1 the program failed, 8 it never ran to the end, ...).
+    value: ${{ steps.run.outputs.exit-code }}
+  dir:
+    description: Where the result files were saved.
+    value: ${{ steps.run.outputs.dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Get the irgo-winvm client
+      id: client
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; *) echo "unknown runner OS $RUNNER_OS"; exit 1 ;; esac
+        case "$RUNNER_ARCH" in X64) arch=amd64 ;; ARM64) arch=arm64 ;; *) echo "unknown runner arch $RUNNER_ARCH"; exit 1 ;; esac
+        ext=""; [ "$os" = windows ] && ext=.exe
+        dir="$RUNNER_TEMP/irgo-winvm-client"; mkdir -p "$dir"
+        bin="$dir/irgo-winvm$ext"
+        base=https://github.com/joeblew999/irgo-windows-vm/releases
+        if [ "$VERSION" = latest ]; then from="$base/latest/download"; else from="$base/download/$VERSION"; fi
+        got=""
+        for name in "irgo-winvm-$os-$arch$ext" "irgo-winvm-$os-$arch"; do
+          if curl -fsSL -o "$bin" "$from/$name"; then got="$from/$name"; break; fi
+        done
+        if [ -z "$got" ]; then
+          # No release build for this OS yet: build the client from the
+          # action's own ref. It is the same binary, and pure Go.
+          if ! command -v go >/dev/null; then
+            echo "::error::no irgo-winvm $VERSION build for $os/$arch and no Go to build one; add actions/setup-go before this step"
+            exit 1
+          fi
+          # The action's own ref; used from this repository by path it has
+          # none, and the commit being tested is the client to build.
+          ref="${ACTION_REF:-main}"
+          if [ -z "$ACTION_REF" ] && [ "$GITHUB_REPOSITORY" = joeblew999/irgo-windows-vm ]; then ref="$GITHUB_SHA"; fi
+          echo "no release build for $os/$arch at $VERSION; building the client from $ref"
+          GOBIN="$dir" CGO_ENABLED=0 go install "github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@$ref"
+          got="go install @$ref"
+        fi
+        chmod +x "$bin"
+        echo "client: $got"
+        "$bin" version
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+    - name: Run it on a fresh Windows VM
+      id: run
+      shell: bash
+      env:
+        IRGO_REMOTE_URL: ${{ inputs.url }}
+        IRGO_REMOTE_TOKEN: ${{ inputs.token }}
+        BIN: ${{ steps.client.outputs.bin }}
+        BINARY: ${{ inputs.binary }}
+        ARGS: ${{ inputs.args }}
+        GUI: ${{ inputs.gui }}
+        TEST: ${{ inputs.test }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -uo pipefail
+        out="$RUNNER_TEMP/irgo-remote"
+        flags=(-o "$out" -json -timeout "$TIMEOUT")
+        [ "$GUI" = true ] && flags+=(-gui)
+        [ "$TEST" = true ] && flags+=(-test)
+        args=()
+        while IFS= read -r a; do [ -n "$a" ] && args+=("$a"); done <<< "$ARGS"
+        "$BIN" remote submit "${flags[@]}" "$BINARY" ${args[@]+"${args[@]}"} | tee "$RUNNER_TEMP/irgo-remote.log"
+        code=${PIPESTATUS[0]}
+        last=$(tail -n 1 "$RUNNER_TEMP/irgo-remote.log")
+        id=$(printf '%s' "$last" | sed -n 's/^{"id":"\([0-9a-f]*\)".*/\1/p')
+        echo "job-id=$id" >> "$GITHUB_OUTPUT"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+        {
+          echo "### irgo-windows-vm: $(basename "$BINARY") on Windows 11 ARM64"
+          echo
+          echo "job \`$id\`, exit code **$code**"
+          if [ -f "$out/$id/stdout.txt" ]; then echo; echo '```'; tail -n 60 "$out/$id/stdout.txt"; echo '```'; fi
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+
+    - name: Upload the result files
+      if: always() && inputs.artifact != '' && steps.run.outputs.job-id != ''
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ steps.run.outputs.dir }}
+        if-no-files-found: warn
+
+    - name: Pass or fail on the job's exit code
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        if [ "${CODE:-1}" != 0 ]; then
+          echo "::error::the job exited ${CODE:-unknown} (docs/DEVELOPMENT.md, \"What it exits with\"; 8 means it never ran to the end and is worth retrying)"
+          exit "${CODE:-1}"
+        fi
+        echo "the job exited 0"

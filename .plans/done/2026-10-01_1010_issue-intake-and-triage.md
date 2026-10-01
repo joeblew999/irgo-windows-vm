@@ -1,6 +1,6 @@
 # Issue intake and triage for agent-filed issues
 
-Status: intake done (agent Y, merged 1 Oct); triage routine planned
+Status: done 1 Oct — intake merged; triage routine live
 
 ## Symptom
 Other repos' agents will file issues here. Without structure they arrive missing the facts needed
@@ -20,3 +20,10 @@ possible, and open PRs for clear fixes — PRs reviewed, never pushed to main di
 
 ## Verify
 File a test issue with the recipe as an agent would; the routine labels and answers it.
+
+## Closed — 1 Oct 2026
+
+Triage routine created: "irgo-windows-vm issue triage" (trig_018vorGqAkPDU9eY31yWwbi7), every 6 h at :36
+UTC, Sonnet 5.5, GitHub connector. Labels, needs-report requests, upstream routing, duplicates
+(closes only clear ones), small-fix PRs on triage/issue-N branches; never pushes to main or merges.
+https://claude.ai/code/routines/trig_018vorGqAkPDU9eY31yWwbi7

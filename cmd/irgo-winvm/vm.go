@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"time"
@@ -56,7 +57,8 @@ func vmDeleteFlags() *flag.FlagSet {
 }
 
 // runVMDelete removes a VM. Without -force it lists what would go and refuses.
-// A VM that does not exist is nothing to undo, which is success.
+// A VM UTM says does not exist is nothing to undo, which is success; UTM not
+// answering is not the same thing, and is an error.
 func runVMDelete(v values, _ []string) error {
 	name, force := v.String("vm"), v.Bool("force")
 	say := utmvm.Printer("vm-delete")
@@ -68,8 +70,11 @@ func runVMDelete(v values, _ []string) error {
 	say("STEP 1/2  the VM")
 	say("          %s", utmvm.Home(bundle))
 
-	e, err := utmvm.Find(name)
+	e, found, err := findForUndo(name)
 	if err != nil {
+		return err
+	}
+	if !found {
 		say("          UTM knows no VM %q; nothing to delete", name)
 		return nil
 	}
@@ -97,6 +102,26 @@ func runVMDelete(v values, _ []string) error {
 	}
 	say("removed %s — %s reclaimed", utmvm.Home(out.Path), utmvm.HumanBytes(out.TotalBytes))
 	return nil
+}
+
+// findVM is utmvm.Find, a variable so tests can have UTM answer either way
+// without UTM.
+var findVM = utmvm.Find
+
+// findForUndo is Find for an undo, which must tell "UTM answered: there is no
+// such VM" (found is false, and the undo has nothing to do) from "UTM could
+// not be asked" (an error). Treating both as nothing to delete made vm-delete
+// and app-delete exit 0 when utmctl itself had failed, so a caller believed a
+// VM gone that was still there.
+func findForUndo(name string) (e utmvm.Entry, found bool, err error) {
+	e, err = findVM(name)
+	switch {
+	case err == nil:
+		return e, true, nil
+	case errors.Is(err, utmvm.ErrNoVM):
+		return utmvm.Entry{}, false, nil
+	}
+	return utmvm.Entry{}, false, fmt.Errorf("cannot tell whether VM %q exists, so nothing was deleted: %w", name, err)
 }
 
 func vmRepairFlags() *flag.FlagSet {

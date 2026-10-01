@@ -94,8 +94,11 @@ func runAppDelete(v values, args []string) error {
 	say("stage:  %s", utmvm.Home(utmvm.VMStageDir()))
 	say("vm:     %s", name)
 	say("guest:  %s and %s", `C:\Windows\Temp`, `C:\Users\Public`)
-	e, err := utmvm.Find(name)
+	e, found, err := findForUndo(name)
 	if err != nil {
+		return err
+	}
+	if !found {
 		say("UTM knows no VM %q; nothing to delete", name)
 		return nil
 	}

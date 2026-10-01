@@ -11,7 +11,10 @@ package utmvm
 // `targets` to tell them what their machine can do.
 
 import (
+	"encoding/binary"
+	"fmt"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -90,4 +93,67 @@ func hostMemory() (uint64, error) { return unix.SysctlUint64("hw.memsize") }
 func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+// apfsUsage is what a file costs on APFS: allocated is every block it uses,
+// private the bytes it shares with no other file (ATTR_CMNEXT_PRIVATESIZE),
+// and family the clone family it belongs to (ATTR_CMNEXT_CLONEID), equal for
+// a file and the clones made from it.
+//
+// st_blocks counts shared blocks in full, so a clone of the 10 GiB golden
+// image reads as 10 GiB the moment it is made, and du over a clone and its
+// source counts the same blocks twice. The private size is what deleting the
+// file gives back (measured 1 Oct 2026: a clone reading 0.28 GiB private
+// freed 0.29 GiB of df when deleted). getattrlist works on a known path in
+// UTM's container, where ls does not.
+func apfsUsage(path string) (allocated, private int64, family uint64, err error) {
+	al := unix.Attrlist{
+		Bitmapcount: unix.ATTR_BIT_MAP_COUNT,
+		Commonattr:  attrCmnReturnedAttrs,
+		Forkattr:    attrCmnextPrivateSize | attrCmnextCloneID,
+	}
+	var buf [64]byte
+	p, err := syscall.BytePtrFromString(path)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	//nolint:gosec // getattrlist(2) takes these pointers for the duration of the call
+	_, _, errno := syscall.Syscall6(syscall.SYS_GETATTRLIST, uintptr(unsafe.Pointer(p)),
+		uintptr(unsafe.Pointer(&al)), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+		uintptr(unix.FSOPT_ATTR_CMN_EXTENDED|unix.FSOPT_NOFOLLOW), 0)
+	if errno != 0 {
+		return 0, 0, 0, fmt.Errorf("getattrlist %s: %w", path, errno)
+	}
+	// u32 length, the returned attribute_set_t (five u32: common, vol, dir,
+	// file, fork), then the attributes in bit order: private size (off_t),
+	// clone id (u64).
+	returned := binary.LittleEndian.Uint32(buf[4+16:])
+	if returned&attrCmnextPrivateSize == 0 || returned&attrCmnextCloneID == 0 {
+		return 0, 0, 0, fmt.Errorf("%s: the filesystem does not report private size (not APFS?)", path)
+	}
+	private = int64(binary.LittleEndian.Uint64(buf[24:])) //nolint:gosec // a byte count
+	family = binary.LittleEndian.Uint64(buf[32:])
+	var st syscall.Stat_t
+	if err := syscall.Stat(path, &st); err != nil {
+		return 0, 0, 0, err
+	}
+	return st.Blocks * 512, private, family, nil
+}
+
+// From <sys/attr.h>; x/sys/unix does not carry the extended common
+// attributes.
+const (
+	attrCmnReturnedAttrs  = 0x80000000
+	attrCmnextPrivateSize = 0x00000008
+	attrCmnextCloneID     = 0x00000100
+)
+
+// volumeSize is the size of the filesystem holding path, and what is free on
+// it for this user, from one statfs.
+func volumeSize(path string) (total, free int64, err error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0, err
+	}
+	return int64(st.Blocks) * int64(st.Bsize), int64(st.Bavail) * int64(st.Bsize), nil //nolint:gosec // filesystem counters
 }

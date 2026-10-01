@@ -26,4 +26,7 @@ if git describe --tags --exact-match HEAD >/dev/null 2>&1 && [ -z "$(git status 
 else
   goreleaser release --clean --snapshot
 fi
+# Each binary is dist/irgo-winvm_darwin_<arch>/irgo-winvm, published as
+# irgo-winvm-darwin-<arch>: the name SHA256SUMS uses.
+ls dist/irgo-winvm_darwin_*/irgo-winvm
 cat dist/SHA256SUMS

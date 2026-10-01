@@ -112,10 +112,16 @@ jobs:
       # the commits since the last tag) and creates the GitHub release. It
       # refuses a dirty tree and a commit that is not the tag, so what it
       # publishes is what the tag names.
+      #
+      # HOMEBREW_TAP_GITHUB_TOKEN can push to joeblew999/homebrew-tap, which
+      # github.token cannot (it is scoped to this repository). Unset, the cask
+      # is not uploaded and the release notes leave the brew line out; the rest
+      # publishes as before.
       - name: publish
         if: github.ref_type == 'tag'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: goreleaser release --clean
 
       - name: build (dry run)
@@ -127,5 +133,5 @@ jobs:
         with:
           name: irgo-winvm-dev
           path: |
-            dist/irgo-winvm-darwin-*
+            dist/irgo-winvm_darwin_*/irgo-winvm
             dist/SHA256SUMS

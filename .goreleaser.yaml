@@ -12,21 +12,14 @@ project_name: irgo-winvm
 builds:
   - id: irgo-winvm
     main: ./cmd/irgo-winvm
-    # Built under its download name, straight into dist/, so what a local build
-    # leaves in dist/ is the file SHA256SUMS names and the release publishes.
-    # Without these the binary sits at dist/irgo-winvm_darwin_arm64_v8.0/irgo-winvm
-    # and only takes its published name on upload.
-    #
-    # This makes GoReleaser warn "artifact already present in the list ... might
-    # cause errors when publishing", twice. It is harmless, and checked rather
-    # than assumed: the check (internal/artifact/artifact.go, Add) compares each
-    # uploadable artefact's name against every artefact, including the Binary
-    # one the build made, and Binary is not uploadable (isUploadable). So one
-    # file per name is uploaded. dist/artifacts.json after a build lists two
-    # Binary and two UploadableBinary entries (both print as "Binary") and the
-    # Checksum -- the same three assets v0.4.1 published.
-    binary: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
-    no_unique_dist_dir: true
+    # Built as irgo-winvm, the command's name, in dist/irgo-winvm_darwin_<arch>/;
+    # the archive below publishes it as irgo-winvm-darwin-<arch>, and
+    # SHA256SUMS names it that way. The build's name is what the Homebrew cask
+    # links onto PATH (`binary "irgo-winvm-darwin-arm64", target: "irgo-winvm"`):
+    # built under its download name, as until v0.4.1, brew installed a command
+    # called irgo-winvm-darwin-arm64. Same bytes either way — the checksums of
+    # one commit were compared before and after this change, and matched.
+    binary: irgo-winvm
     env:
       - CGO_ENABLED=0
     goos: [darwin]
@@ -73,31 +66,145 @@ checksum:
   name_template: SHA256SUMS
   algorithm: sha256
 
+# `brew install joeblew999/tap/irgo-winvm`. A cask, not a formula: GoReleaser
+# deprecated `brews` for prebuilt binaries in v2.10, and a cask installs the
+# binary as published, with the checksum GoReleaser computed.
+#
+# The tap repository joeblew999/homebrew-tap must exist, and release.yml must
+# have HOMEBREW_TAP_GITHUB_TOKEN (a token that can push to it). Until then the
+# upload is skipped, so a release without the tap still publishes everything
+# else — the cask file is still written to dist/homebrew/ for inspection.
+homebrew_casks:
+  - name: irgo-winvm
+    repository:
+      owner: joeblew999
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
+    directory: Casks
+    homepage: https://joeblew999.github.io/irgo-windows-vm/
+    description: Run a Go program built on your Mac on a real Windows 11 ARM64 VM
+    license: MIT
+    commit_author:
+      name: joeblew999
+      email: joeblew999@users.noreply.github.com
+    commit_msg_template: "irgo-winvm {{ .Tag }}"
+    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
+    # The binary is not signed by a Developer ID, and Homebrew quarantines
+    # what a cask downloads, so Gatekeeper would refuse to run it. This is
+    # the same step the manual install asks of you.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", staged_path.to_s]
+          end
+    caveats: |
+      Next: irgo-winvm doctor
+      For an AI agent: claude mcp add irgo-winvm -- irgo-winvm mcp
+
 snapshot:
   # Anything that is not a clean checkout of a tag. Before GoReleaser a
   # non-release build also said `dev`; `-dirty` is kept from then too, since
   # whatever is uncommitted is not what any commit says.
   version_template: "dev{{ if .IsGitDirty }}-dirty{{ end }}"
 
+# The commits since the last tag, grouped. Conventional prefixes (feat:, fix:,
+# docs:) are matched first; the rest by the area this repository's subjects
+# start with. Merges, plans and the recorded glaze verdicts are not changes a
+# user can see.
 changelog:
   use: git
   sort: asc
+  filters:
+    exclude:
+      - '^Merge '
+      - '^plans?:'
+      - '^GLAZE-STATUS'
+      - '^gofmt '
+  groups:
+    - title: New
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: The tool
+      regexp: '^(vm-|iso-|app|doctor|mcp|status|glaze-check|golden|utmvm|cmd|internal|RunInstall|registerBundle|autounattend|desktop reset|first run|Split|join)'
+      order: 2
+    - title: Documentation
+      regexp: '^(docs(\(.+\))?:|README|RESULTS|ROADMAP|CONTRIBUTING|THREAT-MODEL|DEVELOPMENT|UPSTREAM|site)'
+      order: 3
+    - title: Tests, CI and examples
+      regexp: '^(test|tests|ci|CI|release|pages|conformance|examples|drive|glazecheck|glaze|worker|mise|vm:test|iso:test|upstream)'
+      order: 4
+    - title: Other
+      order: 999
 
 release:
+  # The asset list's install script, so `curl | sh` can be pinned to a release.
+  extra_files:
+    - glob: ./install.sh
   header: |
-    A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it.
+    A Windows 11 ARM64 VM on Apple Silicon, and your Go program running inside it,
+    for a developer on a Mac and for an AI agent over MCP.
 
-    Download the one for your Mac — `arm64` for Apple Silicon — then:
+    ## Install
+
+    ```sh
+    curl -fsSL https://github.com/joeblew999/irgo-windows-vm/releases/download/{{ .Tag }}/install.sh | sh
+    ```
+
+    It downloads the binary for your Mac, checks it against `SHA256SUMS`, and
+    installs it as `~/.local/bin/irgo-winvm` (`IRGO_WINVM_DIR` to put it elsewhere).
+    {{- if envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}
+    Or with Homebrew: `brew install --cask joeblew999/tap/irgo-winvm`.
+    {{- end }}
+    Or with Go: `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@{{ .Tag }}`.
+
+    Or download `irgo-winvm-darwin-arm64` (Apple Silicon) below, then:
 
         chmod +x irgo-winvm-darwin-arm64
         xattr -d com.apple.quarantine irgo-winvm-darwin-arm64
-        ./irgo-winvm-darwin-arm64
+        mv irgo-winvm-darwin-arm64 ~/.local/bin/irgo-winvm    # or anywhere on your PATH
 
-    The second line is macOS refusing anything downloaded from the internet;
-    without it Gatekeeper reports the binary as damaged.
+    The binary is not signed with an Apple Developer ID. Downloaded with a
+    browser it carries macOS's quarantine flag, and Gatekeeper refuses to run it
+    until the flag is cleared; `curl`, Homebrew's cask and `go install` take care
+    of that.
 
-    Three steps, in order: iso-create, vm-create, app-create. Each has an undo.
-    It installs UTM itself if you do not have it.
+    ## First run
 
-    Checksums are in SHA256SUMS, and they are reproducible: `mise run go:build`
+    ```sh
+    irgo-winvm doctor
+    ```
+
+    It says what is set up and what to run next, in order: UTM (installed for
+    you), the Windows installer (`iso-create -fetch`), a VM (`vm-create -install`,
+    about 45 minutes unattended, once), then your program
+    (`app-create app.exe`, built with `GOOS=windows GOARCH=arm64 CGO_ENABLED=0`).
+    macOS asks once to let your terminal control UTM: click OK.
+
+    ## For AI agents
+
+    ```sh
+    claude mcp add irgo-winvm -- irgo-winvm mcp
+    ```
+
+    Other clients, every tool, the typical session and the exit codes:
+    <https://joeblew999.github.io/irgo-windows-vm/mcp.html> (`irgo-winvm mcp -h`
+    prints the essentials). It serves stdin and stdout; read the
+    [threat model](https://joeblew999.github.io/irgo-windows-vm/threat-model.html)
+    before `-http`.
+
+    ## A VM in seconds: the golden image
+
+    After one install, `vm-golden-create -vm <that VM>` seals it, and every
+    `vm-create` after that is a clone that answers in about 23 seconds. With a
+    private R2 cache of your own (`IRGO_GOLDEN_URL` and `IRGO_GOLDEN_TOKEN`),
+    `vm-create -install` on another of your Macs pulls the golden image (8.4 GB,
+    under 5 minutes measured) instead of installing. The cache is for your own
+    licensed machines and CI only: the Windows licence forbids sharing the image,
+    and every running clone needs its own licence. Never make it public.
+
+    Checksums are in `SHA256SUMS`, and they are reproducible: `mise run go:build`
     on a clean checkout of the same tag produces byte-identical binaries.

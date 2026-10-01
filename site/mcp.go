@@ -65,6 +65,15 @@ func generateMCP(root string) (string, error) {
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 
+	help, err := capture(bin, "mcp", "-h")
+	if err != nil {
+		return "", fmt.Errorf("mcp -h: %w", err)
+	}
+	instructions, err := agentInstructions(help)
+	if err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 	b.WriteString(`# The MCP server
 
@@ -75,10 +84,30 @@ see the screen when the program hangs.
 This page is captured from the compiled binary by listing a live server, so it
 shows exactly what a client is told.
 
+## Install
+
+Install the binary first ([the ways to install it](index.html#install)); the
+release is all you need, with no checkout, Go toolchain or mise. Then check it:
+
+` + "```" + `sh
+irgo-winvm doctor     # what is set up, and the next steps in order
+` + "```" + `
+
 ## Connect
 
-The server speaks the Model Context Protocol on stdin and stdout. Configure your
-client to spawn it:
+The server speaks the Model Context Protocol on stdin and stdout. Register it
+once with your client.
+
+**Claude Code:**
+
+` + "```" + `sh
+claude mcp add irgo-winvm -- irgo-winvm mcp
+` + "```" + `
+
+Add ` + "`" + `--scope user` + "`" + ` to have it in every project, not just this one.
+
+**Claude Desktop and other clients** that read an ` + "`" + `mcpServers` + "`" + ` file (Claude
+Desktop's is ` + "`" + `~/Library/Application Support/Claude/claude_desktop_config.json` + "`" + `):
 
 ` + "```" + `json
 {
@@ -91,6 +120,9 @@ client to spawn it:
 }
 ` + "```" + `
 
+- **Use the full path** (` + "`" + `command -v irgo-winvm` + "`" + ` prints it) as ` + "`" + `command` + "`" + ` when the
+  client is an app that does not inherit your shell's PATH, as Claude Desktop
+  does not.
 - **Agents working in this repository** are already connected: ` + "`" + `.mcp.json` + "`" + `
   registers the server.
 - **It needs macOS on Apple Silicon** and UTM, which ` + "`" + `vm-create` + "`" + ` installs. A
@@ -98,6 +130,33 @@ client to spawn it:
 - **Nothing else may write to stdout** while it runs, because stdout is the
   protocol channel. Commands print progress, so the server collects that output
   and returns it in the tool result.
+
+## A typical session
+
+What an agent does to answer "does my app work on Windows?", each a tool call:
+
+1. ` + "`" + `doctor` + "`" + `: what is set up, and the next step.
+2. ` + "`" + `vm-create` + "`" + ` with ` + "`" + `vm: "agent1"` + "`" + `: a VM of its own. With a golden image this is a
+   clone that answers in seconds. Without one, ` + "`" + `install: true` + "`" + ` returns a job id,
+   and ` + "`" + `status` + "`" + ` with that id (in ` + "`" + `args` + "`" + `) says when it is done; it pulls the golden
+   image from the [private cache](development.html#the-private-r2-cache) when
+   ` + "`" + `IRGO_GOLDEN_URL` + "`" + ` and ` + "`" + `IRGO_GOLDEN_TOKEN` + "`" + ` are set, or installs Windows
+   (about 45 minutes, once; ` + "`" + `iso-create` + "`" + ` with ` + "`" + `fetch: true` + "`" + ` first).
+3. Build the app with ` + "`" + `GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o app.exe` + "`" + `.
+4. ` + "`" + `app-create` + "`" + ` with ` + "`" + `vm: "agent1"` + "`" + `, ` + "`" + `gui: true` + "`" + ` for a window, and ` + "`" + `args: ["/path/to/app.exe"]` + "`" + `:
+   the program's output and exit code.
+5. ` + "`" + `vm-screen` + "`" + ` with ` + "`" + `vm: "agent1"` + "`" + `: the screen as an image, when the answer is that
+   it hung.
+6. ` + "`" + `vm-delete` + "`" + ` with ` + "`" + `vm: "agent1"` + "`" + ` and ` + "`" + `force: true` + "`" + `, when it is finished with it.
+
+## What the agent is told
+
+The server sends this with its initialize response, so a connected agent has
+it before its first call. Captured from ` + "`" + `irgo-winvm mcp -h` + "`" + `:
+
+` + "```" + `text
+` + instructions + `
+` + "```" + `
 
 ## Tools
 
@@ -260,4 +319,30 @@ exiting, but the 45-minute ` + "`" + `vm-create -install` + "`" + ` it was writt
 driven over MCP. See the [roadmap](roadmap.html).
 `)
 	return b.String(), nil
+}
+
+// instructionsHeading is the line in `mcp -h` that the server's instructions
+// follow, indented, until the flag list.
+const instructionsHeading = "What the server tells the agent when it connects:"
+
+// agentInstructions cuts the server's instructions out of `mcp -h`, without
+// their indent. Missing is an error: a page without them would say the server
+// tells the agent nothing.
+func agentInstructions(help string) (string, error) {
+	_, after, ok := strings.Cut(help, instructionsHeading)
+	if !ok {
+		return "", fmt.Errorf("mcp -h has no %q section", instructionsHeading)
+	}
+	var lines []string
+	for _, l := range strings.Split(after, "\n") {
+		if strings.HasPrefix(l, "  -") {
+			break // the flags
+		}
+		lines = append(lines, strings.TrimPrefix(l, "    "))
+	}
+	s := strings.TrimSpace(strings.Join(lines, "\n"))
+	if s == "" {
+		return "", fmt.Errorf("mcp -h's %q section is empty", instructionsHeading)
+	}
+	return s, nil
 }

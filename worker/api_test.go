@@ -6,7 +6,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -15,12 +14,18 @@ import (
 var testNow = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
 func testEnv(vars map[string]string) (Env, *memStore) {
-	st := newMemStore()
+	env, st, _ := testEnvGolden(vars)
+	return env, st
+}
+
+func testEnvGolden(vars map[string]string) (Env, *memStore, *memBlobs) {
+	st, gb := newMemStore(), newMemBlobs()
 	return Env{
-		Var:  func(n string) string { return vars[n] },
-		Site: func() (Store, error) { return st, nil },
-		Now:  func() time.Time { return testNow },
-	}, st
+		Var:    func(n string) string { return vars[n] },
+		Site:   func() (Store, error) { return st, nil },
+		Golden: func() (Blobs, error) { return gb, nil },
+		Now:    func() time.Time { return testNow },
+	}, st, gb
 }
 
 var png1 = append([]byte("\x89PNG\r\n\x1a\n"), "one"...)
@@ -186,57 +191,3 @@ func TestValidators(t *testing.T) {
 	}
 }
 
-var goldenVars = map[string]string{
-	varGoldenToken: "gold", varAccountID: "acct123", varGoldenBucket: "irgo-golden",
-	varGoldenKeyID: "AKID", varGoldenSecret: "SECRET",
-}
-
-func TestGoldenRefusals(t *testing.T) {
-	env, _ := testEnv(goldenVars)
-	h := Handler(env)
-	id := strings.Repeat("ab", 32)
-	for _, c := range []struct {
-		path, token string
-		want        int
-	}{
-		{"/api/golden/golden/latest", "", 401},
-		{"/api/golden/golden/latest", "wrong", 401},
-		{"/api/golden/", "", 401}, // no listing, and no hint without a token
-		{"/api/golden/", "gold", 404},
-		{"/api/golden/golden/", "gold", 404},
-		{"/api/golden/other/file", "gold", 404},
-		{"/api/golden/golden/chunks/" + id + ".zst%2F..%2F..%2Fx", "gold", 404},
-		{"/api/golden/golden/chunks/short.zst", "gold", 404},
-	} {
-		if w := do(h, "GET", c.path, c.token, nil, ""); w.Code != c.want {
-			t.Errorf("%s token=%q: %d %s, want %d", c.path, c.token, w.Code, w.Body, c.want)
-		}
-	}
-
-	env2, _ := testEnv(map[string]string{varGoldenToken: "gold"})
-	if w := do(Handler(env2), "GET", "/api/golden/golden/latest", "gold", nil, ""); w.Code != 503 {
-		t.Errorf("bucket not configured: %d, want 503", w.Code)
-	}
-}
-
-func TestGoldenRedirectsToPresignedURL(t *testing.T) {
-	env, _ := testEnv(goldenVars)
-	id := strings.Repeat("0f", 32)
-	w := do(Handler(env), "GET", "/api/golden/golden/chunks/"+id+".zst", "gold", nil, "")
-	if w.Code != http.StatusFound {
-		t.Fatalf("%d %s", w.Code, w.Body)
-	}
-	u, err := url.Parse(w.Header().Get("Location"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	q := u.Query()
-	if u.Host != "acct123.r2.cloudflarestorage.com" || u.Path != "/irgo-golden/golden/chunks/"+id+".zst" ||
-		q.Get("X-Amz-Expires") != "1800" || q.Get("X-Amz-Signature") == "" ||
-		!strings.HasPrefix(q.Get("X-Amz-Credential"), "AKID/20261001/auto/s3/") {
-		t.Fatalf("location: %s", u)
-	}
-	if strings.Contains(u.String(), "SECRET") {
-		t.Fatal("the secret key is in the URL")
-	}
-}

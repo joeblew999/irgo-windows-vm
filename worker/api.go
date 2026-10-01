@@ -8,11 +8,11 @@ package main
 //	GET  /api/glaze-status                        the latest run per target, JSON
 //	POST /api/glaze-status/{target}               a run: shots.json and its pictures (token)
 //	GET  /api/glaze-status/{target}/runs/{id}/{f} one stored file of a run
-//	GET  /api/golden/{key...}                     302 to a presigned R2 URL (token)
+//	*    /api/golden/{key}, /api/golden-list/{kind}  the private golden image (golden.go)
 //
-// Everything here is plain Go behind two small interfaces (Env, Store), so it
-// is tested with `go test` on the host; main_js.go binds them to R2 and the
-// Worker's environment.
+// Everything here is plain Go behind small interfaces (Env, Store, Blobs), so
+// it is tested with `go test` on the host; platform_js.go binds them to R2 and
+// the Worker's environment.
 
 import (
 	"bytes"
@@ -39,21 +39,17 @@ type Store interface {
 
 // Env is what the platform supplies per request.
 type Env struct {
-	Var  func(name string) string // vars and secrets from wrangler.toml / wrangler secret
-	Site func() (Store, error)    // the SITE bucket: glaze status, public data
-	Now  func() time.Time
+	Var    func(name string) string // vars and secrets from wrangler.toml / wrangler secret
+	Site   func() (Store, error)    // the SITE bucket: glaze status, public data
+	Golden func() (Blobs, error)    // the GOLDEN bucket: the private golden image
+	Now    func() time.Time
 }
 
 // The names of the vars and secrets Env.Var is asked for. docs/DEVELOPMENT.md,
 // "The Cloudflare Worker", lists them with how each is set.
 const (
-	varGlazeToken    = "GLAZE_STATUS_TOKEN"       // secret: who may post a run
-	varGoldenToken   = "GOLDEN_TOKEN"             // secret: who may fetch the golden image
-	varAccountID     = "R2_ACCOUNT_ID"            // var
-	varGoldenBucket  = "GOLDEN_BUCKET"            // var: the private bucket's name
-	varGoldenKeyID   = "GOLDEN_ACCESS_KEY_ID"     // secret: R2 S3 token, read-only, that bucket only
-	varGoldenSecret  = "GOLDEN_SECRET_ACCESS_KEY" // secret
-	goldenURLExpires = 30 * time.Minute           // what vm-golden-pull's own presign uses
+	varGlazeToken  = "GLAZE_STATUS_TOKEN" // secret: who may post a run
+	varGoldenToken = "GOLDEN_TOKEN"       // secret: who may fetch the golden image
 )
 
 // Limits on a posted run. A run today is 7 pictures of 2–25 KB.
@@ -148,8 +144,11 @@ func Handler(env Env) http.Handler {
 		case get && len(p) == 5 && p[0] == "glaze-status" && p[2] == "runs":
 			env.glazeFile(w, r, p[1], p[3], p[4])
 			return
-		case (get || r.Method == http.MethodHead) && len(p) >= 1 && p[0] == "golden":
+		case len(p) >= 1 && p[0] == "golden":
 			env.golden(w, r, strings.TrimPrefix(r.URL.Path, "/api/golden/"))
+			return
+		case get && len(p) == 2 && p[0] == "golden-list":
+			env.goldenList(w, r, p[1])
 			return
 		}
 		fail(w, http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)
@@ -402,35 +401,6 @@ func (env Env) glazeFile(w http.ResponseWriter, r *http.Request, target, id, fil
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		_, _ = w.Write(b)
 	}
-}
-
-// golden answers with a redirect to a presigned URL on R2's S3 endpoint
-// rather than streaming the object: a 64 MiB chunk through Go-in-Wasm would
-// cost far more CPU than a Worker request is allowed, and the presigned URL
-// keeps Range (resume) working against R2 itself. The private bucket is not
-// bound to the Worker at all; it is reached only with a read-only S3 token.
-func (env Env) golden(w http.ResponseWriter, r *http.Request, key string) {
-	if !env.authorized(w, r, varGoldenToken) {
-		return
-	}
-	if !isGoldenKey(key) {
-		fail(w, http.StatusNotFound, "not a golden-image key: golden/latest, golden/manifests/<sha256>.json or golden/chunks/<sha256>.zst")
-		return
-	}
-	acct, bucket := env.Var(varAccountID), env.Var(varGoldenBucket)
-	keyID, secret := env.Var(varGoldenKeyID), env.Var(varGoldenSecret)
-	if acct == "" || bucket == "" || keyID == "" || secret == "" {
-		fail(w, http.StatusServiceUnavailable, "refused: the golden bucket is not configured (%s, %s, %s, %s)", varAccountID, varGoldenBucket, varGoldenKeyID, varGoldenSecret)
-		return
-	}
-	u := presign(presignInput{
-		Method: r.Method, Host: acct + ".r2.cloudflarestorage.com", Path: "/" + bucket + "/" + key,
-		Region: "auto", AccessKeyID: keyID, SecretAccessKey: secret,
-		Time: env.Now(), Expires: goldenURLExpires,
-	})
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Location", u)
-	w.WriteHeader(http.StatusFound)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

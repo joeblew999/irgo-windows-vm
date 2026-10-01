@@ -62,6 +62,10 @@ func backgroundWindow(p Page) (unsafe.Pointer, error) {
 	return handle(uintptr(win)), nil
 }
 
+// onReady does nothing on macOS: the keys CGEventPostToPid delivers reach
+// the page of a window that is never key.
+func onReady(glaze.WebView) {}
+
 // windowInfo is the window's window-server number (the CGWindowID that
 // native/screen captures and native/input routes clicks to) and where its
 // content starts inside its frame: below the title bar.

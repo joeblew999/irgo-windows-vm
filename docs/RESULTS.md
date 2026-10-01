@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
 | 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
 | 1 Oct 2026 | [a VM of your own in 23 s: install 12 min 24 s once, seal 2 min 49 s, then `vm-create` clones and boots](#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
 | 1 Oct 2026 | [a glaze app driven by real OS input in the background: type, click, click-at, scroll, all `isTrusted`, frontmost app unchanged](#a-glaze-app-driven-by-real-os-input--measured-1-oct-2026) |
@@ -30,6 +31,34 @@ run per platform.
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
 
+## The drive tests on GitHub's Windows ARM64 runner — measured 1 Oct 2026
+
+**Result:** `TestDriveType`, `TestDriveClick`, `TestDriveClickAt` and
+`TestDriveScroll` pass on the `windows-11-arm` job three runs in a row, with no
+retry, no foreground change and every OS step `isTrusted`:
+[36810013494](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810013494),
+[36810234766](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810234766),
+[36810464096](https://github.com/joeblew999/irgo-windows-vm/actions/runs/36810464096)
+(branch `drive-windows-reliable`; macOS green in each). Image
+`windows-11-vs2026-arm64`, native at fork PR #2 (`2fbbf2d`), glaze v0.0.61.
+
+Before: run 36804946289 failed `TestDriveClick` ("no matching event (9 so
+far)", then "the frontmost app was window 0x40270 (pid 6808) before this test
+and window 0x30284 (pid 11052) after it, which this test does not own"). Two
+causes, each found by tracing the foreground at every step:
+
+| cause | how it showed | fix |
+|---|---|---|
+| glaze created the app's window, and on Windows glaze's window activates itself | with the old window and the new trace (branch `drive-windows-diag`, run 36808088081) every drive test failed the same way: the app's window was the foreground window from "window up", +0.5 s, to the close. Closing it handed the foreground to some other window, which is why the old check blamed a stranger. The `TestDriveClick` screenshot of run 36804946289 shows its title bar drawn active | `drive` makes the window itself with `WS_EX_NOACTIVATE` and `SW_SHOWNOACTIVATE`, as native's testwin does; the tests now fail if the app's window is ever in front |
+| WSL's updater, relaunched for the whole job | `WindowsTerminal.exe "C:\Windows\system32\wsl.exe"` became the foreground in the middle of `TestDriveScroll` (run 36808085142). A process-start trace (run 36809190167) showed `provjobd.exe`, a child of the runner's `hosted-compute-agent`, running `wsl.exe` every 30 s; WSL is not installed, so the inbox stub starts `wsl.exe --update --confirm --prompt-before-exit` in a new Windows Terminal window whenever none is running, and that waits about 60 s. Stopping it brought it back within 30 s; `wsl --update` exits 1 ("not installed") | `runner-desktop.ps1` makes `wsl.exe` run `cmd /c exit 1` (Image File Execution Options) for the job; the trace then showed `provjobd` starting `cmd.exe` every 30 s and no window (run 36809643314). Upstream: [actions/runner-images#14264](https://github.com/actions/runner-images/issues/14264) |
+
+Also on that desktop at job start, every run: the full-screen "Microsoft
+account" prompt (`WWAHost.exe`), Start and Search open under it (on one runner
+both reopened 3 s after their hosts were stopped, so they are now closed until
+they stay closed), a "System Properties" dialog, Widgets, and OneDrive's
+first-run setup starting OneDrive a minute in. The keyboard retries in
+`TestDriveType` never fired in these runs: with focus moved into the page on
+load, the field took focus on the first click every time.
 ## The real golden image through the private R2 cache — measured 1 Oct 2026
 
 **Result:** the sealed golden image (Windows 11 Pro 26100.4349) went up to the

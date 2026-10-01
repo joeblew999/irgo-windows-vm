@@ -856,8 +856,8 @@ How it is built, and why:
   `ErrUnsupported` skips only on an OS where the capability is documented as
   unsupported (`nocapture` on macOS, `SetAppIcon` on Windows); the same error
   anywhere else is a failure. And the drive tests skip when there is no OS
-  input to drive with: on Windows until native/input has a Windows backend, and
-  on a Mac whose terminal or runner lacks the Accessibility permission.
+  input to drive with: on Windows when built against a native without its
+  Windows backend, and on a Mac whose terminal or runner lacks the Accessibility permission.
 - **Known upstream bugs fail.** `TestAppScheme/absolute_subresources` fails on
   Windows until glaze fixes [§1b](UPSTREAM.md). `glazecheck.KnownUpstream`
   lists it, so a run whose only failures are known answers `KNOWN BUGS ONLY`
@@ -921,12 +921,37 @@ img, err := s.Screenshot()               // native/screen, even behind other win
   could bring it over the user's work.
 - **It never takes over the desktop.** On macOS the app has the Prohibited
   activation policy and its window is ordered behind every other window, so it
-  can never become active; `CGEventPostToPid` moves no cursor. Each test reads
-  the frontmost app (System Events, through `osascript`) before launching and
-  after closing, and fails if it changed. The message says whether the new
-  frontmost app is the test's own (a takeover) or another (a person or another
-  program switched apps — on the owner's Mac other agents bring UTM forward —
-  or the input went astray).
+  can never become active; `CGEventPostToPid` moves no cursor. On Windows
+  `drive` creates the window itself with `WS_EX_NOACTIVATE`, shows it with
+  `SW_SHOWNOACTIVATE` and hands it to glaze, as native's testwin does (glaze's
+  own window took the foreground at start-up in every drive test, measured on
+  the `windows-11-arm` runner, 1 Oct 2026); it sits on top of the Z order,
+  not behind, because Chromium drops a wheel event over another process's
+  window. Each test reads the frontmost app before launching and after
+  closing (System Events through `osascript` on macOS; the foreground window,
+  its title and its process's executable on Windows) and fails if it changed.
+  The message says whether the new frontmost app is the test's own (a
+  takeover) or another (a person or another program switched apps — on the
+  owner's Mac other agents bring UTM forward — or the input went astray).
+  On Windows the session also records the foreground after every step, and a
+  test fails if the app's own window was ever in front (`TookForeground`),
+  because an app that takes the foreground hands it to some other window when
+  it closes, which the before/after check misreads as someone else's.
+- **A failure says what happened, step by step.** `Session.Trace` is every
+  step — window up, page loaded, each OS input and its result, the close —
+  with the time since launch and, on Windows, the foreground window after it.
+  A failed drive test logs it and every event the page reported (the bridge
+  also reports the page gaining and losing focus).
+- **Retries are logged, never silent.** Keys reach a WebView2 page only while
+  it has focus, and a window that is never activated can start without it or
+  lose it (native's input README, Windows). `TestDriveType` clicks into the
+  field and checks it is the active element before typing (up to five clicks)
+  and sends keys again (up to three times) only when the field is unchanged,
+  that is, when the page dropped them whole; anything partial fails.
+  `TestDriveScroll` posts up to three times for [UPSTREAM §6](UPSTREAM.md#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped).
+  Every retry is a `retry: <why>` log line, which `glaze-check` keeps even on
+  a pass: the row reads **PASS after a retry**, with the reasons, in
+  GLAZE-STATUS.md, and the log has a `RETRIED` line.
 - **`isTrusted` is the proof.** Every OS step is required to arrive as a
   trusted event; `TestDriveClick/script_click_is_untrusted` is the automated
   control showing the same click made by script arrives untrusted.
@@ -940,11 +965,13 @@ img, err := s.Screenshot()               // native/screen, even behind other win
   `go.mod` replace, so `upstream:link` still builds against the local clone,
   which then needs `input/` and `screen/` (the task warns when they are
   missing). `glaze-check` records native as the fork, not as v0.1.15.
-- **Windows waits on native's Windows backend** (`feat/input-screen-windows`).
-  Until it is in the pinned native, `input` returns `ErrUnsupported` there and
-  the drive tests skip, saying so. When it lands: move the pseudo-version, run
-  `glaze:windows`, and check `windowInfo` in `app_windows.go`, whose client-area
-  offset is in pixels and has not been compared with the backend's coordinates.
+- **Windows uses native's Windows backend** (joeblew999/native PR #2,
+  `feat/input-screen-windows`): window messages posted to the app's windows,
+  so no cursor moves and the foreground does not change. Coordinates count
+  from DWM's extended frame bounds, as the backend does (`windowInfo` in
+  `app_windows.go`; `GetWindowRect` put every click 7 px right). The drive
+  tests run on the `windows-11-arm` CI job, whose desktop has to be cleared
+  first (see the Known traps).
 
 `examples/glaze-all` is the demo: every capability is a button, and
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is
@@ -1281,6 +1308,19 @@ detail there and only the reminder here.
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |
+
+### Driving a window on Windows, and the hosted runner
+
+| trap | symptom | what to do |
+|---|---|---|
+| letting glaze create the window on Windows | glaze shows it with `SW_SHOW` and moves focus into WebView2, so it became the foreground window as it started, in every drive test (traced on `windows-11-arm`, 1 Oct 2026); a background click also activates it (Chromium focuses its window on mouse-down) | create the window with `WS_EX_NOACTIVATE`, show it with `SW_SHOWNOACTIVATE`, and pass it as `glaze.Options.Window` (`drive`'s `backgroundWindow`) |
+| comparing the foreground only before and after | an app that took the foreground hands it to another window when it closes, so the takeover was reported as "something else switched apps" (TestDriveClick, run 36804946289) | record the foreground at every step and fail on the app's own window (`Session.TookForeground`) |
+| the foreground named by HWND and pid | "window 0x30284 (pid 11052)" says nothing a day later | name the executable and the window title (`drive.Frontmost`) |
+| keys to a WebView2 window that is never activated | dropped whenever the page does not have focus | click into the field first, check it is the active element, and resend only keys that were dropped whole, logging each retry (`TestDriveType`) |
+| the `windows-11-arm` desktop at job start | a full-screen "Microsoft account" prompt (`WWAHost.exe`) over everything, Start open under it, a "System Properties" dialog; Chromium drops wheel events aimed at a covered window | `.github/scripts/runner-desktop.ps1 -Clear`, which lists, clears and checks |
+| stopping Start and Search once | they came back open 3 s later on one runner | Escape and stop their hosts until they stay closed, then check |
+| stopping WSL's updater (`wsl.exe --update --confirm --prompt-before-exit`) | back within 30 s in a new Windows Terminal window that takes the foreground, every ~90 s for the whole job ([runner-images#14264](https://github.com/actions/runner-images/issues/14264)): the runner's `provjobd.exe` runs `wsl.exe` every 30 s and the inbox stub (WSL is not installed) starts the updater whenever none is running; `wsl --update` exits 1, "not installed" | an Image File Execution Options `Debugger` makes `wsl.exe` run `cmd /c exit 1` for the rest of the job (traced with `runner-desktop.ps1 -Watch`) |
+| a native command last in a `pwsh` step | the step fails with that command's exit code (GitHub's wrapper exits with `$LASTEXITCODE`), though the script carried on | end the script with an explicit `exit 0` |
 
 ### In the guest programs
 

@@ -58,10 +58,16 @@ go.work.sum
 # package directory cmd/irgo-winvm/, which must stay tracked.
 /irgo-winvm
 
-# The site generator, from `go build` run inside site/. Committed the same way,
-# 13 MB, and found by sweeping every tracked file through `file(1)` rather than
-# by looking for the one already known about.
+# The site's hooks and docsite, from a `go build` run inside site/ or docsite/.
+# The first was committed the same way, 13 MB, and found by sweeping every
+# tracked file through `file(1)` rather than by looking for the one already
+# known about.
 /site/site
+/docsite/docsite
+/docsite/cmd/docsite/docsite
+
+# docsite's default output, for a build run without site/docsite.toml.
+/_site/
 
 # The generated site. Built by `mise run site:build` from the markdown, which is
 # the source of truth; committing the output would be the second copy the

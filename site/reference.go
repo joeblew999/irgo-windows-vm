@@ -102,8 +102,7 @@ func generateReference(root string) ([]byte, error) {
 // buildCLI compiles the tool to a temporary path and returns it.
 //
 // Built rather than `go run`, because the reference runs it a dozen times and
-// `go run` recompiles for each. The site is a separate module, so this shells
-// out from the repository root where the CLI's module lives.
+// `go run` recompiles for each.
 func buildCLI(root string) (path string, cleanup func(), err error) {
 	dir, err := os.MkdirTemp("", "irgo-reference-*")
 	if err != nil {

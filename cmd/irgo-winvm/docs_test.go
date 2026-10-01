@@ -41,12 +41,52 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// intentDocs name commands that do not exist yet, on purpose: a roadmap says
-// what is next, and the threat model names what an attacker could call. Every
-// other page states what is true now, so every other page is checked.
-var intentDocs = map[string]bool{
-	"docs/ROADMAP.md":      true,
-	"docs/THREAT-MODEL.md": true,
+// intentDocs are the pages site/docsite.toml marks `intent = true`: they name
+// commands that do not exist yet on purpose (a roadmap says what is next, and
+// the threat model names what an attacker could call). Every other page
+// states what is true now, so every other page is checked.
+//
+// Read from the site's config rather than listed again here. The config is
+// read line by line, for its [[page]] blocks' src and intent keys, which is
+// the only layout it uses; finding no intent page at all is a failure, so a
+// layout change cannot quietly exempt nothing and check everything, or the
+// reverse.
+//
+// Negative control (by hand, 1 Oct 2026): `irgo-winvm frobnicate` appended to
+// docs/ROADMAP.md passes with its `intent = true` and fails without it.
+func intentDocs(t *testing.T) map[string]bool {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "site", "docsite.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	src, intent := "", false
+	flush := func() {
+		if intent && src != "" {
+			out[src] = true
+		}
+		src, intent = "", false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		l := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(l, "["):
+			flush()
+		case strings.HasPrefix(l, "src = "):
+			src, err = strconv.Unquote(strings.TrimPrefix(l, "src = "))
+			if err != nil {
+				t.Fatalf("site/docsite.toml: %q: %v", l, err)
+			}
+		case l == "intent = true":
+			intent = true
+		}
+	}
+	flush()
+	if len(out) == 0 {
+		t.Fatal("site/docsite.toml marks no page intent; its layout changed and this test would check every page")
+	}
+	return out
 }
 
 // markdownFiles returns every .md file at the repository root and in docs/,
@@ -54,6 +94,7 @@ var intentDocs = map[string]bool{
 func markdownFiles(t *testing.T) map[string]string {
 	t.Helper()
 	root := repoRoot(t)
+	intent := intentDocs(t)
 	out := map[string]string{}
 	for _, dir := range []string{".", "docs"} {
 		entries, err := os.ReadDir(filepath.Join(root, dir))
@@ -62,7 +103,7 @@ func markdownFiles(t *testing.T) map[string]string {
 		}
 		for _, e := range entries {
 			name := filepath.ToSlash(filepath.Join(dir, e.Name()))
-			if e.IsDir() || !strings.HasSuffix(name, ".md") || intentDocs[name] {
+			if e.IsDir() || !strings.HasSuffix(name, ".md") || intent[name] {
 				continue
 			}
 			b, rErr := os.ReadFile(filepath.Join(root, name))

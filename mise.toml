@@ -37,13 +37,18 @@ run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
 description = "The analysers, with everything they found already fixed"
 run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
 
+# The site is docsite (docsite/, its own module) over site/docsite.toml.
 [tasks."site:build"]
 description = "Render the markdown into site/dist"
-run = "go -C site run . -root .. -out dist"
+run = "go -C docsite run ./cmd/docsite build -config ../site/docsite.toml"
 
 [tasks."site:serve"]
 description = "Build the site and serve it at http://localhost:8127 to check it"
-run = "go -C site run . -root .. -out dist -serve -port ${PORT:-8127}"
+run = "go -C docsite run ./cmd/docsite serve -config ../site/docsite.toml -port ${PORT:-8127}"
+
+[tasks."site:check"]
+description = "Build the site into a temporary directory and check every link, anchor, image and page"
+run = "go -C docsite run ./cmd/docsite check -config ../site/docsite.toml"
 
 [tasks."vm:shots"]
 description = "Publish the newest shot of each stage into docs/screens/vm"

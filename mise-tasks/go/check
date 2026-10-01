@@ -25,11 +25,17 @@ run go test ./...
 # and file dialogs, which is not something a check run on every edit should do
 # to the desktop it runs on. -short is the headless half; the whole suite is
 # `mise run glaze:mac`.
-for m in examples site worker; do
+for m in examples docsite worker; do
   run go -C "$m" build -o "$MISE_PROJECT_ROOT/.bin/host/" ./...
   run go -C "$m" vet ./...
   run go -C "$m" test -short ./...
 done
+
+# The docs site, built from this tree and checked: every local link, #anchor,
+# image and screenshot, every page in the corpus and sitemap, and every link
+# into the site from cmd/, internal/, .github/ and docs/. docsite's own tests
+# above run it on small projects; this runs it on this one.
+run go -C docsite run ./cmd/docsite check -config ../site/docsite.toml
 
 # The CLI must compile for every host a developer might be on: `targets`
 # exists to tell someone on Windows or Linux what their machine can do, and a

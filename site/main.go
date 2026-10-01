@@ -1,583 +1,126 @@
-// Command site renders the repository's markdown into a static site.
+// Command site is the docs site's hooks: the pages that have no markdown file,
+// generated from the code they describe. docsite (the docsite module in this
+// repository) runs each one from site/docsite.toml, in the repository root,
+// and publishes what it prints on stdout.
 //
-// It generates; it does not author. Every sentence on the site comes from a
-// markdown file that already exists and is already the source of truth for that
-// subject — README for what this is, RESULTS for what was measured, UPSTREAM
-// for what was fixed where, ARCHITECTURE for how the code works. Writing the
-// site by hand would make a second copy of every one, and a second copy is a second
-// thing to update and the one that goes stale: an example README in this
-// repository did exactly that, naming four tasks that no longer existed and a
-// command renamed two commits earlier.
+//	go run ./site reference    the command reference, captured from the binary
+//	go run ./site mcp          the MCP page, captured from a live server's tool list
+//	go run ./site api          the Worker API page, from wire's route table
+//	go run ./site glaze-live   the script the Glaze status page ends with
 //
-// So if the site is wrong, the markdown is wrong. Fix it there — with the one
-// exception this file also builds: the command reference has no source file and
-// is captured from the binary, so a wrong flag on that page is a bug in Go.
-//
-// That claim was not true when it was first made. The template carried a
-// paragraph describing what the screenshots showed, which appeared in no
-// markdown file — so the repository could change what it proves while the site
-// went on asserting the old thing, which is precisely the failure this design
-// exists to prevent. It lives in README.md now.
-//
-// What the template still supplies is labels, not statements: the navigation
-// titles and the pages' meta descriptions, below. Those name things rather than
-// claim anything about them, and a nav cannot be generated from prose.
+// Everything else on the site is a markdown file: if the site is wrong there,
+// the markdown is wrong. Here, a wrong flag or route is a bug in the Go code.
 package main
 
 import (
-	"bytes"
-	_ "embed"
-	"flag"
+	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
-	"io/fs"
-	"net/http"
 	"os"
-	"os/exec"
-	"path"
-	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
-//go:embed page.tmpl
-var pageTmpl string
-
-//go:embed style.css
-var styleCSS []byte
-
-// pages is the site, declared once. Order is the navigation order.
-//
-// Each entry names a markdown file in the repository root and the page it
-// becomes. Adding a page means adding a line here; there is nowhere else to
-// change, and nothing is discovered by scanning a directory — a site that
-// publishes whatever happens to be lying around would have published CLAUDE.md.
-//
-// Nav is the label in the header. Under, instead, names the header entry a page
-// belongs to: it is not in the header itself, it lights that entry up, and it is
-// listed in the footer with every other page. That keeps the header to one line
-// at 1280 px while the docs grow page by page — fourteen labels do not fit, and
-// a nav that wraps or scrolls on a desktop hides the pages at its end.
-//
-// An entry with neither is the home page — the wordmark already links there, so
-// it takes no second entry. The header used to carry both, two adjacent links
-// reading "irgo-windows-vm" and pointing at the same file.
-//
-// A separate field rather than reusing Title, because Title is also the H1 of
-// this page in llms.txt and llms-full.txt (corpus.go:91): renaming it to fix the
-// header would have quietly changed the machine-readable corpus.
-var pages = []struct {
-	Src, Out, Title, Nav, Under, Blurb string
-}{
-	{"README.md", "index.html", "irgo-windows-vm", "", "", "What it does, and how to get started"},
-	{"docs/GETTING-STARTED.md", "getting-started.html", "Getting started", "Get started", "", "Install it, make your first VM, run your first program"},
-	{"docs/USING.md", "using.html", "Using it", "Using it", "", "Each command, exit codes, costs, the golden image and the private cache"},
-	{"docs/FOR-AGENTS.md", "agents.html", "For agents", "Agents", "", "Drive it from an AI agent, over MCP or HTTP, and file issues"},
-
-	// Generated: built by listing a live MCP server, so the page cannot
-	// describe a tool the server does not offer.
-	{"", "mcp.html", "MCP", "", "agents.html", "The MCP server's tools, arguments and instructions, captured from a live server"},
-
-	// Exempt from the check that every command named in the docs exists
-	// (cmd/irgo-winvm/docs_test.go): it names commands in the context of what
-	// an attacker could call, which is not the same as telling a reader to run
-	// them.
-	{"docs/THREAT-MODEL.md", "threat-model.html", "Threat model", "", "agents.html", "What anyone who reaches the HTTP port can do"},
-
-	// Generated, not read from disk. Src is empty and reference.go builds the
-	// markdown by running the binary — see generateReference.
-	{"", "reference.html", "Commands", "Commands", "", "Every command and flag, captured from the binary"},
-
-	{"docs/TESTING.md", "testing.html", "Testing", "Testing", "", "Does glaze work? The conformance suite, driving an app, the cycle tests"},
-	{"docs/GLAZE-STATUS.md", "glaze-status.html", "Glaze status", "", "testing.html", "Does glaze work on the Mac and on Windows? The last recorded run of each"},
-	{"docs/VM-STATUS.md", "vm-status.html", "VM status", "", "testing.html", "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"},
-	{"docs/ARCHITECTURE.md", "architecture.html", "Architecture", "Architecture", "", "How the code is built: stages, packages, locks, jobs, data, the golden image"},
-	{"docs/WORKER.md", "worker.html", "The Cloudflare Worker", "", "architecture.html", "The Worker: the site, live glaze status and the golden image's private API"},
-	// Generated from the Worker's route table in package wire, the table the
-	// Worker routes by and the tool's client builds requests from.
-	{"", "api.html", "Worker API", "", "architecture.html", "Every endpoint of the Cloudflare Worker, generated from its route table"},
-	{"docs/TRAPS.md", "traps.html", "Known traps", "", "architecture.html", "What fails silently or misleadingly, one line each"},
-	{"docs/CONTRIBUTING.md", "contributing.html", "Contributing", "Contributing", "", "Set up, run the checks, land a change, cut a release"},
-	{"docs/CONVENTIONS.md", "conventions.html", "Conventions", "", "contributing.html", "How code here is written, and the defect behind each rule"},
-
-	// The only page that states intent rather than fact, and it says so in its
-	// first line. Exempt from the command check for that reason — naming what
-	// does not exist yet is the point of a roadmap.
-	{"docs/ROADMAP.md", "roadmap.html", "Roadmap", "", "contributing.html", "What is next, and the one claim not yet verified"},
-
-	{"docs/RESULTS.md", "results.html", "Results", "Results", "", "What has been measured, and when"},
-	{"docs/UPSTREAM.md", "upstream.html", "Upstream", "Upstream", "", "Bugs found in glaze, native and UTM, and their status"},
-}
-
-// isHome reports whether a pages entry is the home page: in neither the header
-// nor under an entry of it.
-func isHome(nav, under string) bool { return nav == "" && under == "" }
-
-// siteName is the project's name: the wordmark, and the tail of every page's
-// <title>.
-//
-// Taken from the home page's title rather than written again. It was written
-// again — the template carried the literal twice, once as the wordmark and once
-// in a comparison deciding whether to append it to the title. That comparison
-// had to agree with a string in pages to work, and nothing made it: changing the
-// index's title would have produced "New name — irgo-windows-vm" on the front
-// page and nobody would have been told.
-func siteName() string {
-	for _, p := range pages {
-		if isHome(p.Nav, p.Under) {
-			return p.Title
-		}
-	}
-	// No home page is a broken site, but a panic here would break the build over
-	// a page title. The divergence gate is what fails when a page goes missing.
-	return pages[0].Title
-}
-
-type nav struct {
-	Title, Href, Blurb string
-	Current            bool
-
-	// Section marks the header entry the current page is under, which is
-	// highlighted like the current page but is not it (aria-current="true").
-	Section bool
-}
-
-type page struct {
-	Title, Blurb string
-	Body         template.HTML
-	Nav          []nav
-
-	// All is every page but the home page, by title, for the footer: the one
-	// place a page that is under a header entry is linked from every page.
-	All []nav
-
-	// TOC is the page's own sections, from the same parse as Body. Empty on a
-	// page too short to need one, and the template then draws no sidebar.
-	TOC template.HTML
-
-	Repo string
-
-	// Build is the commit and time this page was generated, so a cached copy
-	// can be told from a current one. Two agents were served a page from a
-	// build several commits old and had no way to know.
-	Build string
-
-	// Home marks the page the wordmark links to, so it can carry the
-	// current-page cue the nav gives every other page.
-	Home bool
-
-	// Site is the project name, from siteName. The template used to hold it as
-	// a literal, in two places.
-	Site string
-
-	// Source is the markdown file this page was rendered from, empty for the
-	// one page captured from the binary.
-	//
-	// The template needs it because the footer used to tell every page's reader
-	// that "if this page is wrong, the markdown is wrong" — which is false on
-	// the command reference, on the very page whose own body says it was
-	// captured from the binary. Somebody finding a wrong default was being sent
-	// to edit a file that does not exist.
-	Source string
-
-	// Live is the Glaze status page, which also asks the Cloudflare Worker
-	// (worker/) for the newest run when it is served from there. On GitHub
-	// Pages the request finds nothing and the page stays as rendered.
-	Live bool
-
-	// LiveAPI is the path the Live page asks, relative so it resolves
-	// against wherever the site is served: the glaze-latest route's, from
-	// wire's table, not written in the template.
-	LiveAPI string
-}
-
-// livePage is the page that shows the Worker's latest glaze runs.
-const livePage = "glaze-status.html"
-
 func main() {
-	root := flag.String("root", "..", "repository root to read markdown from")
-	out := flag.String("out", "dist", "directory to write the site into")
-	repo := flag.String("repo", "https://github.com/joeblew999/irgo-windows-vm", "repository URL")
-	base := flag.String("base", "https://joeblew999.github.io/irgo-windows-vm/", "where the site is published; llms.txt links are absolute because whatever reads them has no page to resolve against")
-	sha := flag.String("sha", "", "commit this was built from; read from git when empty")
-	serve := flag.Bool("serve", false, "after building, serve it for checking locally")
-	port := flag.Int("port", 8127, "port for -serve")
-	flag.Parse()
-
-	if err := build(*root, *out, *repo, *base, *sha); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./site reference|mcp|api|glaze-live")
+		os.Exit(2)
+	}
+	out, err := generate(os.Args[1], ".")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "site:", err)
 		os.Exit(1)
 	}
-	if !*serve {
-		return
-	}
-
-	// Serving lives here rather than in a second command, because it must serve
-	// what was just built. A separate server could be pointed at a stale dist
-	// from an earlier run, and checking a site that no longer matches the
-	// markdown is worse than not checking it.
-	freePort(*port)
-	addr := fmt.Sprintf("localhost:%d", *port)
-	fmt.Printf("\n  http://%s  — ctrl-c to stop\n", addr)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           http.FileServer(http.Dir(*out)),
-		ReadHeaderTimeout: 5 * time.Second, // a bare ListenAndServe has no timeouts at all
-	}
-	if err := srv.ListenAndServe(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	if _, err := os.Stdout.Write(out); err != nil {
+		fmt.Fprintln(os.Stderr, "site:", err)
 		os.Exit(1)
 	}
 }
 
-// freePort stops whatever is already listening on the port, and says what it
-// stopped.
-//
-// A previous run left in the background is the normal case: ctrl-c in one
-// terminal, a `&` forgotten in another, and the next `site:serve` dies with
-// "address already in use" while the page you are looking at is served by the
-// old build. That is worse than an error — the site looks stale rather than
-// broken, and the fix is invisible.
-//
-// It names the process before killing it rather than killing silently, because
-// this will one day match something that is not a previous copy of this
-// server, and the only defence against that is saying so.
-//
-// Never fatal: if lsof is missing or the kill is refused, ListenAndServe
-// reports the real problem a moment later.
-func freePort(port int) {
-	out, err := exec.Command("lsof", "-nP", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN").Output()
-	if err != nil {
-		return // nothing listening, or no lsof: either way there is nothing to do
+// generate is one hook's output. root is the repository root, where docsite
+// runs hooks.
+func generate(name, root string) ([]byte, error) {
+	switch name {
+	case "reference":
+		return generateReference(root)
+	case "mcp":
+		s, err := generateMCP(root)
+		return []byte(s), err
+	case "api":
+		return generateAPI(), nil
+	case "glaze-live":
+		return glazeLive()
 	}
-	for _, pid := range strings.Fields(string(out)) {
-		name := "?"
-		if b, nErr := exec.Command("ps", "-p", pid, "-o", "comm=").Output(); nErr == nil {
-			name = strings.TrimSpace(string(b))
-		}
-		fmt.Printf("  port %d was held by %s (pid %s) — stopping it\n", port, filepath.Base(name), pid)
-		if kErr := exec.Command("kill", pid).Run(); kErr != nil {
-			fmt.Fprintf(os.Stderr, "  could not stop pid %s: %v\n", pid, kErr)
-			continue
-		}
-	}
-	// The socket is not free the instant the process is signalled.
-	time.Sleep(300 * time.Millisecond)
+	return nil, fmt.Errorf("no hook %q", name)
 }
 
-func build(root, out, repo, siteURL, sha string) error {
-	if sha == "" {
-		sha = commitSHA(root)
-	}
-	stamp := buildStamp{SHA: sha, Time: time.Now().UTC().Format(time.RFC3339)}
-
-	// Rebuilt from scratch every time. Leaving the previous run's files in
-	// place means a page that has been deleted stays published, which is the
-	// same class of problem as a stale copy: the site says something the
-	// repository no longer does.
-	if err := os.RemoveAll(out); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		return err
-	}
-
-	screens, err := copyScreens(root, out)
+// glazeLive is the script at the end of the Glaze status page. Served by the
+// Cloudflare Worker (worker/), it asks for the newest run CI posted and shows
+// it above the recorded one, so the page is current without a redeploy;
+// anywhere else, GitHub Pages included, the request finds nothing and the page
+// stays as rendered. The path is the glaze-latest route's, from wire's table,
+// relative so it resolves against wherever the site is served.
+func glazeLive() ([]byte, error) {
+	path, err := json.Marshal(strings.TrimPrefix(wire.MustFind(wire.RouteGlazeLatest).Path, "/"))
 	if err != nil {
-		return err
-	}
-
-	tmpl, err := template.New("page").Parse(pageTmpl)
-	if err != nil {
-		return err
-	}
-
-	// Configured in render.go, with the reason for every extension.
-	md := newMarkdown()
-
-	var corpus []corpusEntry
-	for _, p := range pages {
-		var raw []byte
-		if p.Src == "" {
-			// Generated by running the binary. Fatal on any failure, for the
-			// same reason a missing source file is: a page that loses a command
-			// still renders, and looks right.
-			// Two generated pages now, told apart by their output name. A
-			// switch rather than a flag on the entry: the entry says what the
-			// page is, not how it is made.
-			switch p.Out {
-			case "reference.html":
-				g, gErr := generateReference(root)
-				if gErr != nil {
-					return gErr
-				}
-				raw = g
-			case "mcp.html":
-				g, gErr := generateMCP(root)
-				if gErr != nil {
-					return gErr
-				}
-				raw = []byte(g)
-			case "api.html":
-				raw = generateAPI()
-			default:
-				return fmt.Errorf("%s has no source file and no generator", p.Out)
-			}
-		} else {
-			src := filepath.Join(root, p.Src)
-			r, rErr := os.ReadFile(src)
-			if rErr != nil {
-				// Named, and fatal. A missing source silently producing a
-				// shorter site is how a page disappears without anyone
-				// noticing.
-				return fmt.Errorf("reading %s: %w", src, rErr)
-			}
-			raw = r
-		}
-
-		// The rewritten markdown, named rather than passed inline, because the
-		// corpus is built from exactly what the HTML is built from. Two
-		// traversals of `pages` would be two chances to skip a page; this is
-		// one pass producing both renderings.
-		body := rewriteLinks(raw, repo, p.Src)
-
-		html, cErr := renderMarkdown(md, body)
-		if cErr != nil {
-			return fmt.Errorf("converting %s: %w", p.Out, cErr)
-		}
-		corpus = append(corpus, corpusEntry{Title: p.Title, Out: p.Out, Blurb: p.Blurb, Markdown: body})
-
-		var navs, all []nav
-		for _, q := range pages {
-			if isHome(q.Nav, q.Under) {
-				continue // the wordmark is its link
-			}
-			all = append(all, nav{Title: q.Title, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out})
-			if q.Nav == "" {
-				continue // under another entry: in the footer, not the header
-			}
-			navs = append(navs, nav{Title: q.Nav, Href: q.Out, Blurb: q.Blurb, Current: q.Out == p.Out, Section: q.Out == p.Under})
-		}
-
-		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, All: all, Repo: repo, Source: p.Src, Build: stamp.line(), Home: isHome(p.Nav, p.Under), Site: siteName(), Live: p.Out == livePage,
-			LiveAPI: strings.TrimPrefix(wire.MustFind(wire.RouteGlazeLatest).Path, "/")}
-		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
-			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
-		}
-		if wErr := os.WriteFile(filepath.Join(out, p.Out), rendered.Bytes(), 0o644); wErr != nil {
-			return wErr
-		}
-		from := p.Src
-		if from == "" {
-			from = "(the Go code)"
-		}
-		fmt.Printf("  %-18s <- %s\n", p.Out, from)
-	}
-
-	if err := os.WriteFile(filepath.Join(out, "style.css"), styleCSS, 0o644); err != nil {
-		return err
-	}
-	syntax, err := syntaxCSS()
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(out, syntaxFile), syntax, 0o644); err != nil {
-		return err
-	}
-
-	// The same pages again as plain markdown, one file each.
-	//
-	// A fetcher that fails on a rendered page usually succeeds on plain text,
-	// and the markdown is already in hand here — this is a write, not a second
-	// read, and it comes from the same entries as everything else.
-	for _, e := range corpus {
-		if err := os.WriteFile(filepath.Join(out, markdownName(e.Out)), e.Markdown, 0o644); err != nil {
-			return err
-		}
-	}
-	fmt.Printf("  %-18s <- %d pages, plain markdown\n", "*.md", len(corpus))
-
-	// The same pages again, as one file and as an index of themselves.
-	//
-	// base has a trailing slash so the links below concatenate cleanly, and is
-	// absolute because llms.txt is read by things that did not fetch it from a
-	// browser and have no document to resolve against.
-	base := strings.TrimSuffix(siteURL, "/") + "/"
-	summary := summaryFrom(indexPage(corpus).Markdown)
-	if err := os.WriteFile(filepath.Join(out, corpusFull), renderCorpusFull(corpus, base, stamp), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(out, corpusIndex), renderCorpusIndex(corpus, base, summary, stamp), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(out, sitemapFile), renderSitemap(corpus, base), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(out, robotsFile), renderRobots(base), 0o644); err != nil {
-		return err
-	}
-	fmt.Printf("  %-18s <- %d pages, one file\n", corpusFull, len(corpus))
-	for _, f := range []string{corpusIndex, sitemapFile, robotsFile} {
-		fmt.Printf("  %-18s <- the same list\n", f)
-	}
-
-	// Tells GitHub Pages not to run Jekyll over the output. Without it, Pages
-	// ignores any file or directory whose name starts with an underscore, which
-	// is a silent 404 for whatever happened to be named that way.
-	if err := os.WriteFile(filepath.Join(out, ".nojekyll"), nil, 0o644); err != nil {
-		return err
-	}
-
-	fmt.Printf("  %-18s (%d screenshots)\n", "screens/", len(screens))
-	return nil
-}
-
-// anyLink matches every markdown link target. Which ones to rewrite is decided
-// in code, not by the pattern — see hasScheme.
-var anyLink = regexp.MustCompile(`\]\(([^)#]*?)(#[^)]*)?\)`)
-
-// hasScheme reports whether a link target is absolute: https:, mailto:, and so
-// on. RFC 3986 says a scheme is a letter followed by letters, digits, +, - or .
-// up to the first colon.
-//
-// This decides what is left alone, and the first version got it wrong in a way
-// that only shows on the published site. The pattern excluded ":" as the FIRST
-// character of a target, which was meant to skip absolute URLs — but in
-// "https://example.com" the colon is the sixth character, so every external
-// link matched as a repository path and was rewritten to
-//
-//	https://github.com/OWNER/REPO/blob/main/https://example.com
-//
-// Every outbound link on the site was broken. The link checker did not catch it
-// because the result is a syntactically fine absolute URL, and it only inspects
-// local ones.
-func hasScheme(target string) bool { return schemeRE.MatchString(target) }
-
-var schemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
-
-// rewriteLinks points every in-repository link at wherever that thing actually
-// is once the site is built. Three destinations, and getting any of them wrong
-// is a 404 on a page that looked fine locally:
-//
-//   - a file that becomes a page  -> that page          (docs/USING.md -> using.html)
-//   - a published screenshot      -> the published copy (docs/screens/x.png -> screens/x.png)
-//   - anything else in the repo   -> the repository     (LICENSE -> github.com/.../blob/main/LICENSE)
-//
-// The third case was originally left alone, on the reasoning that a <base> tag
-// would resolve it against the repository. It does not: <base href="./"> is the
-// site's own root, so `LICENSE` resolved to a file the site does not publish
-// and the only broken link on the site was the licence.
-//
-// Targets are relative to src, the markdown file they are written in, exactly
-// as GitHub reads them — so docs/RESULTS.md writes ../README.md and README.md
-// writes docs/RESULTS.md, and both work on GitHub and here. A target that is
-// already a generated page's name (mcp.html) is left as it is.
-func rewriteLinks(raw []byte, repo, src string) []byte {
-	generated := map[string]string{}
-	outs := map[string]bool{}
-	for _, p := range pages {
-		if p.Src != "" {
-			generated[p.Src] = p.Out
-		}
-		outs[p.Out] = true
-	}
-	// Files the build writes beside the pages. The MCP page links llms-full.txt,
-	// which was sent to the repository, where it does not exist.
-	outs["llms.txt"], outs["llms-full.txt"] = true, true
-	return anyLink.ReplaceAllFunc(raw, func(m []byte) []byte {
-		sub := anyLink.FindSubmatch(m)
-		target, anchor := string(sub[1]), string(sub[2])
-
-		// Left exactly as written: anything absolute, a root-relative path, and
-		// a bare anchor like (#evidence).
-		if target == "" || hasScheme(target) || strings.HasPrefix(target, "/") {
-			return m
-		}
-		if outs[target] {
-			return m
-		}
-		target = path.Join(path.Dir(src), target)
-		if out, ok := generated[target]; ok {
-			return []byte("](" + out + anchor + ")")
-		}
-		if rest, ok := strings.CutPrefix(target, "docs/screens/"); ok {
-			return []byte("](screens/" + rest + anchor + ")")
-		}
-		return []byte("](" + repo + "/blob/main/" + target + anchor + ")")
-	})
-}
-
-// copyScreens publishes the committed screenshots and returns their names.
-//
-// These are the evidence the project turns on: a Windows desktop that a Mac
-// built and installed unattended, and the failure that put three Bing tabs on
-// it. Prose claiming both is worth much less than the pictures.
-func copyScreens(root, out string) ([]string, error) {
-	srcDir := filepath.Join(root, "docs", "screens")
-	dstDir := filepath.Join(out, "screens")
-
-	// Walked, not listed. The screenshots are filed by what they show — vm/ for
-	// the machine's own lifecycle, glaze/ for a program running on it — and a
-	// flat ReadDir skips directories, so every one of them would have silently
-	// vanished from the site the moment they were sorted into folders.
-	//
-	// Subdirectories are preserved in the output, so docs/screens/vm/x.png is
-	// published as screens/vm/x.png and the markdown's link rewriting stays a
-	// straight prefix swap.
-	var names []string
-	err := filepath.WalkDir(srcDir, func(p string, d fs.DirEntry, wErr error) error {
-		if wErr != nil {
-			return wErr
-		}
-		if d.IsDir() || !strings.HasSuffix(strings.ToLower(d.Name()), ".png") {
-			return nil
-		}
-		rel, rErr := filepath.Rel(srcDir, p)
-		if rErr != nil {
-			return rErr
-		}
-		dst := filepath.Join(dstDir, rel)
-		if mErr := os.MkdirAll(filepath.Dir(dst), 0o755); mErr != nil {
-			return mErr
-		}
-		if cErr := copyFile(p, dst); cErr != nil {
-			return cErr
-		}
-		names = append(names, filepath.ToSlash(rel))
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	sort.Strings(names) // glaze/ before vm/, and stable between runs
-	return names, nil
+	return []byte(strings.Replace(glazeLiveHTML, "LIVE_API", string(path), 1)), nil
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }() // read-only
-
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, cErr := io.Copy(f, in); cErr != nil {
-		_ = f.Close() // already failing
-		return cErr
-	}
-	// Checked, because this is a write: a short copy produces a truncated PNG
-	// that renders as a broken image rather than as an error.
-	return f.Close()
-}
+// glazeLiveHTML puts everything from the response in as text, or as an image
+// URL under the API: never as HTML. No HTML comment in it: the page template
+// used to strip it, so it was never published.
+const glazeLiveHTML = `<script>
+(function () {
+  var prose = document.querySelector(".prose");
+  if (!prose || !window.fetch) return;
+  fetch(LIVE_API, { cache: "no-store" }).then(function (r) {
+    var ct = r.headers.get("Content-Type") || "";
+    return r.ok && ct.indexOf("application/json") === 0 ? r.json() : null;
+  }).then(function (all) {
+    if (!all) return;
+    var box = document.createElement("div");
+    box.className = "markdown-alert markdown-alert-note live";
+    var title = document.createElement("p");
+    title.className = "markdown-alert-title";
+    title.textContent = "Latest runs posted by CI, live";
+    box.appendChild(title);
+    var any = false;
+    ["mac", "windows"].forEach(function (target) {
+      var run = all[target];
+      if (!run || !run.manifest) return;
+      any = true;
+      var m = run.manifest;
+      var p = document.createElement("p");
+      var b = document.createElement("strong");
+      b.textContent = (target === "mac" ? "Mac" : "Windows") + ": ";
+      p.appendChild(b);
+      p.appendChild(document.createTextNode((m.Verdict || "") + " — " + (m.When || "") +
+        (m.Commit ? ", commit " + m.Commit.slice(0, 12) : "") + (m.Platform ? ", " + m.Platform : "")));
+      if (m.RunURL && /^https:\/\/github\.com\//.test(m.RunURL)) {
+        p.appendChild(document.createTextNode(" "));
+        var a = document.createElement("a");
+        a.href = m.RunURL;
+        a.textContent = "(run)";
+        p.appendChild(a);
+      }
+      box.appendChild(p);
+      var shots = document.createElement("p");
+      shots.className = "live-shots";
+      (m.Tests || []).forEach(function (t) {
+        if (!t.Picture) return;
+        var img = document.createElement("img");
+        img.src = run.base + encodeURIComponent(t.Picture);
+        img.alt = t.Test + ": " + t.Result;
+        img.title = img.alt;
+        img.loading = "lazy";
+        shots.appendChild(img);
+      });
+      box.appendChild(shots);
+    });
+    if (any) prose.insertBefore(box, prose.firstElementChild ? prose.firstElementChild.nextSibling : null);
+  }).catch(function () {});
+})();
+</script>
+`

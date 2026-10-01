@@ -59,8 +59,9 @@ jobs:
         with:
           install_args: go golangci-lint goreleaser
 
-      # site:build compiles the site module and, for the command reference, the
-      # CLI itself — both from a cold cache on every push. Same cache as check,
+      # site:build compiles docsite and, through the hooks in site/ (the command
+      # reference and the MCP page), the CLI itself — both from a cold cache on
+      # every push. Same cache as check,
       # different key prefix so the two do not overwrite each other's entries.
       - uses: actions/cache@v6.1.0
         with:
@@ -122,9 +123,10 @@ jobs:
       - name: build the site
         run: mise run site:build
 
-      # No link check here. TestEveryLocalLinkResolves and TestEveryAnchorResolves
-      # in site/ build the site and check every local href, src and #anchor; they
-      # run in check.yml via `mise run go:check`, on the same push.
+      # No link check here. `docsite check` builds the site and checks every
+      # local href, src and #anchor, the corpus and the links into the site
+      # from the code; it runs in check.yml via `mise run go:check`, on the
+      # same push.
 
       - uses: actions/upload-pages-artifact@v5.0.0
         with:

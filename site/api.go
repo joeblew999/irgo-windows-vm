@@ -5,9 +5,13 @@ package main
 // /api/openapi.json is generated from. Nothing here names a route, a token or
 // a status; a wrong one on the page is a wrong entry in wire/routes.go.
 //
-// Imported rather than captured, unlike the command and MCP pages: package
-// wire is the standard library only (its TestStandardLibraryOnly), so it
-// brings nothing into this module's build.
+// Imported rather than captured, unlike the command and MCP pages: the table
+// is data, and there is no binary between it and a reader.
+//
+// A hook, so the page can switch to rendering the OpenAPI document instead
+// (worker/openapi.json, from wire/openapi): in site/docsite.toml, replace this
+// page's run with file = "worker/openapi.json" and format = "openapi", or with
+// whatever generator renders it.
 
 import (
 	"fmt"

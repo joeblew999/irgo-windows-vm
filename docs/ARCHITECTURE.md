@@ -223,7 +223,9 @@ a flock file someone holds lets a third process lock a new file of that name.
 ## The capacity model
 
 What a VM costs the Mac, and how many are allowed, is one model in
-`internal/utmvm/capacity_model.go`: the per-VM memory, the memory and disk kept
+`internal/utmvm/capacity_model.go`: the memory of `irgo-win11` and installs
+(8 GiB) and of clones (4 GiB, which `cloneVM` sets in UTM's configuration and
+reads back), the memory and disk kept
 for macOS, the reserve each clone may grow into, the install reserve, and the
 per-owner quota. Three readers, one answer: `vm-create`'s guard
 (`vm_capacity.go`, three-way, cannot tell refuses with exit 7), `capacity`
@@ -256,7 +258,7 @@ and the quota test, for a new VM, is the owner's VMs + 1 against
 `IRGO_WINVM_QUOTA_GIB`, both from the VM records. The memory test is
 [the one users see](USING.md#is-there-room). `capacity`'s "more clones fit" is
 `(free - promised - 10 GiB) / 4 GiB`, and "more can run" is
-`(memory - configured for running VMs - 4 GiB) / 8 GiB`.
+`(memory - configured for running VMs - 4 GiB) / 4 GiB`, in clones.
 
 **Retention** (`prune.go`) is a pure selection, `selectByBounds` (older than
 the age, or past the size counting from the newest, never the newest of a

@@ -145,7 +145,7 @@ records *why* these particular numbers were chosen, only that they are fixed.
 |---|---|---|
 | name | `irgo-win11` | `utmvm.DefaultVMName`, the machine owner's; `-vm` overrides, and every other caller must pass it ([Sharing one Mac](#sharing-one-mac)) |
 | disk | **64 GiB, sparse** | costs kilobytes until the guest writes; see [what it costs](#what-it-costs) |
-| RAM | **8192 MiB** | `vmMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds one ([Is there room?](#is-there-room)) |
+| RAM | **8192 MiB**; a clone of the golden image **4096 MiB** | `vmMemoryMiB` and `cloneMemoryMiB`; committed as the guest runs, which is why a 16 GiB Mac holds `irgo-win11` and one clone ([Is there room?](#is-there-room)) |
 | CPUs | **4** | `CPU` is `host` — the guest sees the Mac's cores |
 
 The guest logs itself in as **`dev`**, an administrator, with the password
@@ -427,15 +427,19 @@ refuse with exit 7, the numbers, and the running VMs by name.
 
 - **Memory:** `hw.memsize`, less the memory UTM says each VM that is not
   stopped is configured with (AppleScript `memory of configuration`, which
-  needs no Full Disk Access; paused VMs keep theirs), less the VMs other
-  `vm-create`s are still making (their records' live pids), less the new VM's,
-  must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the owner's own
-  work. Configured, not current use, because the guest commits it: on 1 Oct
-  2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of it dirty,
-  with 6.3 GB of the Mac's 7 GB swap in use. So a 16 GiB Mac holds one VM and
-  refuses a second; 32 GiB holds three. `-overcommit` skips the memory half for
-  a person who accepts swapping: three VMs did boot and pass `glaze-check` on
-  16 GiB for a few minutes ([RESULTS](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026)).
+  needs no Full Disk Access; paused VMs keep theirs), less 8 GiB for each VM
+  other `vm-create`s are still making (their records' live pids), less the new
+  VM's, must leave `hostMemoryReserveBytes`, **4 GiB**, for macOS and the
+  owner's own work. Configured, not current use, because the guest commits it:
+  on 1 Oct 2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of
+  it dirty, with 6.3 GB of the Mac's 7 GB swap in use. **A clone of the golden
+  image is made with 4 GiB** (`cloneMemoryMiB`, set in UTM's configuration as
+  it is cloned and read back); `irgo-win11` and installs keep 8 GiB. So a
+  16 GiB Mac runs `irgo-win11` and one clone (16 − 8 − 4 = 4 left) and refuses
+  a second; 32 GiB runs `irgo-win11` and four. A 4 GiB clone beside
+  `irgo-win11` passed `glaze-check -windows` and `vm-check`
+  ([RESULTS](RESULTS.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)).
+  `-overcommit` skips the memory half for a person who accepts swapping.
 - **Disk:** free space on the volume holding UTM's VMs (`statfs`, which works
   there without Full Disk Access) must cover the new VM, plus what the VMs
   already there are still promised, plus `hostDiskReserveBytes`, **10 GiB**,
@@ -484,8 +488,8 @@ MCP) answers how much room there is and who holds it:
 On 1 Oct 2026 on the owner's Mac: 38.2 GiB free of 460 GiB; `irgo-win11`
 20.6 GiB of its own; the golden image 10.1 GiB, all of it shared with
 `golden-export`, a copy made by hand, which therefore holds nothing of its own;
-media 9.1 GiB; room by disk for 7 more clones and by memory for none while
-`irgo-win11` runs. `doctor` ends with the same answer in one line.
+media 9.1 GiB; room by disk for 7 more clones and by memory for one 4 GiB
+clone beside `irgo-win11`. `doctor` ends with the same answer in one line.
 
 Bytes are APFS's own accounting, not `du`: `du` counts a clone and its source in
 full each, so the golden image and `golden-export` read 20 GB to it and hold

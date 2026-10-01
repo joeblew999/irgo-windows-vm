@@ -15,7 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
-| 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; APFS private size is what deleting it frees; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
+| 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; a 4 GiB clone beside irgo-win11 passed glaze-check and vm-check; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
 | 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
 | 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
 | 1 Oct 2026 | [the real golden image through the private R2 cache: 8.4 GB, pulled byte-identical in 4 min 37 s](#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026) |
@@ -62,9 +62,17 @@ not), is what deleting a VM gives back. M2 Pro, 16 GiB, 460 GiB volume, UTM
   the golden image and `golden-export` and different for `cap1`, cloned by UTM
   from the same image. So `capacity` counts shared blocks once, as the most any
   one file shares (there is one golden image), rather than per family.
-- **Memory, not disk, is what limits this Mac.** With `cap1` and `irgo-win11`
-  both running (16 GiB configured on 16 GiB), swap went from 7.5 GB to between
-  9.6 and 10.6 GB and stayed there; every run still passed.
+- **Memory, not disk, is what limits this Mac.** With `cap1` (8 GiB, made with
+  `-overcommit` by the build before this change) and `irgo-win11` both running,
+  16 GiB configured on 16 GiB, swap went from 7.5 GB to between 9.6 and 10.6 GB
+  and stayed there; every run still passed.
+- **A 4 GiB clone is enough.** `cap4`, cloned with 4096 MiB (read back from
+  UTM) beside `irgo-win11`, needed no `-overcommit`: the guard answered yes,
+  16 − 8 − 4 = 4 GiB left for macOS. It answered in 22 s, passed
+  `glaze-check -windows` in 59 s (KNOWN BUGS ONLY: §1b) and `vm-check` in 94 s
+  (YES, 44 passed, 0 skipped), and a second clone was refused. Swap used went
+  from 10.3 to 11.8 GB over the runs. Deleting it freed 151 MB, its private
+  size.
 - **What it changed:** `cloneReserveBytes`, the space a clone is promised, is
   4 GiB, fourteen times the measured growth, in place of the 10 GiB guess
   (`cloneHeadroomBytes`); and space promised to existing VMs now counts against

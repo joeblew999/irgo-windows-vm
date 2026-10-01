@@ -21,45 +21,24 @@ import (
 	"time"
 )
 
-// vmMemoryMiB is what every VM is made with (setDefaults), and what a VM that
-// does not exist yet is counted as needing. A clone has its golden image's,
-// which was made with this.
-const vmMemoryMiB = 8192
-
-// hostMemoryReserveBytes is the memory left for macOS and the owner's own
-// work after every VM has its configured memory. 4 GiB: the system alone sits
-// around 3 GiB, and the measurement above shows a 16 GiB Mac with one VM and
-// 8 GiB to spare already 6.3 GB into swap. On 16 GiB this allows one VM (16 -
-// 8 = 8 left), and refuses a second (0 left); on 32 GiB, three.
-const hostMemoryReserveBytes = 4 << 30
-
-// hostDiskReserveBytes is the free space kept for macOS after a new VM has
-// what it needs. macOS keeps its swap on this volume (7 GB of it in the
-// measurement above), and warns at about 5 GB free; 10 GiB keeps it out of
-// that.
-const hostDiskReserveBytes = 10 << 30
-
-// installHeadroomBytes is what a VM installed from the ISO takes: about 30 GiB
-// once Windows is on it ("What it costs" in docs/DEVELOPMENT.md). It also
-// covers vm-create pulling the golden image when there is none here: 8.4 GB
-// of chunks, then the bundle rebuilt (19 GB of data, measured 1 Oct 2026).
-const installHeadroomBytes = 30 << 30
+// The numbers this guard decides with are the capacity model's, in
+// capacity_model.go: one model, read by this guard, `capacity` and doctor.
 
 // diskNeed is which disk headroom a create needs.
 type diskNeed int
 
 const (
 	diskNone       diskNeed = iota // the VM exists: booting it writes little
-	diskForClone                   // cloneHeadroomBytes
-	diskForInstall                 // installHeadroomBytes
+	diskForClone                   // cloneReserveBytes
+	diskForInstall                 // installReserveBytes
 )
 
 func (d diskNeed) bytes() int64 {
 	switch d {
 	case diskForClone:
-		return cloneHeadroomBytes
+		return cloneReserveBytes
 	case diskForInstall:
-		return installHeadroomBytes
+		return installReserveBytes
 	}
 	return 0
 }
@@ -91,6 +70,10 @@ type CapacityPlan struct {
 	// in minutes; a guest commits its memory as it runs, so that does not
 	// last. Disk is still checked: running out of it corrupts a clone.
 	Overcommit bool
+
+	// Owner is who the new VM will belong to, for the per-owner quota. Empty
+	// skips the quota: capacity's "could anyone make another clone?".
+	Owner string
 }
 
 // vmMemory is one VM as UTM describes it.
@@ -114,6 +97,20 @@ type capacityFacts struct {
 
 	free    int64
 	freeErr error
+
+	// promised is the disk the VMs that exist (and those being made) are
+	// still allowed to grow into (capacity_model.go), which must stay free
+	// on top of what the new VM needs.
+	promised    int64
+	promisedErr error
+
+	quota    Quota
+	quotaErr error
+	// ownerVMs and ownerHeld are what plan.Owner already has: VMs UTM lists
+	// that its records say are the owner's, and the disk they hold.
+	ownerVMs  int
+	ownerHeld int64
+	ownerErr  error
 }
 
 // vmUsesMemory reports whether a VM in this state holds its memory. Anything
@@ -198,16 +195,59 @@ func decideCapacity(f capacityFacts) (Answer, string) {
 	if f.plan.Disk == diskNone {
 		return AnswerYes, mem
 	}
+	if f.plan.Owner != "" {
+		a, quota := decideQuota(f)
+		mem += "; " + quota
+		if a != AnswerYes {
+			return a, mem
+		}
+	}
 	if f.freeErr != nil {
 		return AnswerCannotTell, mem + "; cannot read the free disk space: " + f.freeErr.Error()
 	}
-	want := f.plan.Disk.bytes() + hostDiskReserveBytes
-	disk := fmt.Sprintf("disk: %s free, want %s for %s and %s for macOS",
-		gib(f.free), gib(f.plan.Disk.bytes()), f.plan.Disk, gib(hostDiskReserveBytes))
+	if f.promisedErr != nil {
+		return AnswerCannotTell, mem + "; cannot tell how much disk the other VMs are promised: " + f.promisedErr.Error()
+	}
+	want := f.plan.Disk.bytes() + f.promised + hostDiskReserveBytes
+	disk := fmt.Sprintf("disk: %s free, want %s for %s, %s still promised to the VMs already here and %s for macOS",
+		gib(f.free), gib(f.plan.Disk.bytes()), f.plan.Disk, gib(f.promised), gib(hostDiskReserveBytes))
 	if f.free < want {
-		return AnswerNo, mem + "; " + disk
+		return AnswerNo, mem + "; " + disk + ". `irgo-winvm capacity` says what holds it, and `irgo-winvm prune` and `vm-reap` what can go"
 	}
 	return AnswerYes, mem + "; " + disk
+}
+
+// decideQuota answers whether plan.Owner may have one more VM of this size.
+func decideQuota(f capacityFacts) (Answer, string) {
+	gib := func(b int64) string { return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30)) }
+	switch {
+	case f.quotaErr != nil:
+		return AnswerCannotTell, "quota: " + f.quotaErr.Error()
+	case f.ownerErr != nil:
+		return AnswerCannotTell, "quota: cannot tell what " + f.plan.Owner + " already has: " + f.ownerErr.Error()
+	}
+	need := f.plan.Disk.bytes()
+	why := fmt.Sprintf("quota: %s has %d VM(s) holding %s, may have %s",
+		f.plan.Owner, f.ownerVMs, gib(f.ownerHeld), f.quota)
+	raise := fmt.Sprintf(". vm-delete one of yours, or raise it with %s / %s", QuotaVMsEnv, QuotaGiBEnv)
+	if f.quota.VMs > 0 && f.ownerVMs+1 > f.quota.VMs {
+		return AnswerNo, why + raise
+	}
+	if f.quota.Bytes > 0 && f.ownerHeld+need > f.quota.Bytes {
+		return AnswerNo, why + fmt.Sprintf(", and %s needs %s", f.plan.Disk, gib(need)) + raise
+	}
+	return AnswerYes, why
+}
+
+func (q Quota) String() string {
+	vms, disk := "any number of VMs", "any amount of disk"
+	if q.VMs > 0 {
+		vms = fmt.Sprintf("%d VM(s)", q.VMs)
+	}
+	if q.Bytes > 0 {
+		disk = fmt.Sprintf("%.1f GiB", float64(q.Bytes)/(1<<30))
+	}
+	return vms + " and " + disk
 }
 
 //go:embed assets/utm-memory.applescript
@@ -287,6 +327,7 @@ func CheckCapacity(plan CapacityPlan, say func(string, ...any)) error {
 		} else {
 			f.free, f.freeErr = FreeBytes(dir)
 		}
+		gatherDiskFacts(&f, readVMDisk)
 	}
 	a, why := decideCapacity(f)
 	say("room:   %s — %s", a, why)
@@ -296,4 +337,55 @@ func CheckCapacity(plan CapacityPlan, say func(string, ...any)) error {
 	return fmt.Errorf("%w for %s (%s): %s.\n"+
 		"  Stop or vm-delete a VM you own, or wait for another caller's to stop; `irgo-winvm status` lists them with their owners",
 		ErrNoRoom, plan.VM, a, why)
+}
+
+// gatherDiskFacts fills in what the disk and quota halves of the decision
+// read: the space still promised to every VM UTM lists (and to every VM
+// another vm-create is making that it does not list yet), and what
+// plan.Owner already holds. measure is readVMDisk, or a fake.
+func gatherDiskFacts(f *capacityFacts, measure func(string) vmDisk) {
+	f.quota, f.quotaErr = QuotaFromEnv()
+	records, bad, rErr := VMRecords()
+	owners := map[string]string{}
+	for _, r := range records {
+		owners[strings.ToLower(r.Name)] = r.Owner
+	}
+	switch {
+	case rErr != nil:
+		f.ownerErr = rErr
+	case len(bad) > 0:
+		f.ownerErr = fmt.Errorf("unreadable VM record: %s", bad[0])
+	}
+	mine := func(name string) bool {
+		return f.plan.Owner != "" && strings.EqualFold(owners[strings.ToLower(name)], f.plan.Owner)
+	}
+	listed := map[string]bool{}
+	for _, v := range f.vms {
+		listed[strings.ToLower(v.Name)] = true
+		if strings.EqualFold(v.Name, f.plan.VM) {
+			continue
+		}
+		d := measure(v.Name)
+		if d.Err != nil {
+			f.promisedErr = fmt.Errorf("%w %s: %v", errVMDisk, v.Name, d.Err)
+			if mine(v.Name) {
+				f.ownerErr = f.promisedErr
+			}
+			continue
+		}
+		f.promised += promised(v.Name, d)
+		if mine(v.Name) {
+			f.ownerVMs++
+			f.ownerHeld += held(v.Name, d)
+		}
+	}
+	for _, p := range f.pending {
+		if !listed[strings.ToLower(p)] {
+			f.promised += cloneReserveBytes
+			if mine(p) {
+				f.ownerVMs++
+				f.ownerHeld += cloneReserveBytes
+			}
+		}
+	}
 }

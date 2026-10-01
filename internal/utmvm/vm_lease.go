@@ -341,7 +341,7 @@ func BeginCreate(name string, c Caller, noGolden, overcommit bool, say func(stri
 		return func() {}, TouchVM(name)
 	}
 
-	plan := CapacityPlan{VM: name, Exists: exists, Overcommit: overcommit}
+	plan := CapacityPlan{VM: name, Exists: exists, Overcommit: overcommit, Owner: c.ID}
 	if !exists {
 		plan.Disk = diskForInstall
 		if !noGolden {

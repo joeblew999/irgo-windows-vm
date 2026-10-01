@@ -37,16 +37,6 @@ const goldenVerifyName = GoldenVMName + "-verify"
 // cannot write (see above).
 const goldenManifestName = "golden.json"
 
-// cloneHeadroomBytes is the free space a clone is given room to grow into,
-// on top of hostDiskReserveBytes (vm_capacity.go).
-//
-// A clone costs nothing until the guest writes, and then every write is a new
-// block: the pagefile coming back, updates, whatever the agent runs. Running
-// out mid-write corrupts the clone. 10 GiB is an ESTIMATE, not a measurement —
-// phase 0 of the plan measures how much a clone actually grows, and this
-// number should be replaced by that.
-const cloneHeadroomBytes = 10 << 30
-
 // cloneBootWait is how long a fresh clone gets to answer. The first boot of a
 // clone is a normal boot of an installed Windows with a new network card, so
 // it should be like any boot; five minutes, not two, until phase 0 has timed

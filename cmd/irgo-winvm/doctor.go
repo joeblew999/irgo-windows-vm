@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -56,7 +57,6 @@ func runDoctor(v values, _ []string) error {
 
 	out := utmvm.Reporter("doctor")
 	out("%-22s %-12s %s", "WHAT", "STATE", "WHERE")
-	var missing int
 	var update string
 	for _, r := range rows {
 		where := utmvm.Home(r.Path)
@@ -64,21 +64,132 @@ func runDoctor(v values, _ []string) error {
 			where = r.URL
 		}
 		out("%-22s %-12s %s", r.What, r.State, where)
-		if r.State == "MISSING" {
-			missing++
-		}
 		if r.What == utmUpdateRow {
 			update = r.Note
 		}
 	}
 	out("")
 	out("%s", update)
-	if missing == 0 {
-		out("nothing missing.")
-		return nil
+	out("")
+	for _, line := range nextSteps(measureSetup()) {
+		out("%s", line)
 	}
-	out("%d missing. In order: irgo-winvm iso-create -fetch, then vm-create -install.", missing)
 	return nil
+}
+
+// setup is what the next steps depend on, measured by measureSetup and kept
+// apart from it so nextSteps can be tested without a Mac set up each way.
+type setup struct {
+	utm        string // installed version, "" when UTM is not installed
+	media      bool   // the Windows installer is built
+	isoTools   bool   // wimlib and a masterer are installed
+	brew       bool   // Homebrew is here to install them
+	vm         bool   // the default VM's disk exists
+	golden     bool   // a golden image is registered
+	cache      string // the private cache's location, "" when not configured
+	cacheError error  // the cache half configured
+}
+
+func measureSetup() setup {
+	var s setup
+	if in, err := utmvm.DetectUTM(); err == nil {
+		s.utm = in.Version
+	}
+	for _, e := range utmvm.Externals() {
+		if e.Name == "Windows 11 ARM64 ISO" {
+			s.media = e.Present
+		}
+	}
+	s.isoTools = true
+	for _, t := range utmvm.ISOTools() {
+		s.isoTools = s.isoTools && t.Found()
+	}
+	if _, err := exec.LookPath("brew"); err == nil {
+		s.brew = true
+	} else if _, err := os.Stat("/opt/homebrew/bin/brew"); err == nil {
+		s.brew = true
+	}
+	if b, err := utmvm.BundlePath(utmvm.DefaultVMName); err == nil {
+		_, sErr := os.Stat(utmvm.DiskPath(b))
+		s.vm = sErr == nil
+	}
+	s.golden = utmvm.Golden().Present
+	r, cached, err := utmvm.GoldenCacheFromEnv()
+	if cached {
+		s.cache = r.Where()
+	}
+	s.cacheError = err
+	return s
+}
+
+// nextSteps is what a newcomer does next, in order, each step marked done,
+// next (the first not done) or later. Every line names the command to run,
+// and nothing assumes a checkout of the repository.
+func nextSteps(s setup) []string {
+	var lines []string
+	first := true
+	step := func(done bool, title string, how ...string) {
+		mark := "   "
+		switch {
+		case done:
+			mark = " ✓ "
+		case first:
+			mark = " → "
+			first = false
+		}
+		lines = append(lines, mark+title)
+		if !done {
+			for _, h := range how {
+				lines = append(lines, "      "+h)
+			}
+		}
+	}
+	lines = append(lines, "Next, in order:")
+
+	step(s.utm != "", "UTM, the hypervisor"+ifElse(s.utm != "", " ("+s.utm+")", ""),
+		"vm-create installs it from UTM's signed .dmg on GitHub, or: brew install --cask utm")
+
+	// The installer is only needed when the VM will be installed from it.
+	if !s.vm && !s.golden && s.cache == "" {
+		how := []string{"irgo-winvm iso-create -fetch",
+			"downloads Windows 11 ARM64 from Microsoft (4.2 GB) and builds the installer from it"}
+		if !s.isoTools && !s.brew {
+			how = append(how, "it installs wimlib and xorriso with Homebrew, which is not here: https://brew.sh")
+		}
+		step(s.media, "the Windows installer", how...)
+	}
+
+	vm := []string{"irgo-winvm vm-create -install",
+		"installs Windows unattended, about 45 minutes; you click nothing"}
+	switch {
+	case s.golden:
+		vm = []string{"irgo-winvm vm-create", "clones the golden image and boots it: seconds"}
+	case s.cache != "":
+		vm = []string{"irgo-winvm vm-create -install",
+			"pulls the golden image from your private cache (" + s.cache + "), minutes, then clones it"}
+	}
+	vm = append(vm, "macOS asks once whether your terminal may control UTM: click OK",
+		"(if you clicked Don't Allow: System Settings > Privacy & Security > Automation)")
+	step(s.vm, "a Windows VM", vm...)
+
+	step(false, "your program, on Windows",
+		"GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o app.exe .",
+		"irgo-winvm app-create app.exe        (-gui for anything with a window)")
+
+	if s.cacheError != nil {
+		lines = append(lines, "", "The private golden-image cache is half configured:", "  "+s.cacheError.Error())
+	}
+	lines = append(lines, "",
+		"For an AI agent: claude mcp add irgo-winvm -- irgo-winvm mcp",
+		"Guide: "+utmvm.SiteURL+"mcp.html")
+	return lines
+}
+
+func ifElse(c bool, a, b string) string {
+	if c {
+		return a
+	}
+	return b
 }
 
 // doctorRows is everything doctor reports, measured now.
@@ -99,7 +210,7 @@ func doctorRows() []doctorRow {
 		}
 	}
 	for _, t := range utmvm.ISOTools() {
-		state := "MISSING"
+		state := "not yet" // iso-create installs it
 		if t.Found() {
 			state = "ok"
 		}
@@ -201,8 +312,19 @@ func utmUpdateNote(in utmvm.Install, present bool, c utmvm.UTMReleaseCheck) stri
 
 func day(t time.Time) string { return t.Format("2 Jan 2006") }
 
+// notYet is the state of a row whose absence is not a problem: optional, or
+// fetched by the command that needs it.
+var notYet = map[string]string{
+	"Go toolchain":        "optional", // for building your .exe, and glaze-check
+	"UTM guest tools ISO": "not yet",  // vm-create downloads it
+	"the VM itself":       "not yet",  // UTM makes it on first use
+}
+
 func externalRow(e utmvm.External) doctorRow {
 	state := "MISSING"
+	if s, ok := notYet[e.Name]; ok {
+		state = s
+	}
 	if e.Present {
 		state = "ok"
 		if e.Bytes > 0 {

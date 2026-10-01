@@ -11,11 +11,11 @@ main session's background agents; the main session reviews and merges their bran
 | # | Plan | Owner | State |
 |---|---|---|---|
 | 0 | [`2026-09-30_1730_fix-it-all.md`](2026-09-30_1730_fix-it-all.md) — index of all work, "Resume here" | main session | living |
-| 1 | [`2026-10-01_1000_release-prime-time.md`](2026-10-01_1000_release-prime-time.md) — install, first run, golden auto-pull, agent guide, v0.5.0 | main session | merged; tag v0.5.0 after Z/AA/BB/CC; live-test golden auto-pull |
+| 1 | [`2026-10-01_1000_release-prime-time.md`](2026-10-01_1000_release-prime-time.md) — install, first run, golden auto-pull, agent guide, v0.5.0 | — | **released v0.5.0 1 Oct** (macOS + Linux/Windows clients, installer verified, cask in Casks/); golden auto-pull still to live-test |
 | 2 | [`2026-10-01_1020_shared-mac.md`](2026-10-01_1020_shared-mac.md) — VM ownership, leases, reaping, resource guard, per-VM staging | agent Z | branch ready, merge pending |
 | 3 | [`2026-10-01_1030_worker-ledger.md`](2026-10-01_1030_worker-ledger.md) — D1 ledger of agents/machines/VMs, dashboard | — | **merged 1 Oct**, live (D1 irgo-ledger; routes to move into FF's table) |
 | 4 | [`2026-10-01_1040_vm-conformance.md`](2026-10-01_1040_vm-conformance.md) — the glaze suite's machinery pointed at the VM; VM-STATUS.md | — | **merged 1 Oct**; irgo-win11 fails on BitLocker + hibernation (vm-repair to fix) |
-| 5 | [`2026-10-01_1100_remote-cross-platform.md`](2026-10-01_1100_remote-cross-platform.md) — Windows/Linux/GitHub clients drive a Mac through the Worker | agent CC | starting |
+| 5 | [`2026-10-01_1100_remote-cross-platform.md`](2026-10-01_1100_remote-cross-platform.md) — Windows/Linux/GitHub clients drive a Mac through the Worker | — | **merged 1 Oct**, live: Linux container + GitHub ubuntu/windows runners → Mac → clone → results |
 | 5a | [`2026-10-01_1130_vm-capacity.md`](2026-10-01_1130_vm-capacity.md) — disk/RAM budget, quotas, retention, capacity in CLI/MCP/Worker | — | **merged 1 Oct** (4 GiB clones, capacity, quotas, prune; Worker redeploy pending) |
 | 5b | [`2026-10-01_1140_docs-restructure.md`](2026-10-01_1140_docs-restructure.md) — docs by audience, single source per topic | — | **merged 1 Oct** (9 pages by audience; BB/CC/DD write into them) |
 | 5c | [`2026-10-01_1150_worker-api-single-source.md`](2026-10-01_1150_worker-api-single-source.md) — one route table for Worker + every client, docs and OpenAPI generated | — | **merged + deployed 1 Oct** (15 routes, OpenAPI) |

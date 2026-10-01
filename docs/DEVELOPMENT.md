@@ -88,10 +88,11 @@ There are four modules. The split controls what reaches the shipped binary.
 | root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
 | `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
 | `site` | needs a markdown parser the tool has no business carrying |
-| `worker` | the [Cloudflare Worker](#the-cloudflare-worker), on workers-go and built to Wasm by TinyGo |
+| `worker` | the [Cloudflare Worker](#the-cloudflare-worker), on workers-go and built to Wasm by TinyGo. Imports the root module's `wire` package only, through `replace … => ../` |
 
 Verify the split with `go list -deps`, not by reading imports. The site module
-requires goldmark, its extensions and the chroma highlighter, and nothing else.
+requires goldmark, its extensions and the chroma highlighter, and the root
+module for `wire` alone (standard library only, for the Worker API page).
 That is why the generated MCP page is captured from the binary rather than
 produced by importing the server: importing it would pull the protocol SDK's
 dependency graph into the documentation generator.
@@ -134,6 +135,8 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger): spools locally, sends in the background, never fails a command. Imports nothing of the tool's, so `utmvm` can call it |
+| `wire` | the [Worker API](#the-worker-api) declared once: routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
+| `internal/workerclient` | the one client of the Worker, built from `wire`'s table |
 | `internal/glazecheck` | whether glaze works: build `examples/conformance` into a test binary, run it here or through `app-create`, record every test from its test2json events. Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
@@ -1215,26 +1218,86 @@ the owner switches.
   unchanged.
 - **The golden image** (`worker/golden.go`), the private bucket bound as
   `GOLDEN`, and the only way `vm-golden-push` and `vm-golden-pull` reach it
-  when `IRGO_GOLDEN_URL` is set ([the private R2 cache](#the-private-r2-cache)):
-
-  | request | token | does |
-  |---|---|---|
-  | `GET /api/golden/<key>` | `GOLDEN_TOKEN` | the object, streamed; `Range` answers 206 |
-  | `HEAD /api/golden/<key>` | `GOLDEN_TOKEN` | `X-Golden-Size`, `X-Golden-Sha256` |
-  | `PUT /api/golden/<key>` | `GOLDEN_PUSH_TOKEN` | stored only if it hashes to `X-Golden-Sha256`; 201 |
-  | `DELETE /api/golden/<key>` | `GOLDEN_PUSH_TOKEN` | 204, also when nothing was there |
-  | `GET /api/golden-list/<manifests\|chunks>?cursor=` | `GOLDEN_PUSH_TOKEN` | a page of keys and sizes |
-
-  `<key>` is exactly one the cache writes: `golden/latest`,
+  when `IRGO_GOLDEN_URL` is set ([the private R2 cache](#the-private-r2-cache)).
+  A key is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
 - **The ledger** (`worker/ledger.go`), who used which VM where, in the D1
   database bound as `LEDGER`: see [The ledger](#the-ledger).
 
-All of the handler is plain Go behind two small interfaces (`worker/api.go`).
-`go:check` builds and tests it for the host, where `workers.Serve` is an
-ordinary HTTP server and R2 is a map. Only `platform_js.go` touches the
-Workers runtime.
+Every route, its token, its body limit and its answers are on the
+[Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page,
+generated from the route table (see [The Worker API](#the-worker-api)); no
+document lists them by hand. All of the handler is plain Go behind small
+interfaces (`worker/api.go`). `go:check` builds and tests it for the host,
+where `workers.Serve` is an ordinary HTTP server, R2 is a map and D1 is
+SQLite. Only `platform_js.go` touches the Workers runtime.
+
+### The Worker API
+
+The Worker's API is declared once, in package `wire` (`wire/routes.go`), the
+way the commands are declared once in `internal/command`. Everything that
+serves or calls it is derived from that table:
+
+| reads the table | how |
+|---|---|
+| `worker/` | `Handler` matches each request with `wire.Match` and calls the handler registered under the route's name in `handlers` (`worker/api.go`); before it, the dispatcher checks the route's token scope (401, or 503 when its secret is unset), `NeedLength` (411) and `MaxBody` (413). It panics at start if `handlers` and the table disagree |
+| `internal/workerclient` | the one client. A call names a route; the URL is `wire.Route.URL`, the token is the one for the route's scope, success is the route's status, and anything else is a `*workerclient.Error` with the Worker's `wire.Code`. `vm-golden-push`/`-pull` (`internal/utmvm/vm_golden_worker.go`), the ledger (`internal/ledger`) and CI's glaze post (`glaze-check -post`) all go through it |
+| `/api/openapi.json` | the OpenAPI 3.1 document, from `wire/openapi` (reflection over the request and response types, so not in the TinyGo build), written to `worker/openapi.json` by `mise run worker:wasm` and embedded |
+| the site | the [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page (`site/api.go`), and the path the Glaze status page fetches |
+| MCP | a tool whose command calls a route (`Route.Commands`) names it in its description |
+
+`wire` is a package of the root module, not a module of its own: a replace
+directive in the root `go.mod` would break `go install …/cmd/irgo-winvm@latest`,
+which refuses a module that has one. `worker/` and `site/` require the root
+module with `replace … => ../`; module graph pruning keeps their `go.sum`
+free of the tool's dependencies, and only `wire`'s standard-library imports
+are built. `wire`'s `TestStandardLibraryOnly` keeps it that way (no
+third-party module, no `regexp`), and `mise run worker:wasm` is what proves
+TinyGo takes it.
+
+The tests, each with its negative control in its comment:
+
+- `wire`: `TestTable` (unique names and method+path, every `{param}`
+  described, every scope and code declared), `TestMatch`, `TestURLEscapes`.
+- `worker`: `TestHandlersAreTheTable`; `TestEveryRouteEnforcesItsScope`, which
+  replaces every handler with a spy and checks each route is reached with its
+  own token and refused (handler never run) with none, a wrong one, each
+  other scope's, and with its secret unset; `TestBodyLimitsFromTheTable`;
+  `TestOpenAPIIsCurrent`. The route-specific refusal tests
+  (`TestGoldenRefusals`, `TestGlazePostRefusals`, `TestLedgerRefusals`) pin
+  the scopes literally, so a wrong scope in the table itself fails too.
+- `internal/workerclient`: `TestEachCallCarriesItsScopesToken`,
+  `TestErrorsCarryTheCode`, and `TestNoURLsOutsideTheClient`. That last one is
+  a grep, because the compiler cannot tell a URL from any other string: no
+  non-test file outside `wire/`, `internal/workerclient/` and `worker/` may
+  contain a route's literal path prefix (taken from the table, so a new route
+  is covered), comments excepted.
+- `internal/mcpserver`: `TestWorkerRoutesNameRealCommands`.
+
+**Adding a route** is three edits and a regenerate:
+
+1. **One entry in `wire.Routes`** (`wire/routes.go`): a `Route*` name
+   constant, method, path (`{name}` for one segment, a final `{name...}` for
+   the rest), `Scope`, summary, `Params`, request and response types (the zero
+   value of a Go type in `wire`, or a media type for a body that is not
+   JSON), `Success`, the handler's own `Errors`, `MaxBody` for a body, and
+   `Commands` if an `irgo-winvm` command calls it. A new token is a new
+   `Scope` and a row in `wire.Scopes` (the Worker secret and the client's
+   variable). Shared constants, key patterns and limits go in `wire` too.
+2. **One handler** in `worker/`, `func(env Env, w, r, params []string)`,
+   registered under the route's name in `handlers` (`worker/api.go`). It does
+   not check the token or the body's size: the dispatcher did. It answers an
+   error with `fail(w, wire.Code…, …)`.
+3. **One client method** in `internal/workerclient`, built on `c.Do(ctx,
+   wire.RouteX, params, query, body, header)`, decoding into the route's
+   `wire` type.
+4. `mise run worker:wasm` regenerates `worker/openapi.json`; then
+   `mise run go:check`. The site page, the OpenAPI document and the MCP
+   descriptions follow on their own.
+
+The TinyGo traps below still apply to anything a handler or `wire` does:
+no `ServeMux` patterns, no package-level regexps.
 
 ### Rules the code keeps
 
@@ -1313,8 +1376,8 @@ TinyGo cost two traps, both found under `wrangler dev` and both invisible to
 
 | trap | symptom | what to do |
 |---|---|---|
-| `http.ServeMux` patterns such as `"GET /api/health"` under TinyGo 0.42 | never match: a mux holding only that pattern answered that path with 404 | route by hand (`Handler` in `api.go`) |
-| `regexp.MustCompile` of `[0-9a-f]{64}` at package level under TinyGo | `fatal error: stack overflow` before `main`; every request then fails with "Go program has already exited" or hangs | plain loops (`isHex`, `isPicture`, `isGoldenKey`) |
+| `http.ServeMux` patterns such as `"GET /api/health"` under TinyGo 0.42 | never match: a mux holding only that pattern answered that path with 404 | route by hand (`wire.Match`) |
+| `regexp.MustCompile` of `[0-9a-f]{64}` at package level under TinyGo | `fatal error: stack overflow` before `main`; every request then fails with "Go program has already exited" or hangs | plain loops (`wire.IsHex`, `wire.IsPicture`, `wire.IsGoldenKey`) |
 
 Three more, about the tools rather than the code:
 
@@ -1417,9 +1480,10 @@ Done on 1 Oct 2026 by these steps. In order:
    conformance job's last step then posts on every push to main. Until both
    are set, that step prints that it is not posting and succeeds.
 7. **Check the deployment** with the curls above, using the real URL and
-   tokens. A request with no token must get 401 on `/api/glaze-status/*`
-   (POST), `/api/golden/*` (every method) and `/api/golden-list/*`, and the
-   read token must get 401 on a PUT.
+   tokens. Every route with a token must answer 401 without one (the
+   [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page
+   lists them), the read token must get 401 on a PUT, and
+   `/api/openapi.json` must be the committed `worker/openapi.json`.
 
 Switching the public site from GitHub Pages to the Worker (a custom domain on
 the Worker, and retiring `pages.yml`) is a separate decision and is not part
@@ -1479,12 +1543,11 @@ runs on SQLite (modernc.org/sqlite, in the worker module only), so the tests
 run the real SQL. The d1 driver under TinyGo was measured with `wrangler dev`
 before it was used: inserts, nulls, `RowsAffected` for duplicates.
 
-| request | token | does |
-|---|---|---|
-| `POST /api/ledger/events` | `LEDGER_TOKEN` | `{"events":[...]}`, 1 to 25; answers `accepted`, `duplicates`, `rejected` |
-| `GET /api/ledger/events` | `LEDGER_READ_TOKEN` | history, newest first, filtered by `owner`, `vm`, `machine`, `host`, `type`, `op`, `repo`, `client`; `since` is RFC 3339 or a duration (default 7 days); `limit` up to 1000 |
-| `GET /api/ledger/vms` | `LEDGER_READ_TOKEN` | now: machines, VMs (`in-use`, `stale`, `idle`, `deleted`), open work, recent events; `since`, `stale` |
-| `GET /api/ledger/` | `LEDGER_READ_TOKEN`, as bearer or as the Basic password | the same, as a page |
+Its routes (`ledger-post`, `ledger-events`, `ledger-vms`, `ledger-page`,
+and `ledger-bare`, which redirects `/api/ledger` to the page) and their
+filters are on the [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html)
+page. Posting needs `LEDGER_TOKEN`; reading needs `LEDGER_READ_TOKEN`, which
+the page also takes as an HTTP Basic password (`Route.Page`).
 
 - **Stale** is open work never closed: a start with no end, or a lease with
   no release, older than `stale` (3 h by default), or a lease past its

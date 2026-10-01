@@ -41,6 +41,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/joeblew999/irgo-windows-vm/wire"
 )
 
 //go:embed page.tmpl
@@ -91,6 +93,10 @@ var pages = []struct {
 	// Also generated: built by listing a live MCP server, so the page cannot
 	// describe a tool the server does not offer.
 	{"", "mcp.html", "MCP", "MCP", "Drive it from an AI agent; captured from a live server"},
+
+	// Also generated: from the Worker's route table in package wire, the
+	// table the Worker routes by and the tool's client builds requests from.
+	{"", "api.html", "Worker API", "API", "Every endpoint of the Cloudflare Worker, from its route table"},
 }
 
 // siteName is the project's name: the wordmark, and the tail of every page's
@@ -156,6 +162,11 @@ type page struct {
 	// (worker/) for the newest run when it is served from there. On GitHub
 	// Pages the request finds nothing and the page stays as rendered.
 	Live bool
+
+	// LiveAPI is the path the Live page asks, relative so it resolves
+	// against wherever the site is served: the glaze-latest route's, from
+	// wire's table, not written in the template.
+	LiveAPI string
 }
 
 // livePage is the page that shows the Worker's latest glaze runs.
@@ -285,6 +296,8 @@ func build(root, out, repo, siteURL, sha string) error {
 					return gErr
 				}
 				raw = []byte(g)
+			case "api.html":
+				raw = generateAPI()
 			default:
 				return fmt.Errorf("%s has no source file and no generator", p.Out)
 			}
@@ -321,7 +334,8 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 
 		var rendered bytes.Buffer
-		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName(), Live: p.Out == livePage}
+		data := page{Title: p.Title, Blurb: p.Blurb, Body: html.Body, TOC: html.TOC, Nav: navs, Repo: repo, Source: p.Src, Build: stamp.line(), Home: p.Nav == "", Site: siteName(), Live: p.Out == livePage,
+			LiveAPI: strings.TrimPrefix(wire.MustFind(wire.RouteGlazeLatest).Path, "/")}
 		if eErr := tmpl.Execute(&rendered, data); eErr != nil {
 			return fmt.Errorf("rendering %s: %w", p.Out, eErr)
 		}
@@ -330,7 +344,7 @@ func build(root, out, repo, siteURL, sha string) error {
 		}
 		from := p.Src
 		if from == "" {
-			from = "(the binary)"
+			from = "(the Go code)"
 		}
 		fmt.Printf("  %-18s <- %s\n", p.Out, from)
 	}

@@ -63,7 +63,7 @@
   <div class="footer-inner">
   <p>
   {{- if .Source}}Generated from <a href="{{.Repo}}/blob/main/{{.Source}}">{{.Source}}</a> in the repository. To correct this page, edit that file.
-  {{- else}}Captured from the compiled binary at build time; nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it.
+  {{- else}}Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it.
   {{- end}}</p>
   <p>For machines:
   <a href="llms.txt">llms.txt</a> ·
@@ -137,14 +137,14 @@
   The Glaze status page only. Served by the Cloudflare Worker (worker/), this
   asks it for the newest run CI posted and shows it above the recorded one, so
   the page is current without a redeploy. Anywhere else, GitHub Pages
-  included, api/glaze-status is not there and nothing changes. Everything from
+  included, the API is not there and nothing changes. Everything from
   the response goes in as text or as an image URL under the API: never as HTML.
 -->
 <script>
 (function () {
   var prose = document.querySelector(".prose");
   if (!prose || !window.fetch) return;
-  fetch("api/glaze-status", { cache: "no-store" }).then(function (r) {
+  fetch({{.LiveAPI}}, { cache: "no-store" }).then(function (r) {
     var ct = r.headers.get("Content-Type") || "";
     return r.ok && ct.indexOf("application/json") === 0 ? r.json() : null;
   }).then(function (all) {

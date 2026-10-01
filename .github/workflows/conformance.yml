@@ -142,9 +142,13 @@ jobs:
       # The same record, posted to the Cloudflare Worker (worker/), so its
       # Glaze status page shows this run within seconds instead of after the
       # next pages deploy. Pushes to main only: a pull request's run must not
-      # become "the latest". Does nothing until the owner sets the repository
-      # variable GLAZE_STATUS_URL (the Worker's origin) and the secret
-      # GLAZE_STATUS_TOKEN (docs/DEVELOPMENT.md, "The Cloudflare Worker").
+      # become "the latest". `glaze-check -post` sends it through the tool's
+      # one Worker client (internal/workerclient, its routes from
+      # wire/routes.go), the code every other caller of the Worker uses: the
+      # manifest and exactly the pictures it names. It does nothing but say
+      # so until the owner sets the repository variable GLAZE_STATUS_URL (the
+      # Worker's origin) and the secret GLAZE_STATUS_TOKEN
+      # (docs/DEVELOPMENT.md, "The Cloudflare Worker").
       # continue-on-error: a Worker that is down is not a glaze failure, and
       # the step still shows red.
       - name: Post the record to the Worker
@@ -155,20 +159,5 @@ jobs:
           GLAZE_STATUS_URL: ${{ vars.GLAZE_STATUS_URL }}
           GLAZE_STATUS_TOKEN: ${{ secrets.GLAZE_STATUS_TOKEN }}
         run: |
-          if [ -z "$GLAZE_STATUS_URL" ] || [ -z "$GLAZE_STATUS_TOKEN" ]; then
-            echo "GLAZE_STATUS_URL or GLAZE_STATUS_TOKEN is not set: not posting"
-            exit 0
-          fi
           target=mac; [ "$RUNNER_OS" = Windows ] && target=windows
-          dir="docs/screens/conformance/$target"
-          if [ ! -f "$dir/shots.json" ]; then
-            echo "no $dir/shots.json: this run recorded no pictures, nothing to post"
-            exit 0
-          fi
-          form=(-F "manifest=@$dir/shots.json;type=application/json")
-          for p in "$dir"/*.png; do
-            [ -e "$p" ] && form+=(-F "$(basename "$p")=@$p;type=image/png")
-          done
-          echo "POST $GLAZE_STATUS_URL/api/glaze-status/$target ($(( ${#form[@]} / 2 )) parts: shots.json and its pictures)"
-          curl -sS --fail-with-body -H "Authorization: Bearer $GLAZE_STATUS_TOKEN" \
-            "${form[@]}" "$GLAZE_STATUS_URL/api/glaze-status/$target"
+          go run ./cmd/irgo-winvm glaze-check -post "$target"

@@ -53,7 +53,8 @@ examples/         conformance, the glaze and native test suite (mise run glaze:m
                   glaze:windows), vmconformance, the VM's (vm-check), shots, how
                   both take pictures, drive, which the interaction tests click
                   and type with, and glaze-all, the demo you drive by hand
-site/             renders docs/ into the website
+docsite/          the docs site generator, a tool for any project's docs/ (its own module)
+site/             this repository's site: docsite's config, and hooks for the generated pages
 worker/           the Cloudflare Worker: the site, live glaze status, golden-image links
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
 .plans/           work in progress, one file per plan
@@ -70,15 +71,15 @@ There are four modules. The split controls what reaches the shipped binary.
 |---|---|
 | root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
 | `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
-| `site` | needs a markdown parser the tool has no business carrying |
+| `docsite` | the docs site generator. Needs a markdown parser the tool has no business carrying, and imports nothing from this repository, so it can move to its own |
 | `worker` | the [Cloudflare Worker](WORKER.md), on workers-go and built to Wasm by TinyGo. Imports the root module's `wire` package only, through `replace … => ../` |
 
-Verify the split with `go list -deps`, not by reading imports. The site module
-requires goldmark, its extensions and the chroma highlighter, and the root
-module for `wire` alone (standard library only, for the Worker API page).
-That is why the generated MCP page is captured from the binary rather than
-produced by importing the server: importing it would pull the protocol SDK's
-dependency graph into the documentation generator.
+Verify the split with `go list -deps`, not by reading imports. The docsite
+module requires goldmark, its extensions, the chroma highlighter and a TOML
+parser, and nothing of this repository. The site's hooks (`site/`) are a
+package of the root module, since they need only what it already has: `wire`
+for the Worker API page, and the binary, which they build and run for the
+command reference and the MCP page.
 
 ### Runtime data
 

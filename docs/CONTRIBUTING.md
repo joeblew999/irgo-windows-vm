@@ -42,8 +42,9 @@ changed.
 
 ### What the checks cover
 
-- **`go:check` covers all four Go modules** (the root, `examples`, `site` and
-  `worker`) and cross-compiles for Linux and Windows as well as macOS. Deleting
+- **`go:check` covers all four Go modules** (the root, `examples`, `docsite`
+  and `worker`), checks the docs site (`docsite check`, below), and
+  cross-compiles for Linux and Windows as well as macOS. Deleting
   a function from `sysfile_other.go` once passed every check being run, because
   they all ran on darwin. The module split is in
   [Architecture](ARCHITECTURE.md#go-modules); `go list -deps ./cmd/irgo-winvm`
@@ -131,27 +132,54 @@ see [Test your own changes to glaze or native](TESTING.md#test-your-own-changes-
 <https://joeblew999.github.io/irgo-windows-vm/> is generated from the markdown
 in this repository and published by `pages.yml` on every push to `main`. There
 is no separate copy to edit: if a page is wrong, fix the markdown. The
-exceptions are the [command reference](#the-command-reference) and the MCP
-page, which are captured from the binary.
+exceptions are the [command reference](#the-command-reference), the MCP page
+and the Worker API page, which are generated from the code.
 
 ```sh
 mise run site:serve    # build and serve at http://localhost:8127
 mise run site:build    # build only, into site/dist (gitignored)
+mise run site:check    # build into a temporary directory and check it
 ```
 
 `site:serve` stops whatever already holds the port. Otherwise a leftover server
 keeps answering and you review the *old* build without knowing.
 
+### How it is built
+
+The generator is **docsite** (`docsite/`, its own module, with
+[its own README](https://github.com/joeblew999/irgo-windows-vm/blob/main/docsite/README.md)):
+a tool for any project with a `docs/` folder, which imports nothing from this
+repository and will move to a repository of its own. This repository is its
+first user. What is particular to this site is in `site/`:
+
+- **`site/docsite.toml`**: the pages in navigation order, their nav labels,
+  parents and descriptions, which pages state intent, the link-check sources,
+  and the prose of `llms.txt` and `robots.txt`.
+- **The hooks** (`site/main.go`, run as `go run ./site <name>`): the pages
+  with no markdown file, each generated from the code it describes. `reference`
+  and `mcp` capture the binary; `api` reads wire's route table; `glaze-live`
+  is the script that ends the Glaze status page, asking the Worker for the
+  newest run.
+
+To change the API page's generator, for example to render the OpenAPI document
+(`worker/openapi.json`) instead, change that page's `generate` line in the
+config: `generate = { file = "worker/openapi.json", format = "openapi" }`.
+
 ### What CI checks
 
-None of these failures is visible on a page that renders, and each has happened.
-CI fails on:
+`go:check` runs `docsite check` on this site. None of these failures is
+visible on a page that renders, and each has happened. It fails on:
 
-- a local link to a file the site doesn't publish;
+- a local link or image to a file the site doesn't publish;
 - an absolute URL that has been rewritten as a repository path;
 - a fragment link to a heading that doesn't exist;
+- a link into the site, from `cmd/`, `internal/`, `.github/` or `docs/`, to a
+  page or heading that doesn't exist. Error messages link the site, so a renamed
+  heading would otherwise break them silently;
 - a page that appears in the HTML site but not the corpus, or the reverse (see
   below). A corpus missing a page still looks complete;
+- a heading id that differs from what plain goldmark gives, a duplicated id, a
+  table outside its scroll box, a footer naming the wrong source;
 - a screenshot no page mentions (see [Screenshots](#screenshots)).
 
 ### Copies for machines
@@ -166,7 +194,7 @@ the command reference.
 
 They are not a second copy. Each corpus entry is written in the same loop that
 renders the HTML page, from the same markdown, in one pass over the page list
-in `site/main.go`.
+in `site/docsite.toml`.
 
 ### Where a topic goes
 
@@ -194,16 +222,18 @@ on the page for its reader:
 
 ### Add a page
 
-Every file above becomes a page. To add one, add a line to `pages` in
-`site/main.go`. Nothing is discovered by scanning a directory, so nothing is
-published by accident. A page with a `Nav` label is in the header; one with
-`Under` set is listed in the footer and lights up its parent's entry, which
-keeps the header to one line at 1280 px.
+Every file above becomes a page. To add one, add a `[[page]]` to
+`site/docsite.toml`. Nothing is discovered by scanning a directory, so nothing
+is published by accident. A page with a `nav` label is in the header; one with
+`parent` set is listed in the footer and lights up its parent's entry, which
+keeps the header to one line at 1280 px. A page that names commands that do not
+exist yet, on purpose, gets `intent = true`, which exempts it from the check
+that every command the docs name exists.
 
 ### The command reference
 
-The reference has no source file. The site build compiles the CLI and captures
-`irgo-winvm help` and `-h` for every command, so no flag, default or usage
+The reference has no source file. Its hook (`go run ./site reference`)
+compiles the CLI and captures `irgo-winvm help` and `-h` for every command, so no flag, default or usage
 string is ever transcribed. `iso-create -fetch` computes its usage text from a
 constant, so only a captured copy is correct.
 

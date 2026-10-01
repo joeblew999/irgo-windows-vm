@@ -7,6 +7,16 @@
 go = "1.27.1"
 golangci-lint = "2.14.0"
 goreleaser = "2.18.2"
+# The Cloudflare Worker in worker/ (docs/DEVELOPMENT.md, "The Cloudflare
+# Worker"): TinyGo builds its Wasm, wrangler runs it locally and deploys it, and
+# wrangler is an npm package, so node is pinned with it. CI installs only the
+# Go tools (install_args, and MISE_TASK_RUN_AUTO_INSTALL=false so `mise run`
+# does not install the rest), so none of these slow a check.
+tinygo = "0.42.0"
+# wasm-opt, which tinygo runs on every -target wasm build and fails without.
+"aqua:WebAssembly/binaryen" = "133"
+node = "24.19.0"
+"npm:wrangler" = "4.143.0"
 
 [env]
 # Local glaze/native clones, for upstream:*. Bugs there are fixed there.

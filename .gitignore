@@ -73,6 +73,12 @@ go.work.sum
 # this one.
 .DS_Store
 
+# The Worker's build output (mise run worker:wasm), wrangler's local state
+# (the simulated R2 of `wrangler dev`), and local secrets for wrangler dev.
+/worker/build/
+/worker/.wrangler/
+/worker/.dev.vars
+
 # Agent worktrees (Claude Code isolation), never part of the repo.
 /.claude/worktrees/
 

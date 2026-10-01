@@ -606,3 +606,8 @@ footer a { color: var(--accent); }
   .table-scroll { overflow: visible; border: 0; }
   body { font-size: 11pt; }
 }
+
+/* The live box on the Glaze status page (page.tmpl, .Live): the latest run's
+   screenshots as a strip of thumbnails. */
+.live-shots { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.live-shots img { height: 6rem; width: auto; border: 1px solid var(--rule); border-radius: 4px; }

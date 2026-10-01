@@ -69,6 +69,7 @@ examples/         conformance, the glaze and native test suite (mise run glaze:m
                   glaze:windows), drive, which its interaction tests click and
                   type with, and glaze-all, the demo you drive by hand
 site/             renders docs/ into the website
+worker/           the Cloudflare Worker: the site, live glaze status, golden-image links
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
 .plans/           work in progress, one file per plan
 mise.toml         tools, environment, one-line tasks. They run .bin/irgo-winvm, built by go:tool
@@ -77,13 +78,14 @@ mise-tasks/       every task longer than a line, one script each; the path is th
 
 ### Go modules
 
-There are three modules. The split controls what reaches the shipped binary.
+There are four modules. The split controls what reaches the shipped binary.
 
 | module | why it is separate |
 |---|---|
 | root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
 | `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
 | `site` | needs a markdown parser the tool has no business carrying |
+| `worker` | the [Cloudflare Worker](#the-cloudflare-worker), on workers-go and built to Wasm by TinyGo |
 
 Verify the split with `go list -deps`, not by reading imports. The site module
 requires goldmark, its extensions and the chroma highlighter, and nothing else.
@@ -858,6 +860,187 @@ taskbar clock in each capture advanced minute by minute. A capture taken inside
 the guest (`CopyFromScreen` in dev's session) matched it pixel for pixel,
 update prompt included. When a window seems to survive being killed, the
 process that owns it is not the one that was killed. See the traps below.
+
+## The Cloudflare Worker
+
+`worker/` is a prototype, not deployed yet: one Cloudflare Worker, written in Go
+on [syumai/workers-go](https://github.com/syumai/workers-go), that serves three
+things. GitHub Pages (`pages.yml`) keeps publishing the site as before until
+the owner switches.
+
+- **The site.** `site/dist`, from `mise run site:build`, as Workers static
+  assets. Cloudflare serves a matching file before the Worker runs, so pages
+  cost no Worker CPU. Only `/api/*` reaches Go (`run_worker_first`).
+- **Live glaze status.** CI's conformance job posts each runner's
+  `shots.json` and its pictures to `POST /api/glaze-status/<mac|windows>` with
+  a bearer token, and the Worker stores them in the R2 bucket bound as `SITE`.
+  `GET /api/glaze-status` returns the newest run per target, and the Glaze
+  status page shows it above the recorded one, so the page is current without
+  a redeploy. On GitHub Pages that request finds nothing and the page is
+  unchanged.
+- **The golden image.** `GET /api/golden/<key>`, with a different token,
+  answers `302` to a presigned R2 URL valid for 30 minutes. The keys are
+  exactly the ones `vm-golden-push` writes (`golden/latest`,
+  `golden/manifests/<sha256>.json`, `golden/chunks/<sha256>.zst`, in
+  `internal/utmvm/vm_golden_cache.go` on the golden-image branch, not merged
+  yet), and the Worker refuses anything else.
+
+All of the handler is plain Go behind two small interfaces (`worker/api.go`).
+`go:check` builds and tests it for the host, where `workers.Serve` is an
+ordinary HTTP server and R2 is a map. Only `platform_js.go` touches the
+Workers runtime.
+
+### Rules the code keeps
+
+- **Refused by default.** A request without the right token gets 401, whatever
+  the path, so a caller without one learns nothing about which keys exist. A
+  secret that is not set refuses everything with 503: an unconfigured Worker
+  does not fall open.
+- **The golden bucket is never bound to the Worker.** The Worker signs URLs
+  with a read-only R2 token scoped to that bucket and holds nothing else of it.
+  It has no listing, no write, and no route to any other object. The bucket
+  keeps no public access, so the `vm-golden-push` check that it is private
+  (r2.dev URL off, no custom domain) still describes it. The licence terms
+  that make the image private are in `.plans/2026-09-30_1700_vm-golden-image.md`.
+- **Redirect, not proxy.** A 64 MiB chunk streamed through Go in Wasm would
+  cost far more CPU than a Worker request gets (10 ms on the free plan). A
+  presigned URL costs one HMAC chain, and `Range` resumes go straight to R2,
+  which is what `isoDownload` needs. Go's HTTP client drops `Authorization` on
+  a redirect to another host, so the Worker token never reaches R2.
+- **Uploads are checked before anything is stored.** The target must match the
+  manifest. Every picture the manifest names must be sent, nothing else may
+  be, and each must be a PNG with a plain name. A run older than the stored
+  one is refused (409), so a re-run of an old workflow cannot roll the page
+  back. A stored record that does not parse counts as "cannot tell", and that
+  refuses too. The record is written last, and success is reported only once
+  it reads back as written.
+- **A run's files never change.** They are stored under the first 8 bytes of
+  the manifest's SHA-256 and served `immutable`. Posting the same run again
+  writes the same bytes.
+
+### Go or TinyGo
+
+Both build this handler and both pass the same requests under `wrangler dev`.
+**TinyGo is used.** Measured 1 Oct 2026, Go 1.27.1, TinyGo 0.42.0,
+workers-go v0.36.0, wrangler 4.143.0:
+
+| | TinyGo | Go (`GOOS=js`, `-s -w`) |
+|---|---|---|
+| `app.wasm` | 1.49 MB | 7.29 MB |
+| deploy bundle (`wrangler deploy --dry-run`) | 1,478 KiB, 547 KiB gzip | 7,142 KiB, 1,998 KiB gzip |
+| `GET /api/health`, local, median of 30 | 5.1 ms | 4.3 ms |
+| `GET /api/glaze-status`, median of 30 | 5.9 ms | 5.4 ms |
+| `POST` a Windows run (7 PNGs), median of 10 | 33.1 ms | 18.8 ms |
+
+Workers allows 64 MiB uncompressed with no compressed limit, and 1 s of
+startup, so either fits. TinyGo's bundle is a fifth of the size, and that is
+what the platform has to compile against the startup limit. The local times
+are wall clock with simulated R2, not Cloudflare CPU time, and the only
+request where Go is clearly faster is the POST, which CI sends twice per push.
+workers-go recommends TinyGo for size. Going back to Go means changing two
+lines in `mise-tasks/worker/wasm`: `-mode=go`, and `GOOS=js GOARCH=wasm go build`.
+
+TinyGo cost two traps, both found under `wrangler dev` and both invisible to
+`go test` on the host:
+
+| trap | symptom | what to do |
+|---|---|---|
+| `http.ServeMux` patterns such as `"GET /api/health"` under TinyGo 0.42 | never match: a mux holding only that pattern answered that path with 404 | route by hand (`Handler` in `api.go`) |
+| `regexp.MustCompile` of `[0-9a-f]{64}` at package level under TinyGo | `fatal error: stack overflow` before `main`; every request then fails with "Go program has already exited" or hangs | plain loops (`isHex`, `isPicture`, `isGoldenKey`) |
+
+Three more, about the tools rather than the code:
+
+- **`mise run` installs every tool in `mise.toml`**, not only the ones a task
+  needs. In a fresh data dir with only Go installed, `mise run go:lint`
+  installed TinyGo (1.2 GB), binaryen, node and wrangler before it ran. Every workflow therefore sets
+  `install_args` on mise-action and `MISE_TASK_RUN_AUTO_INSTALL: false`. With
+  both, the same run installed go, golangci-lint and goreleaser and nothing
+  else.
+- **TinyGo's `-target wasm` runs `wasm-opt`**, and without binaryen it fails
+  with "no usable wasm-opt found". binaryen is pinned in `mise.toml`.
+- **`workers-assets-gen -o build` empties `build/`** first, and **`wrangler
+  dev` does not see a rebuilt `site/dist`**, because `site:build` replaces the
+  directory. Restart `wrangler dev` after `site:build`. Its simulated R2
+  survives in `worker/.wrangler/state`.
+
+### Run it locally
+
+No Cloudflare account is needed. The tokens below are local stand-ins:
+
+```
+mise install
+mise run site:build
+cd worker
+wrangler dev --local --var GLAZE_STATUS_TOKEN:local-glaze --var GOLDEN_TOKEN:local-gold \
+  --var R2_ACCOUNT_ID:acct0000 --var GOLDEN_BUCKET:irgo-golden \
+  --var GOLDEN_ACCESS_KEY_ID:AKIDLOCAL --var GOLDEN_SECRET_ACCESS_KEY:secretlocal
+```
+
+`wrangler dev` runs `mise run worker:wasm` itself. Then, from the repository
+root:
+
+```
+curl -s localhost:8787/api/health                                    # {"ok":true}
+curl -s -w ' %{http_code}\n' -F manifest=@docs/screens/conformance/windows/shots.json \
+  localhost:8787/api/glaze-status/windows                            # 401
+d=docs/screens/conformance/windows; f=(-F "manifest=@$d/shots.json")
+for p in $d/*.png; do f+=(-F "$(basename $p)=@$p"); done
+curl -s -H 'Authorization: Bearer local-glaze' "${f[@]}" localhost:8787/api/glaze-status/windows   # 201
+curl -s localhost:8787/api/glaze-status                              # the run, as JSON
+curl -s -w ' %{http_code}\n' localhost:8787/api/golden/golden/latest # 401
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -H 'Authorization: Bearer local-gold' \
+  localhost:8787/api/golden/golden/latest                            # 302, a presigned URL
+```
+
+Then open `http://localhost:8787/glaze-status`: the live box sits above the
+recorded run. Measured 1 Oct 2026, every one of these answered as commented.
+The posted picture came back byte for byte identical to the committed one, an
+older run was refused with 409, and `/api/golden/` with a valid token
+(a listing) answered 404.
+
+### Deploying it
+
+Not done yet. Nothing has been created on Cloudflare. In order:
+
+1. **Authenticate wrangler**, with `wrangler login` or `CLOUDFLARE_API_TOKEN`.
+   That token needs Workers Scripts Edit and Workers R2 Storage Edit on the
+   account.
+2. **Create the site bucket**: `wrangler r2 bucket create irgo-windows-vm-site`.
+   Leave public access off (no r2.dev URL, no custom domain). The Worker is
+   the only reader.
+3. **The golden bucket** is the one `vm-golden-push` uses (`IRGO_R2_BUCKET`).
+   It is not created here and must stay private. In the dashboard, under R2
+   and then Manage API tokens, create a token with **Object Read only**,
+   scoped to **that bucket only**. Keep its Access Key ID and Secret Access
+   Key.
+4. **Fill in `[vars]`** in `worker/wrangler.toml`: `R2_ACCOUNT_ID` (the
+   account id) and `GOLDEN_BUCKET` (the bucket's name). Neither is a secret.
+5. **Build the site, then deploy**: `mise run site:build`, then
+   `cd worker && wrangler deploy`. The deploy runs `mise run worker:wasm` and
+   uploads `site/dist` as the Worker's assets. Its output names the URL,
+   `https://irgo-windows-vm.<subdomain>.workers.dev`, and `startup_time_ms`.
+6. **Set the four secrets** from `worker/`, one `wrangler secret put <NAME>`
+   each:
+
+   | secret | value |
+   |---|---|
+   | `GLAZE_STATUS_TOKEN` | a new random token, e.g. `openssl rand -hex 32` |
+   | `GOLDEN_TOKEN` | a different random token, for machines that pull the golden image |
+   | `GOLDEN_ACCESS_KEY_ID` | from step 3 |
+   | `GOLDEN_SECRET_ACCESS_KEY` | from step 3 |
+
+7. **Point CI at it**:
+   `gh variable set GLAZE_STATUS_URL --body https://irgo-windows-vm.<subdomain>.workers.dev`
+   and `gh secret set GLAZE_STATUS_TOKEN` with the same value as step 6. The
+   conformance job's last step then posts on every push to main. Until both
+   are set, that step prints that it is not posting and succeeds.
+8. **Check the deployment** with the curls above, using the real URL and
+   tokens. A request with no token must get 401 on both `/api/glaze-status/*`
+   (POST) and `/api/golden/*`.
+
+Switching the public site from GitHub Pages to the Worker (a custom domain on
+the Worker, and retiring `pages.yml`) is a separate decision and is not part
+of these steps.
 
 ## Known traps
 

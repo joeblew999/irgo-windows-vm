@@ -45,7 +45,7 @@ type Env struct {
 	Now    func() time.Time
 }
 
-// The names of the vars and secrets Env.Var is asked for. docs/DEVELOPMENT.md,
+// The names of the vars and secrets Env.Var is asked for. docs/WORKER.md,
 // "The Cloudflare Worker", lists them with how each is set.
 const (
 	varGlazeToken  = "GLAZE_STATUS_TOKEN" // secret: who may post a run

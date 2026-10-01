@@ -85,7 +85,7 @@ jobs:
       # its [env] reads $HOME and its tasks are bash — and the tool is a macOS
       # program that only glaze-check makes sense of on Windows. The Go version
       # is the same pin: every go.mod says the version mise.toml pins
-      # (docs/DEVELOPMENT.md, Tasks), and go-version-file reads it from there.
+      # (docs/CONTRIBUTING.md, mise tasks), and go-version-file reads it from there.
       - if: runner.os == 'Windows'
         uses: actions/setup-go@v7.0.0
         with:
@@ -144,7 +144,7 @@ jobs:
       # next pages deploy. Pushes to main only: a pull request's run must not
       # become "the latest". Does nothing until the owner sets the repository
       # variable GLAZE_STATUS_URL (the Worker's origin) and the secret
-      # GLAZE_STATUS_TOKEN (docs/DEVELOPMENT.md, "The Cloudflare Worker").
+      # GLAZE_STATUS_TOKEN (docs/WORKER.md, "Deploying it").
       # continue-on-error: a Worker that is down is not a glaze failure, and
       # the step still shows red.
       - name: Post the record to the Worker

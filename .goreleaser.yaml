@@ -130,7 +130,7 @@ changelog:
       regexp: '^(vm-|iso-|app|doctor|mcp|status|glaze-check|golden|utmvm|cmd|internal|RunInstall|registerBundle|autounattend|desktop reset|Desktop reset|first run|Split|join|Push|The server|Mutation lock|RestartUTM|Windows keys|file-share|utm-|lock.go)'
       order: 2
     - title: Documentation
-      regexp: '^(docs(\(.+\))?:|README|RESULTS|ROADMAP|CONTRIBUTING|THREAT-MODEL|DEVELOPMENT|UPSTREAM|site)'
+      regexp: '^(docs(\(.+\))?:|README|RESULTS|ROADMAP|CONTRIBUTING|THREAT-MODEL|DEVELOPMENT|UPSTREAM|GETTING-STARTED|USING|FOR-AGENTS|TESTING|ARCHITECTURE|WORKER|CONVENTIONS|TRAPS|AGENTS|CLAUDE|site)'
       order: 3
     - title: Tests, CI and examples
       regexp: '^(test|tests|ci|CI|release|pages|conformance|examples|drive|glazecheck|glaze|worker|mise|vm:test|iso:test|upstream)'

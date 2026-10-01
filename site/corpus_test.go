@@ -573,3 +573,74 @@ func TestEveryLocalLinkResolves(t *testing.T) {
 	}
 	t.Logf("%d local links checked", checked)
 }
+
+// siteRef matches a link to a published page from outside the site: the site's
+// absolute URL, or `SiteURL+"page.html#frag"` in Go. Group 1 is the page, group
+// 2 the fragment without its `#`.
+var siteRef = regexp.MustCompile(`(?:https://joeblew999\.github\.io/irgo-windows-vm/|SiteURL\s*\+\s*")([a-z0-9-]+\.html)(?:#([a-z0-9-]+))?`)
+
+// TestSiteLinksFromOutsideResolve checks the links into the site that the
+// rendered pages cannot: messages the binary prints (which link the site, never
+// a docs/ path), the issue forms, and absolute URLs in the markdown, which the
+// renderer leaves alone and TestEveryAnchorResolves therefore never sees. When
+// the docs were split by audience, an error message linking
+// development.html#the-private-r2-cache would have gone on pointing at a page
+// that no longer existed, and nothing would have said so.
+//
+// Negative control, run by hand: changing the anchor in vm_golden_r2.go's
+// message to #setting-up-the-bucke fails this, naming the file.
+func TestSiteLinksFromOutsideResolve(t *testing.T) {
+	out := buildToTemp(t)
+	ids := map[string]map[string]bool{}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		set := map[string]bool{}
+		for _, m := range htmlID.FindAllStringSubmatch(read(t, filepath.Join(out, e.Name())), -1) {
+			set[m[1]] = true
+		}
+		ids[e.Name()] = set
+	}
+
+	checked := 0
+	for _, dir := range []string{"../cmd", "../internal", "../.github", "../docs", "../README.md", "../AGENTS.md"} {
+		wErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			switch filepath.Ext(p) {
+			case ".go", ".md", ".yml", ".yaml":
+			default:
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			for _, m := range siteRef.FindAllStringSubmatch(read(t, p), -1) {
+				page, frag := m[1], m[2]
+				checked++
+				set, ok := ids[page]
+				if !ok {
+					t.Errorf("%s links to %s, which the site does not publish", p, page)
+					continue
+				}
+				if frag != "" && !set[frag] {
+					t.Errorf("%s links to %s#%s, and %s has no heading with that id", p, page, frag, page)
+				}
+			}
+			return nil
+		})
+		if wErr != nil {
+			t.Fatal(wErr)
+		}
+	}
+	if checked == 0 {
+		t.Error("no links into the site were found outside it; the pattern has stopped matching")
+	}
+	t.Logf("%d links into the site checked", checked)
+}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/crgimenes/native/input"
 	"github.com/joeblew999/irgo-windows-vm/examples/drive"
@@ -123,8 +124,11 @@ func launchApp(t *testing.T, name string) *drive.Session {
 		switch {
 		case err != nil:
 			t.Errorf("the frontmost app could not be read after the test: %v", err)
-		case after != before:
-			t.Errorf("the frontmost app was %q before this test and %q after it: driving the app took over the desktop (or someone switched apps meanwhile)", before, after)
+		case after == before:
+		case after.PID == s.PID() || after.PID == os.Getpid():
+			t.Errorf("the frontmost app was %v before this test and %v after it, which is this test's own: driving the app took over the desktop", before, after)
+		default:
+			t.Errorf("the frontmost app was %v before this test and %v after it, which this test does not own: someone or something else switched apps, or the driver's input went astray", before, after)
 		}
 	})
 	return s
@@ -256,10 +260,31 @@ func TestDriveScroll(t *testing.T) {
 	}
 	snap(t, s, "before")
 
-	if err := s.Scroll(0, -5); err != nil { // OS: negative dy scrolls down
-		t.Fatalf("scrolling: %v", err)
+	// STANDING IN FOR AN UPSTREAM FIX — docs/UPSTREAM.md §6: the first scroll
+	// posted to a new process, after this one has posted input to another, is
+	// dropped. Up to three posts; one when §6 is fixed or the test runs alone.
+	var e drive.Event
+	for post := 1; ; post++ {
+		if err := s.Scroll(0, -5); err != nil { // OS: negative dy scrolls down
+			t.Fatalf("scrolling: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		got, err := s.Expect(ctx, func(e drive.Event) bool { return e.Type == "wheel" })
+		cancel()
+		if err == nil {
+			e = got
+			if post > 1 {
+				t.Logf("the wheel event arrived on post %d, not the first (docs/UPSTREAM.md §6)", post)
+			}
+			break
+		}
+		if post == 3 {
+			t.Fatalf("three scrolls posted and the page saw no wheel event: %v", err)
+		}
 	}
-	e := expectTrusted(t, s, "wheel", nil)
+	if !e.Trusted {
+		t.Fatalf("the wheel event was not trusted (isTrusted false): %s", e)
+	}
 	if e.DY <= 0 {
 		t.Errorf("the wheel event's deltaY is %v, want positive (down)", e.DY)
 	}

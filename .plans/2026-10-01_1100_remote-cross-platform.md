@@ -1,6 +1,6 @@
 # Drive a Mac from Windows, Linux and GitHub
 
-Status: built, live clone proof pending · 2026-10-01
+Status: built and proven live · 2026-10-01
 
 ## Symptom
 Only someone sitting at this Mac can use irgo-winvm. Developers and agents on Windows or Linux
@@ -57,14 +57,27 @@ Measured / proven:
   status, cancel → exit 8; `vm-create` there refuses with exit 2 pointing at remote-submit;
   listing with a caller token refused 403.
 
-Pending:
-- Live end-to-end on a clone (Linux client → Mac `serve` → clone → result → clone deleted) —
-  waiting for the single VM slot.
-- GitHub action run from a scratch branch (`scratch/remote-*`), needs `serve` running; the repo
-  secret `IRGO_REMOTE_TOKEN` (the `ci` caller) is set.
-- Joins: X's GoReleaser windows/linux targets (the action already tries `irgo-winvm-<os>-<arch>[.exe]`
-  and falls back to `go install` at its own ref); FF's `wire/` route table (handlers are one
-  function per route in `worker/jobs.go`, client one method per route in `internal/remote/client.go`);
-  ledger events for remote jobs come for free through the commands' own recording on the Mac only
-  for runTool paths — `serve`'s executor calls the library, so a `remote-job` ledger event is not
-  yet emitted.
+Proven live (1 Oct 2026, Worker version da8e9c51, routes in FF's `wire` table):
+- **Linux client → Mac → clone → results.** linux/arm64 client in an alpine container submitted
+  `conformance.test.exe -test.run TestClipboard|TestAppScheme -conformance.shots={out}` with `-gui`:
+  queued, claimed by `serve` (`-overcommit` beside irgo-win11), cloned `job-9e276df24e14` in 1.65 s,
+  answering in 22 s, pushed 6 MB over SMB, ran on the desktop, and came back with `stdout.txt`,
+  `test2json.json`, `desktop.png` and `shot-windows-TestAppScheme.png` (the window, as the test
+  photographed it). TestClipboard passed; TestAppScheme/absolute_subresources failed (upstream
+  §1b), so exit 1, as the table says. A hello exe exited 0 the same way, in 48 s end to end.
+- **The first -gui job found no desktop session** 2 s after the clone's agent answered: `serve` now
+  waits up to 2 min for it (measured, then fixed).
+- **GitHub action** from a `scratch/remote-action` push: ubuntu-latest and windows-latest each built
+  a hello exe, built the client with `go install @<sha>` (no release build for linux/windows yet),
+  submitted as caller `ci`, got exit 0 and an artifact (2.7 MB each). Run 36823804685, both green;
+  the branch is deleted.
+- Every job clone was deleted and its owner record forgotten; UTM lists irgo-win11 and irgo-golden.
+- Found: the main session's redeploy from main dropped the queue routes mid-job; `serve` kept
+  going, deleted its clone, and could not report. The routes are now in `wire`, so the next deploy
+  from main carries them.
+
+Left:
+- X's GoReleaser windows/linux targets: the action tries `irgo-winvm-<os>-<arch>[.exe]` first and
+  falls back to `go install` at its own ref (about 85 s on a hosted runner).
+- `serve` calls the clone and run code directly, so no ledger event names a remote job yet.
+- The admin token only lists; reading another caller's files would need a route of its own.

@@ -1,0 +1,11 @@
+# A blank issue skips every required field, so the web offers only the forms.
+# This does not stop gh or the API, which ignore forms: agents are asked to
+# follow `irgo-winvm report -issue <kind>` instead (docs/CONTRIBUTING.md).
+blank_issues_enabled: false
+contact_links:
+  - name: Filing as an agent (gh, the API)
+    url: https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/CONTRIBUTING.md#reporting-issues-for-agents
+    about: Forms are web-only. The command that writes the body, and the gh command line that files it.
+  - name: Known upstream bugs (docs/UPSTREAM.md)
+    url: https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/UPSTREAM.md
+    about: Bugs already found in glaze, native and UTM, and where each fix stands. Check here first.

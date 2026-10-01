@@ -24,6 +24,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // ErrNotLoopback is a refusal to expose the port to anything but this machine
@@ -121,12 +123,12 @@ func ServeHTTP(ctx context.Context, o ServeHTTPOptions, d Deps) error {
 	}
 	if !loopback {
 		if !o.AllowRemote {
-			return fmt.Errorf("%w: %s is not loopback. Pass -allow-remote and set IRGO_WINVM_TOKEN to bind it — see docs/THREAT-MODEL.md",
+			return fmt.Errorf("%w: %s is not loopback. Pass -allow-remote and set IRGO_WINVM_TOKEN to bind it — see "+utmvm.ThreatModelURL,
 				ErrNotLoopback, o.Addr)
 		}
 		if o.Secret == "" {
 			return fmt.Errorf("%w: %s is reachable from outside this machine and IRGO_WINVM_TOKEN is not set. "+
-				"Authentication is mandatory off loopback, not optional — see docs/THREAT-MODEL.md",
+				"Authentication is mandatory off loopback, not optional — see "+utmvm.ThreatModelURL,
 				ErrNotLoopback, o.Addr)
 		}
 	}
@@ -142,7 +144,7 @@ func ServeHTTP(ctx context.Context, o ServeHTTPOptions, d Deps) error {
 	if o.Secret != "" {
 		state = "bearer token required"
 	}
-	fmt.Fprintf(os.Stderr, "irgo-winvm mcp on http://%s — %s. Read docs/THREAT-MODEL.md\n", bind, state)
+	fmt.Fprintf(os.Stderr, "irgo-winvm mcp on http://%s — %s. Read %s\n", bind, state, utmvm.ThreatModelURL)
 
 	handler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return New(d) },

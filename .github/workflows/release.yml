@@ -112,6 +112,9 @@ jobs:
       # the commits since the last tag) and creates the GitHub release. It
       # refuses a dirty tree and a commit that is not the tag, so what it
       # publishes is what the tag names.
+      #
+      # The Homebrew cask is committed to Casks/ in this repository with this
+      # same token (contents: write), so no other secret is needed.
       - name: publish
         if: github.ref_type == 'tag'
         env:
@@ -127,5 +130,5 @@ jobs:
         with:
           name: irgo-winvm-dev
           path: |
-            dist/irgo-winvm-darwin-*
+            dist/irgo-winvm_darwin_*/irgo-winvm
             dist/SHA256SUMS

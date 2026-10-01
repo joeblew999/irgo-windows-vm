@@ -67,7 +67,16 @@ func Serve(p Page) {
 		w.SetSize(p.Width, p.Height, glaze.HintNone)
 	}
 
-	if err := w.Bind("__drive_event", func(ev map[string]any) { emit(ev) }); err != nil {
+	if err := w.Bind("__drive_event", func(ev map[string]any) {
+		if ev["type"] != "ready" {
+			emit(ev)
+			return
+		}
+		w.Dispatch(func() {
+			onReady(w)
+			emit(ev)
+		})
+	}); err != nil {
 		fail(err)
 	}
 	if err := w.Bind("__drive_reply", func(id int, value, errText string) {

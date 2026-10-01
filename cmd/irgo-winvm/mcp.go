@@ -16,15 +16,54 @@ import (
 func mcpFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.Bool("list", false, "print the tools as JSON and exit, instead of serving")
-	fs.String("http", "", "serve over HTTP on this address instead of stdin and stdout; a bare :port means 127.0.0.1. Read docs/THREAT-MODEL.md first")
-	fs.Bool("allow-remote", false, "bind a non-loopback address; requires IRGO_WINVM_TOKEN. Read docs/THREAT-MODEL.md")
+	fs.String("http", "", "serve over HTTP on this address instead of stdin and stdout; a bare :port means 127.0.0.1. Read "+utmvm.ThreatModelURL+" first")
+	fs.Bool("allow-remote", false, "bind a non-loopback address; requires IRGO_WINVM_TOKEN. Read "+utmvm.ThreatModelURL)
 	return fs
 }
 
-const mcpAbout = `  Serves the commands above to an agent over the Model Context Protocol.
-  With no flags it speaks JSON-RPC on stdin and stdout; -http serves the
-  same tools over HTTP. Read docs/THREAT-MODEL.md before -http.
-`
+// mcpAbout is `mcp -h`: how to register the server with a client, then what
+// the server tells the agent once it is connected. The site's MCP page and
+// command reference capture it from here.
+var mcpAbout = `  Serves these commands to an AI agent over the Model Context Protocol. With
+  no flags it speaks JSON-RPC on stdin and stdout, which is how a client
+  starts it. Register it once:
+
+    Claude Code    claude mcp add irgo-winvm -- irgo-winvm mcp
+    other clients  {"mcpServers": {"irgo-winvm": {"command": "irgo-winvm", "args": ["mcp"]}}}
+                   Claude Desktop reads that from
+                   ~/Library/Application Support/Claude/claude_desktop_config.json
+
+  A client that does not see your shell's PATH needs the full path as the
+  command: ` + "`command -v irgo-winvm`" + ` prints it. -http serves the same tools
+  over HTTP: read ` + utmvm.ThreatModelURL + ` first.
+
+  What the server tells the agent when it connects:
+
+` + indentWrap(mcpserver.Instructions, "    ", 78) + "\n\n"
+
+// indentWrap wraps each paragraph of s at width columns, every line indented.
+func indentWrap(s, indent string, width int) string {
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		if strings.TrimSpace(para) == "" {
+			out = append(out, "")
+			continue
+		}
+		line := indent
+		for _, w := range strings.Fields(para) {
+			if len(line) > len(indent) && len(line)+1+len(w) > width {
+				out = append(out, line)
+				line = indent
+			}
+			if len(line) > len(indent) {
+				line += " "
+			}
+			line += w
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
 
 // runMCP serves every command to an agent as an MCP tool, or with -list prints
 // the tool descriptions the documentation is generated from.

@@ -1,0 +1,82 @@
+# Each field's label is a heading in the issue body, and `irgo-winvm report
+# -issue bug` prints the same headings for agents filing with gh, which cannot
+# fill a form. cmd/irgo-winvm/issue_test.go fails if the two disagree, so
+# rename a label in both places. Keep the layout below (two-space list items,
+# label at six spaces): that test reads it without a YAML parser.
+name: Bug report
+description: irgo-winvm did the wrong thing. Not for bugs in glaze, native or UTM.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Is it ours?** A bug in glaze, native or UTM is fixed there, not here. Check
+        [docs/UPSTREAM.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/UPSTREAM.md)
+        first, and use the *Upstream bug triage* form if it is theirs.
+
+        **Agents:** forms are web-only. Run `irgo-winvm report -issue bug > body.md`, fill
+        it in, and file with `gh issue create --body-file body.md` (the exact command
+        is at the top of that file and in
+        [CONTRIBUTING.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/CONTRIBUTING.md#reporting-issues-for-agents)).
+  - type: input
+    id: reporter
+    attributes:
+      label: Reporting repo and agent
+      description: The repository you were working in, and who hit this. "joeblew999/foo, Claude Code (agent)" or "me, by hand".
+      placeholder: owner/repo, agent or person
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: As run, with every flag. Over MCP, the tool name and its args.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full output
+      description: Everything it printed, stdout and stderr, and the exit code. Not a summary.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should have happened.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead, if the output does not already say.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: From a known state (for example a fresh `vm-create`), if you have them.
+    validations:
+      required: false
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report
+      description: Paste the output of `irgo-winvm report`, run right after the failure (it is markdown; it renders). Read it first.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: It is not already in docs/UPSTREAM.md or an open issue.
+          required: true
+        - label: I read the report and it holds no secret, token or personal path.
+          required: true

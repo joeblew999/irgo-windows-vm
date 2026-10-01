@@ -230,6 +230,99 @@ libraries, and the workaround hides it.
 
 Record what you found, and where it was fixed, in [UPSTREAM.md](UPSTREAM.md).
 
+## Reporting issues (for agents)
+
+Repositories that use `irgo-winvm` through their agents file issues here when
+they need something. This is how to file one that can be acted on without a
+round of questions.
+
+**File here** when `irgo-winvm` does the wrong thing (a wrong exit code, a
+step that hangs, output that lies), or when your repository needs it to do
+something it does not.
+
+**Do not file here** when:
+
+- the bug is in glaze, native or UTM. Read [UPSTREAM.md](UPSTREAM.md) first:
+  if it is listed, add what you found to that entry's linked issue. If it is
+  not, use the *upstream* kind below, so it is triaged into the ledger rather
+  than misfiled as ours. It is upstream only if a correct caller, reading only
+  that project's documentation, would hit it.
+- your own program failed. Exit 1 from `app-create` is your `.exe` failing,
+  with its own exit code named in the message (see
+  [What it exits with](DEVELOPMENT.md#what-it-exits-with)). Exits 4 and 6 are
+  worth retrying before filing.
+
+**Write the body with one command**, right after the failure, so the log still
+holds it:
+
+```sh
+irgo-winvm report -issue bug > body.md       # or: feature, upstream
+```
+
+It prints the issue body with the same headings as the web form, the
+diagnostic report already inside it (version, macOS, UTM, golden image, the
+last commands and their exits, the log around the last error, glaze-status,
+`doctor -json`), and the `gh` command that files it at the top. Over MCP, call
+the `report` tool with `-issue bug`. Plain `irgo-winvm report` prints only the
+report, to paste into an existing issue. Home directories become `~`, and
+tokens, keys and every `.env.r2` value become `[redacted:...]`; read it before
+posting anyway.
+
+Replace every _italic_ line, keep every `###` heading in order, tick the
+checks, and file it:
+
+```sh
+gh issue create --repo joeblew999/irgo-windows-vm \
+  --title "[bug] app-create -gui exits 4 on a fresh clone" \
+  --label bug,needs-triage,agent-filed \
+  --body-file body.md
+```
+
+The forms in `.github/ISSUE_TEMPLATE` work only in a browser; `gh` and the API
+skip them, so the body is the template. Use `--label feature,needs-triage,agent-filed`
+for a feature and `--label needs-triage,agent-filed` for an upstream bug (add
+`upstream-glaze`, `upstream-native` or `upstream-utm` if you are sure). If gh
+says a label is not found, file without `--label`.
+
+**What makes it actionable:**
+
+- the exact command, every flag, and its full output with the exit code: not
+  a paraphrase;
+- the report, run after the failure and before anything else, so the last
+  commands and the log excerpt are about this failure;
+- expected against actual, in a sentence each;
+- for a feature, what your repository is trying to get done and how you will
+  both know it is done, not only the flag you want;
+- which repository and which agent filed it, so a question has somewhere to go.
+
+An issue without the report gets `needs-report` and waits for it.
+
+### Labels
+
+The labels are declared once, in `.github/labels.tsv` (name, colour and
+description, tab-separated), and `mise run gh:labels` creates or updates them
+on GitHub with `gh label create --force`. It deletes nothing. `DRY_RUN=1`
+prints the commands instead of running them, and `REPO=owner/name` points it
+at another repository. `cmd/irgo-winvm/issue_test.go` fails if a form,
+`report -issue` or this page names a label the file does not define, or if a
+form and `report -issue` disagree about the headings.
+
+| label | means |
+|---|---|
+| `bug` | `irgo-winvm` does the wrong thing |
+| `feature` | a calling repository needs something it does not do |
+| `upstream-glaze`, `upstream-native`, `upstream-utm` | the bug is theirs: recorded in UPSTREAM.md, fixed there |
+| `needs-triage` | nobody has looked yet; every form adds it |
+| `needs-report` | a bug without the report; triage waits for it |
+| `triaged` | classified, labelled, and the next step is named in a comment |
+| `agent-filed` | filed by an agent for a calling repository |
+| `good first issue` | small and self-contained, with the fix described |
+| `duplicate`, `wontfix` | closed, with a comment linking the original or saying why |
+
+Triage: read the report, move an upstream bug into [UPSTREAM.md](UPSTREAM.md)
+and label it `upstream-*`, swap `needs-triage` for `triaged`, and say the next
+step in a comment.
+
 ## Commits
 
 - **One concern per commit**, each verified on its own. A refactor landed as one
@@ -251,7 +344,14 @@ git tag -a v0.1.2 -m "..." && git push origin v0.1.2
 ```
 
 The version comes from the tag and nowhere else, so nothing in the tree needs
-editing first.
+editing first. Use semver: a minor bump (v0.5.0) for new commands, flags or
+behaviour, a patch (v0.5.1) for fixes only.
+
+The release notes are the header in `.goreleaser.yaml` (install, first run, MCP,
+the golden image) and the commits since the last tag, grouped. Commit subjects
+starting `feat:`, `fix:` or `docs:` land in New, Fixes and Documentation; the
+rest are grouped by the area the subject starts with (`vm-create:`, `site:`,
+`conformance:` ...). Merges, `plans:` and `GLAZE-STATUS` commits are left out.
 
 ### How a release is built
 
@@ -261,7 +361,29 @@ The build is [GoReleaser](https://goreleaser.com), configured in
 - the targets (darwin arm64 and amd64 only);
 - the build flags;
 - the download names (`irgo-winvm-darwin-arm64`: raw binaries, not tarballs);
-- the install instructions in the release notes.
+- the install instructions in the release notes;
+- the Homebrew cask.
+
+What a release offers a user, and where each comes from:
+
+| install | from |
+|---|---|
+| `curl -fsSL …/install.sh \| sh` | `install.sh` at the root, also attached to each release (`release.extra_files`). It verifies the binary against `SHA256SUMS` before installing it |
+| `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm` | the cask GoReleaser commits to `Casks/` in this repository on each release |
+| `go install …/cmd/irgo-winvm@vX.Y.Z` | the module proxy; the binary reports the tag from its build info |
+| the raw binary | the release's assets |
+
+**The tap** is this repository: GoReleaser commits `Casks/irgo-winvm.rb` on each release with the
+release workflow's own token, so nothing needs setting up. The cask clears the quarantine flag after
+install, because the binary is not signed with an Apple Developer ID and Homebrew quarantines what a
+cask downloads.
+
+**Gatekeeper.** The binaries are ad-hoc signed by the Go linker (arm64 requires
+a signature to run at all) and not notarized. A file with no quarantine flag
+runs; one a browser downloaded is refused until `xattr -d
+com.apple.quarantine` clears it. `curl`, `go install` and the cask's hook leave
+no flag. Signing and notarizing need an Apple Developer account, which this
+project does not have.
 
 `release.yml` then:
 
@@ -278,7 +400,12 @@ uploaded as an artefact, with nothing published.
 
 ### Build locally
 
-`mise run go:build` runs the same build into `dist/`.
+`mise run go:build` runs the same build into `dist/`: each binary is
+`dist/irgo-winvm_darwin_<arch>/irgo-winvm`, published as
+`irgo-winvm-darwin-<arch>`, and the cask is `dist/homebrew/Casks/irgo-winvm.rb`.
+To try `install.sh` against it, copy the binaries under their published names
+into a directory with `dist/SHA256SUMS` and run
+`IRGO_WINVM_BASE=file://<that directory> sh install.sh`.
 
 - On a clean checkout of a tag, it builds exactly what that release published.
 - Anywhere else it is a snapshot, and the binary reports `dev` (`dev-dirty` with

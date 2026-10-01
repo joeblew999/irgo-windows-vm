@@ -44,6 +44,11 @@ type Result struct {
 	// printed nothing of its own. It is shown, and not counted again.
 	Inherited bool
 
+	// Retried is every step the test tried again, and why, from its
+	// "retry:" lines, joined with " / ". Kept on a pass: a pass that needed a
+	// retry is not the same as one that did not, and the record says so.
+	Retried string
+
 	// Shot is the screenshot the test logged, as the suite names it
 	// (<os>/<Test>.png, relative to the directory it was given), and ShotNote
 	// what it said about the picture. NoShot is why a test that tried took
@@ -186,11 +191,24 @@ func (s Section) markdown() string {
 	default:
 		b.WriteString("| test | result | first message |\n|---|---|---|\n")
 		for _, r := range s.Results {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(), cell(r.Detail))
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", r.Name, r.label(), cell(r.message()))
 		}
 	}
 	b.WriteString(closeMarker(s.Target) + "\n")
 	return b.String()
+}
+
+// message is the table's message for a result: its first line, then what
+// it retried.
+func (r Result) message() string {
+	switch {
+	case r.Retried == "":
+		return r.Detail
+	case r.Detail == "":
+		return "retried: " + r.Retried
+	default:
+		return r.Detail + " — retried: " + r.Retried
+	}
 }
 
 // label is how the tables word a result.
@@ -208,6 +226,8 @@ func (r Result) label() string {
 		return "skip"
 	case r.Known != "":
 		return "PASS — **known failure " + r.Known + " no longer fails**"
+	case r.Retried != "":
+		return "PASS after a retry"
 	default:
 		return "PASS"
 	}

@@ -82,7 +82,7 @@ func TestTheRefusalSaysWhatToDoInstead(t *testing.T) {
 	if !strings.Contains(err.Error(), "IRGO_WINVM_TOKEN") {
 		t.Errorf("the refusal does not name the token: %v", err)
 	}
-	if !strings.Contains(err.Error(), "THREAT-MODEL") {
+	if !strings.Contains(err.Error(), "threat-model") {
 		t.Errorf("the refusal does not point at the threat model: %v", err)
 	}
 }

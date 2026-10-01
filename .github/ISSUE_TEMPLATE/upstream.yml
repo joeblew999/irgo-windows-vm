@@ -1,0 +1,77 @@
+# Each field's label is a heading in the issue body, and `irgo-winvm report
+# -issue upstream` prints the same headings for agents filing with gh.
+# cmd/irgo-winvm/issue_test.go fails if the two disagree.
+name: Upstream bug triage (glaze, native, UTM)
+description: A bug that looks like it is in glaze, native or UTM, to be recorded in the ledger and fixed there.
+title: "[upstream] "
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bugs in [glaze](https://github.com/crgimenes/glaze), [native](https://github.com/crgimenes/native)
+        and [UTM](https://github.com/utmapp/UTM) are fixed **upstream**, never worked around here.
+        [docs/UPSTREAM.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/UPSTREAM.md)
+        is the ledger: if your bug is already in it, add what you found to that entry's issue
+        instead of filing. This form is for a bug the ledger does not have yet; triage decides
+        whether it is theirs (then it is recorded and filed or patched upstream) or ours
+        (then it becomes a bug here).
+
+        It is upstream only if a correct caller, reading only that project's public
+        documentation, would hit it. If irgo-winvm called it wrongly, it is our bug.
+  - type: dropdown
+    id: project
+    attributes:
+      label: Project
+      options:
+        - glaze
+        - native
+        - UTM
+        - not sure
+    validations:
+      required: true
+  - type: input
+    id: ledger
+    attributes:
+      label: UPSTREAM.md entry
+      description: The closest entry in docs/UPSTREAM.md, by heading, or "none".
+    validations:
+      required: true
+  - type: input
+    id: reporter
+    attributes:
+      label: Reporting repo and agent
+      description: The repository you were working in, and who hit this.
+      placeholder: owner/repo, agent or person
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is upstream
+      description: What the project's documentation promises, and what it does instead. The evidence that this is not irgo-winvm.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest program or command sequence that shows it, and on which OS (the Mac, the VM, a CI runner).
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report
+      description: Paste the output of `irgo-winvm report`. Its glaze-status section says which glaze and native were built against.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: It is not already in docs/UPSTREAM.md or an open issue.
+          required: true
+        - label: I read the report and it holds no secret, token or personal path.
+          required: true

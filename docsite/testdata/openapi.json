@@ -1,0 +1,59 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pet store",
+    "version": "1.2.0",
+    "description": "A small API, for the renderer's test."
+  },
+  "security": [{"bearer": []}],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "list-pets",
+        "summary": "every pet",
+        "security": [],
+        "parameters": [
+          {"name": "limit", "in": "query", "description": "at most this many", "schema": {"type": "integer"}}
+        ],
+        "responses": {
+          "200": {"description": "OK", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Pet"}}}}}
+        }
+      },
+      "post": {
+        "operationId": "add-pet",
+        "summary": "add a pet",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Pet"}}}},
+        "responses": {"201": {"description": "Created"}}
+      }
+    },
+    "/pets/{id}": {
+      "get": {
+        "operationId": "get-pet",
+        "summary": "fetch one pet",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "description": "the pet's id", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "OK", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Pet"}}}},
+          "404": {"description": "no such pet"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {"type": "http", "scheme": "bearer", "description": "the API token"}
+    },
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "description": "what it answers to"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "kind": {"type": "string", "enum": ["cat", "dog"]}
+        }
+      }
+    }
+  }
+}

@@ -47,6 +47,10 @@ const (
 	VMCreate     Type = "vm-create"
 	VMDelete     Type = "vm-delete"
 	Reap         Type = "reap"
+	// Capacity is a snapshot of one machine's disk, memory and VM counts,
+	// as compact JSON in Detail (cmd/irgo-winvm/capacity.go writes it, the
+	// Worker's view reads it). It opens and closes nothing.
+	Capacity Type = "capacity"
 )
 
 // Event is one thing that happened. The JSON names are the wire contract with
@@ -333,6 +337,10 @@ func Emit(e Event) {
 		c.FlushAsync()
 	}
 }
+
+// On reports whether a Client is configured, for a caller whose event costs
+// something to gather.
+func On() bool { return std.Load() != nil }
 
 // DrainDefault is Drain on the configured Client.
 func DrainDefault(budget time.Duration) { std.Load().Drain(budget) }

@@ -96,10 +96,14 @@ var All = []Command{
 	// Not an undo of one command: it removes whatever clones callers left
 	// behind. Dry run unless -force, like every destructive command.
 	{Name: "vm-reap", Summary: "remove clones idle past their lease; never irgo-win11 or the golden image", Locks: LockEachVM, Destructive: true, OverMCP: true},
+	// Takes the lock of each thing it removes, without waiting, as vm-reap
+	// does; a busy one is kept. vm-create runs it on its way in.
+	{Name: "prune", Summary: "remove screenshots, logs and staged binaries past their age or size bounds", Locks: LockEachVM, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, OverMCP: true},
 	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
+	{Name: "capacity", Summary: "disk and memory: what each VM and the tool's data hold, by owner, and how many more VMs fit", ReadOnly: true, OverMCP: true},
 	// report gathers what an issue needs, redacted, for pasting into one.
 	{Name: "report", Summary: "a redacted, paste-ready diagnostic block for an issue: versions, doctor, the last errors, glaze", ReadOnly: true, OverMCP: true},
 	{Name: "status", Summary: "every VM with its owner and last use, and long-running work: what is going, what finished", ReadOnly: true, OverMCP: true},

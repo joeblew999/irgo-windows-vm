@@ -93,7 +93,7 @@ func TestPrunePlanAndPrune(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		filepath.Join(shots, "a1-20260801-100000-ready.png"):      true,
+		filepath.Join(shots, "a1-20260801-100000-ready.png"):     true,
 		filepath.Join(logs, "glaze-windows-20260801-100000.log"): true,
 		filepath.Join(bin, "agent-a", "aaaa.exe"):                true,
 		filepath.Join(bin, "agent-b", "bbbb.exe"):                true,

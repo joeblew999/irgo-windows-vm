@@ -102,9 +102,8 @@ func parseQuota(vms, gib string) (Quota, error) {
 
 // vmDisk is what one VM's system disk costs, by APFS's own accounting.
 type vmDisk struct {
-	Allocated int64  // every block, shared ones included
-	Private   int64  // the blocks no other file shares: what deleting it frees
-	Family    uint64 // clone family: the golden image and its clones share one
+	Allocated int64 // every block, shared ones included
+	Private   int64 // the blocks no other file shares: what deleting it frees
 	Err       error
 }
 
@@ -115,7 +114,7 @@ func readVMDisk(name string) vmDisk {
 		return vmDisk{Err: err}
 	}
 	var d vmDisk
-	d.Allocated, d.Private, d.Family, d.Err = apfsUsage(DiskPath(b))
+	d.Allocated, d.Private, d.Err = apfsUsage(DiskPath(b))
 	return d
 }
 

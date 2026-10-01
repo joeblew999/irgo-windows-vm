@@ -66,7 +66,8 @@ Each top-level directory has one job:
 cmd/irgo-winvm/   the CLI: flags, handlers, exit codes. The one thing users install
 internal/         the CLI's packages (see Architecture). internal/ so nothing outside can import them
 examples/         conformance, the glaze and native test suite (mise run glaze:mac /
-                  glaze:windows), and glaze-all, the demo you drive by hand
+                  glaze:windows), drive, which its interaction tests click and
+                  type with, and glaze-all, the demo you drive by hand
 site/             renders docs/ into the website
 docs/             every document. AGENTS.md and CLAUDE.md at the root only point here
 .plans/           work in progress, one file per plan
@@ -581,6 +582,7 @@ deliberately does not, is in its comment.
 | `TestOpenURL` | native — the scheme allow-list and Reveal's refusal only | nothing: no side effect |
 | `TestAppScheme`, `TestEvents` | glaze — the portless `app://` path, the Events bridge | a desktop session |
 | `TestTray`, `TestMenu`, `TestNoCapture`, `TestAppIcon`, `TestFileDialog` | native + glaze | a desktop session |
+| `TestDriveType`, `TestDriveClick`, `TestDriveClickAt`, `TestDriveScroll` | glaze, driven by native/input and native/screen through [`examples/drive`](#driving-an-app-examplesdrive) | a desktop session, and on macOS the Accessibility permission |
 
 How it is built, and why:
 
@@ -596,11 +598,13 @@ How it is built, and why:
   not in the suite at all: they open a window in another process that the test
   cannot close, and "the call returned nil" is all it could assert. Drive them
   by hand in `glaze-all`.
-- **A skip says why, and there are two reasons.** `-short` skips what needs a
-  desktop (it is what `go:check` and `app:test` run). And a package's own
+- **A skip says why, and there are three reasons.** `-short` skips what needs a
+  desktop (it is what `go:check` and `app:test` run). A package's own
   `ErrUnsupported` skips only on an OS where the capability is documented as
   unsupported (`nocapture` on macOS, `SetAppIcon` on Windows); the same error
-  anywhere else is a failure.
+  anywhere else is a failure. And the drive tests skip when there is no OS
+  input to drive with: on Windows until native/input has a Windows backend, and
+  on a Mac whose terminal or runner lacks the Accessibility permission.
 - **Known upstream bugs fail.** `TestAppScheme/absolute_subresources` fails on
   Windows until glaze fixes [§1b](UPSTREAM.md). `glazecheck.KnownUpstream`
   lists it, so a run whose only failures are known answers `KNOWN BUGS ONLY`
@@ -630,6 +634,64 @@ How it is built, and why:
   record; `pages.yml` downloads the latest completed conformance run on main
   and runs `glaze-check -import` on it before building the site, so the Glaze
   status page shows CI's pictures, and what is committed when CI has none.
+
+### Driving an app: examples/drive
+
+Playwright for a glaze window: find an element, click it, type, scroll, wait
+for the page to change, take a picture. The difference from Playwright is that
+the input is real OS input, delivered to the app's process, so it goes through
+the window server, AppKit or Win32, and the web view's hit-testing and focus as
+a user's would. The package doc (`examples/drive/doc.go`) has the protocol.
+
+```go
+s, err := drive.Launch(ctx, cmd)         // cmd runs an app that calls drive.Serve
+s.Click(ctx, "#save")                    // bridge finds it, OS clicks its centre
+s.Type("héllo 👋")                        // OS
+s.Press(input.KeyBackspace)              // OS
+s.Scroll(0, -5)                          // OS: negative dy scrolls down
+s.WaitForText(ctx, "#status", "saved")   // bridge
+s.Expect(ctx, func(e drive.Event) bool { return e.Type == "click" && e.Trusted })
+img, err := s.Screenshot()               // native/screen, even behind other windows
+```
+
+| | how | real OS input? |
+|---|---|---|
+| `Click`, `ClickAt`, `Type`, `Press`, `Scroll` | `input.Target(pid)`: `CGEventPostToPid` on macOS | **yes** — the page sees `isTrusted` events |
+| `Locate`, `Text`, `Eval`, `WaitFor*` | JavaScript in the page, through glaze `Bind`/`Eval` | no: reads the page, changes nothing |
+| `Expect`, `Events` | every pointer, key, input and wheel event the page saw, with `isTrusted`, on the app's JSON stdout | — |
+| `Screenshot` | `screen.CaptureWindow`: ScreenCaptureKit on macOS | — |
+
+- **The app is a separate process**: the test binary started again with
+  `drive.AppEnv`, which `TestMain` hands to `drive.Serve`. One binary, so the
+  VM, which has no Go toolchain, needs nothing else. Not in-process: glaze
+  activates a test binary's own windows (it is not a bundle), and a click there
+  could bring it over the user's work.
+- **It never takes over the desktop.** On macOS the app has the Prohibited
+  activation policy and its window is ordered behind every other window, so it
+  can never become active; `CGEventPostToPid` moves no cursor. Each test reads
+  the frontmost app (System Events, through `osascript`) before launching and
+  after closing, and fails if it changed. The message says whether the new
+  frontmost app is the test's own (a takeover) or another (a person or another
+  program switched apps — on the owner's Mac other agents bring UTM forward —
+  or the input went astray).
+- **`isTrusted` is the proof.** Every OS step is required to arrive as a
+  trusted event; `TestDriveClick/script_click_is_untrusted` is the automated
+  control showing the same click made by script arrives untrusted.
+  `TestDriveClickAt` checks the page receives a click at exactly the point
+  asked for; with the title-bar offset dropped it fails (measured: 32 points
+  off, onto `body`).
+- **native comes from the fork.** `input` and `screen` are not in a crgimenes
+  release yet, so `examples/go.mod` replaces native with
+  `github.com/joeblew999/native` at its `feat/input-screen-darwin` commit
+  (upstream as joeblew999/native PR #1). A `go.work` replace overrides a
+  `go.mod` replace, so `upstream:link` still builds against the local clone,
+  which then needs `input/` and `screen/` (the task warns when they are
+  missing). `glaze-check` records native as the fork, not as v0.1.15.
+- **Windows waits on native's Windows backend** (`feat/input-screen-windows`).
+  Until it is in the pinned native, `input` returns `ErrUnsupported` there and
+  the drive tests skip, saying so. When it lands: move the pseudo-version, run
+  `glaze:windows`, and check `windowInfo` in `app_windows.go`, whose client-area
+  offset is in pixels and has not been compared with the backend's coordinates.
 
 `examples/glaze-all` is the demo: every capability is a button, and
 `mise run glaze:hands` leaves it on the VM's desktop to drive by hand. It is

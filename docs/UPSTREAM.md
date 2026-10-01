@@ -25,6 +25,7 @@ so the distinction stays visible.
 | [no way to have a tray *and* a window](#3-nativetray--no-way-to-have-a-tray-and-a-window) | native | low | `FOUND HERE` — a limitation, not reported | question drafted |
 | [WebView2 "not found" when its registration is stale](#4-glaze--webview2-not-found-when-its-registration-is-stale) | glaze | high | `FILED` 30 Sep 2026, no reply yet | [glaze#34](https://github.com/crgimenes/glaze/issues/34); branch `fix/webview2-stale-registration` (`ba8775b`) on the fork, **no PR** |
 | [`New` crashes if the main goroutine has moved thread](#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread) (macOS) | glaze | medium | `FOUND HERE` 30 Sep 2026, not reported, not patched | — |
+| [the first background scroll to a new process is dropped](#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped) (macOS, fork's `feat/input-screen-darwin`) | native (fork) | low | `OPEN` 1 Oct 2026 — measured, cause not isolated | — |
 | [`utmctl` reports failure and exits 0](#utmctl-reports-failure-and-exits-0) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`utmctl exec` never returns the guest's output](#utmctl-exec-never-returns-the-guests-output) | UTM | high | `FOUND HERE`, not reported | drafted |
 | [`suspend --save-state` power-cuts the guest](#utmctl-suspend---save-state-reports-success-and-power-cuts-the-guest) | UTM | high | `FOUND HERE`, not reported | drafted |
@@ -393,6 +394,28 @@ Fix, in glaze: `func init() { runtime.LockOSThread() }` in `webview_darwin.go`,
 which pins the main goroutine to the main thread before `main` runs, as Cocoa
 bindings generally do. Until then, call `New` before anything slow on the main
 goroutine.
+
+## 6. native/input — the first background scroll to a new process is dropped
+
+On the owner's fork (`feat/input-screen-darwin`, `93363eb`, macOS 27 arm64):
+once a process has posted any input with `input.Target(pid)` — a click, a key,
+or a scroll — to one app, the first `Scroll` it posts to a **different**
+process never reaches the page; the second does. Clicks and keys to the new
+process are not affected, and neither is a scroll in a fresh test process, or
+a scroll after a click within one app.
+
+Measured 1 Oct 2026 with `examples/drive` (two app processes in one test
+binary, the first given `Type("abc")`, `Scroll(0, -1)` or `ClickAt` only, the
+second scrolled once every 150 ms until a `wheel` event arrived): the wheel
+came on the second post in every case, and on the first when nothing had been
+posted before. In `glaze:mac`, where each test pauses 0.7 s per screenshot,
+the first post landed, so time since the earlier input may matter too.
+Not yet checked: whether the dropped event reaches the app at
+all (testwin's `-nsevents` would say), which decides whether this is the
+fork's event source, CoreGraphics or WebKit.
+
+Until it is understood, `TestDriveScroll` posts up to three times and logs how
+many it took.
 
 ## UTM
 

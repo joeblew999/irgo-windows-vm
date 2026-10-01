@@ -88,8 +88,10 @@ func (s *Suite) orDefault() *Suite {
 	return s
 }
 
-func (s *Suite) openMarker(target string) string  { return "<!-- " + s.Name + "-status:" + target }
-func (s *Suite) closeMarker(target string) string { return "<!-- /" + s.Name + "-status:" + target + " -->" }
+func (s *Suite) openMarker(target string) string { return "<!-- " + s.Name + "-status:" + target }
+func (s *Suite) closeMarker(target string) string {
+	return "<!-- /" + s.Name + "-status:" + target + " -->"
+}
 
 // markerRE matches a section's opening marker with its key=value pairs. A
 // placeholder's marker has none, and is not matched.

@@ -52,7 +52,6 @@ var KnownUpstream = []Known{
 	{Target: TargetWindows, Test: "TestAppScheme/absolute_subresources", Ref: "docs/UPSTREAM.md §1b"},
 }
 
-
 // event is one line of `go tool test2json` output.
 type event struct {
 	Action  string

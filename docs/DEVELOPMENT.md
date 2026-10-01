@@ -1321,7 +1321,8 @@ what, and what was started and never finished. It decides nothing.
 
 **The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
 the start and end of every command (exit code, duration, the error text)
-except `mcp`, `help`, `version` and `commands`. Over MCP it records the
+except `mcp`, `help`, `version`, `commands` and `glaze-status` (the site build runs
+it as `glaze-status -h` a dozen times). Over MCP it records the
 client's name from its `initialize`. Each event carries a machine id, the
 hostname, the owner (`IRGO_WINVM_OWNER`, else the login name), the repository
 (`IRGO_WINVM_REPO`, else the checkout it runs in, read from its git config),

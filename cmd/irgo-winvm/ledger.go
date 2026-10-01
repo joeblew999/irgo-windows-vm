@@ -11,8 +11,11 @@ import (
 // unrecorded are the commands the ledger is not told about: they touch no VM
 // and say nothing about who is using what. mcp is here because it serves for
 // hours and its start would read as work never ended; every tool call it
-// serves is recorded on its own.
-var unrecorded = map[string]bool{"mcp": true, "help": true, "version": true, "commands": true}
+// serves is recorded on its own. glaze-status reads a committed file, and
+// takes no flags, so `glaze-status -h` runs it: the site build did that a
+// dozen times per build and every one reached the live ledger (measured
+// 1 Oct 2026).
+var unrecorded = map[string]bool{"mcp": true, "help": true, "version": true, "commands": true, "glaze-status": true}
 
 // recordCommand tells the ledger a command is starting, and returns what
 // tells it how the command ended. client is the MCP client's name, or empty

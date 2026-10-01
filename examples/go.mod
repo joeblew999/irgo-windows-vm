@@ -14,9 +14,9 @@ require (
 
 // native's input and screen packages (background OS input and window capture,
 // which examples/drive is built on) are not in a crgimenes release yet: they
-// are on the owner's fork, branch feat/input-screen-darwin, proposed upstream
-// as joeblew999/native PR #1. This takes native from there, at that branch's
-// commit; it is trunk v0.1.15 plus those two packages and nothing else.
+// are on the owner's fork: PR #1 (macOS, feat/input-screen-darwin) and PR #2
+// (Windows, feat/input-screen-windows, which builds on #1). This takes native
+// at PR #2's commit: trunk v0.1.15 plus those two packages and nothing else.
 //
 // When the packages are in a crgimenes/native release: delete this replace and
 // require that release. When the fork's Windows backend
@@ -25,4 +25,4 @@ require (
 // A go.work replace overrides this one, so `mise run upstream:link` still
 // builds against the local clone — which then needs input/ and screen/ too
 // (upstream:link says so when they are missing).
-replace github.com/crgimenes/native => github.com/joeblew999/native v0.1.16-0.20260930085437-93363ebf8e8e
+replace github.com/crgimenes/native => github.com/joeblew999/native v0.1.16-0.20261001015633-2fbbf2d09e65

@@ -114,7 +114,7 @@ func FetchGuestTools(progress func(done, total int64)) (string, error) {
 	// changes with every guest-tools release. The size check below is the only
 	// guard available — a truncated download here presents later as a VM with
 	// no network, which is a long way from the cause.
-	if dErr := isoDownload(GuestToolsURL, dest, digest{}, progress); dErr != nil {
+	if dErr := isoDownload(GuestToolsURL, nil, dest, digest{}, progress); dErr != nil {
 		return "", fmt.Errorf("downloading UTM guest tools from %s to %s: %w", GuestToolsURL, dest, dErr)
 	}
 	fi, sErr := os.Stat(dest)
@@ -220,7 +220,7 @@ func InstallUTMFromRelease(progress func(done, total int64)) error {
 	dmg := filepath.Join(tmp, "UTM.dmg")
 	fmt.Fprintf(os.Stderr, "downloading UTM %s, the latest stable release (%s), from %s\n",
 		rel.Version, rel.Published.Format("2 Jan 2006"), url)
-	if dErr := isoDownload(url, dmg, digest{}, progress); dErr != nil {
+	if dErr := isoDownload(url, nil, dmg, digest{}, progress); dErr != nil {
 		return fmt.Errorf("utmvm: downloading UTM: %w", dErr)
 	}
 

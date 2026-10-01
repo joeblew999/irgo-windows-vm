@@ -10,10 +10,11 @@ import (
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
-// r2Config reads the bucket and its credentials from the environment. Missing
-// settings are the command called wrongly: exit 2, every variable named.
-func r2Config() (utmvm.R2Config, error) {
-	c, err := utmvm.R2ConfigFromEnv()
+// r2Config reads the bucket and its credentials from the environment; write
+// is whether the command changes the bucket. Missing settings are the command
+// called wrongly: exit 2, every variable named.
+func r2Config(write bool) (utmvm.R2Config, error) {
+	c, err := utmvm.R2ConfigFromEnv(write)
 	if errors.Is(err, utmvm.ErrR2NotConfigured) {
 		return c, fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -35,7 +36,7 @@ func vmGoldenPushFlags() *flag.FlagSet {
 // or with -delete removes one from it. Only chunks the bucket lacks are sent.
 func runVMGoldenPush(v values, _ []string) error {
 	say := utmvm.Printer("vm-golden-push")
-	r, err := r2Config()
+	r, err := r2Config(true)
 	if err != nil {
 		return err
 	}
@@ -136,7 +137,7 @@ func runVMGoldenPull(v values, _ []string) error {
 		return nil
 	}
 
-	r, err := r2Config()
+	r, err := r2Config(false)
 	if err != nil {
 		return err
 	}

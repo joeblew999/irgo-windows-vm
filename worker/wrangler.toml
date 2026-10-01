@@ -18,14 +18,14 @@ run_worker_first = ["/api/*"]
 html_handling = "auto-trailing-slash"
 
 # Public data: the glaze runs CI posts, read back by the Glaze status page.
-# Never the golden image, which is in its own private bucket and is not bound
-# here at all (api.go, golden).
 [[r2_buckets]]
 binding = "SITE"
 bucket_name = "irgo-windows-vm-site"
 
-[vars]
-# The golden image's private bucket, reached only through presigned URLs.
-# Empty until the owner fills them in; /api/golden answers 503 until then.
-R2_ACCOUNT_ID = "7384af54e33b8a54ff240371ea368440"
-GOLDEN_BUCKET = "irgo-golden"
+# The golden image's private bucket. Bound here and reached only through
+# /api/golden/*, behind GOLDEN_TOKEN (read) and GOLDEN_PUSH_TOKEN (write); a
+# binding is not a public route, so the bucket keeps no public access
+# (docs/DEVELOPMENT.md, "The private R2 cache").
+[[r2_buckets]]
+binding = "GOLDEN"
+bucket_name = "irgo-golden"

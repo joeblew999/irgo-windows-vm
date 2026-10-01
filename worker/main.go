@@ -1,9 +1,9 @@
 // Command worker is the Cloudflare Worker for irgo-windows-vm: the site as
-// static assets, the live glaze status, and signed links to the private golden
-// image. Built for Wasm (mise run worker:wasm) it runs on Workers; built for
-// the host, as go:check does, workers.Serve starts a plain HTTP server on :9900
-// with an in-memory bucket and the process environment, to debug the handler
-// without wrangler.
+// static assets, the live glaze status, and the private golden image's only
+// way in and out. Built for Wasm (mise run worker:wasm) it runs on Workers;
+// built for the host, as go:check does, workers.Serve starts a plain HTTP
+// server on :9900 (or $PORT) with in-memory buckets and the process
+// environment, to debug the handler without wrangler.
 package main
 
 import (
@@ -13,5 +13,5 @@ import (
 )
 
 func main() {
-	workers.Serve(Handler(Env{Var: getenv, Site: siteBucket, Now: time.Now}))
+	workers.Serve(Handler(Env{Var: getenv, Site: siteBucket, Golden: goldenBucket, Now: time.Now}))
 }

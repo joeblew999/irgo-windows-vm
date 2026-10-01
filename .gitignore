@@ -82,6 +82,6 @@ go.work.sum
 # Agent worktrees (Claude Code isolation), never part of the repo.
 /.claude/worktrees/
 
-# The private R2 cache's credentials (docs/DEVELOPMENT.md, "Setting up the
+# The private R2 cache's credentials (docs/USING.md, "Setting up the
 # bucket"). Loaded by mise.toml; never committed.
 /.env.r2

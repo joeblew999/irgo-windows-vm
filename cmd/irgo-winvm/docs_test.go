@@ -119,11 +119,12 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 }
 
 // exitCodeDoc holds the exit-code table.
-const exitCodeDoc = "docs/DEVELOPMENT.md"
+const exitCodeDoc = "docs/USING.md"
 
 // exitCodeHeading opens the section the table is read from. Only that section
 // is read: another table in the same file has a `| CPUs | **4** |` row, which
-// once satisfied the check for code 4 on its own.
+// once satisfied the check for code 4 on its own (in docs/DEVELOPMENT.md, before
+// the docs were split by audience; the VM table is still on this page).
 const exitCodeHeading = "## What it exits with"
 
 // exitCodeSection returns body from exitCodeHeading up to the next level-two

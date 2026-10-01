@@ -28,23 +28,17 @@ every platform.
 ## Install
 
 You need a Mac with Apple Silicon. UTM, the hypervisor, is installed for you if
-it is missing. The release binary is all you need: no checkout, Go or mise.
+it is missing.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/joeblew999/irgo-windows-vm/main/install.sh | sh
 ```
 
-It downloads the binary for your Mac from the
-[latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest),
-checks it against the release's `SHA256SUMS`, and installs it as
-`~/.local/bin/irgo-winvm`. Or:
-
-- **Homebrew:** `brew tap joeblew999/irgo-windows-vm https://github.com/joeblew999/irgo-windows-vm && brew install --cask irgo-winvm`
-- **Go:** `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest`
-- **By hand:** download `irgo-winvm-darwin-arm64` from the release, then
-  `chmod +x` it, `xattr -d com.apple.quarantine` it, and put it on your PATH as
-  `irgo-winvm`. The binary is not signed with an Apple Developer ID, so a copy
-  downloaded with a browser is refused by Gatekeeper until that flag is cleared.
+It installs the binary from the
+[latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest)
+as `~/.local/bin/irgo-winvm`, after checking it against the release's
+`SHA256SUMS`. Homebrew, `go install` and a download by hand are in
+[Getting started](docs/GETTING-STARTED.md#install).
 
 ## Quick start
 
@@ -59,7 +53,7 @@ irgo-winvm app-create your.exe  # run your program in it and print its output
   Windows installer.
 - The install is slow, but only once: about 45 minutes you don't need to watch.
   After that `app-create` takes seconds, and with a
-  [golden image](docs/DEVELOPMENT.md#the-golden-image) every new VM is a clone
+  [golden image](docs/USING.md#the-golden-image) every new VM is a clone
   that answers in about 23 seconds.
 - Every command is safe to repeat. If the work is already done, it says so and
   stops.
@@ -74,7 +68,8 @@ claude mcp add irgo-winvm -- irgo-winvm mcp
 
 Other clients, what each tool does, a typical session and the exit codes are in
 the [MCP guide](https://joeblew999.github.io/irgo-windows-vm/mcp.html);
-`irgo-winvm mcp -h` prints the essentials.
+`irgo-winvm mcp -h` prints the essentials. Serving it over HTTP and filing
+issues from another repository are in [For agents](docs/FOR-AGENTS.md).
 
 ## What you'll see
 
@@ -91,13 +86,18 @@ Windows ready to run your program:
 
 | page | read it to |
 |---|---|
-| [MCP guide](https://joeblew999.github.io/irgo-windows-vm/mcp.html) | drive it from an AI agent |
+| [Getting started](docs/GETTING-STARTED.md) | install it, make your first VM and run your first program |
+| [Using it](docs/USING.md) | understand each command, the exit codes, the costs and the golden image |
+| [For agents](docs/FOR-AGENTS.md) | drive it from an AI agent, over MCP or HTTP, and file issues |
 | [Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html) | look up every command and flag, captured from the binary |
-| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, check glaze on Windows, land a change |
-| [Development](docs/DEVELOPMENT.md) | understand the commands, exit codes, costs, the golden image and known traps |
+| [Testing](docs/TESTING.md) | find out whether glaze works on Windows, and drive a glaze app with real input |
+| [Architecture](docs/ARCHITECTURE.md) | see how it is built, before you change it |
+| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, land a change, cut a release |
 | [Results](docs/RESULTS.md) | see what has been measured, with dates and screenshots |
 | [Upstream](docs/UPSTREAM.md) | see the bugs found in glaze, native and UTM, and their status |
-| [Roadmap](docs/ROADMAP.md) | see what is next |
-| [Threat model](docs/THREAT-MODEL.md) | know what the HTTP server exposes before you enable it |
+
+The [Glaze status](docs/GLAZE-STATUS.md), [Known traps](docs/TRAPS.md),
+[Roadmap](docs/ROADMAP.md) and [Threat model](docs/THREAT-MODEL.md) are linked
+from those pages.
 
 MIT licensed. See [LICENSE](LICENSE).

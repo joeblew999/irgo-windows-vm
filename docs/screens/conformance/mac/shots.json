@@ -1,10 +1,45 @@
 {
   "Target": "mac",
-  "When": "2026-09-30T15:33:49.1455+07:00",
+  "When": "2026-10-01T07:43:08.798767+07:00",
   "Platform": "darwin/arm64 (this machine, natively)",
-  "Commit": "22166ad28ddd6e17676efd93eb0e0d77e5a27013",
-  "Verdict": "YES: 28 passed, 1 skipped",
+  "Commit": "d9e99a8bb5feba64cc04d051b986563301971db0",
+  "Verdict": "YES: 40 passed, 1 skipped",
   "Tests": [
+    {
+      "Test": "TestDriveType/before",
+      "Result": "PASS",
+      "Picture": "TestDriveType_before.png"
+    },
+    {
+      "Test": "TestDriveType/after",
+      "Result": "PASS",
+      "Picture": "TestDriveType_after.png"
+    },
+    {
+      "Test": "TestDriveClick/before",
+      "Result": "PASS",
+      "Picture": "TestDriveClick_before.png"
+    },
+    {
+      "Test": "TestDriveClick/after",
+      "Result": "PASS",
+      "Picture": "TestDriveClick_after.png"
+    },
+    {
+      "Test": "TestDriveClickAt/clicked",
+      "Result": "PASS",
+      "Picture": "TestDriveClickAt_clicked.png"
+    },
+    {
+      "Test": "TestDriveScroll/before",
+      "Result": "PASS",
+      "Picture": "TestDriveScroll_before.png"
+    },
+    {
+      "Test": "TestDriveScroll/after",
+      "Result": "PASS",
+      "Picture": "TestDriveScroll_after.png"
+    },
     {
       "Test": "TestEvents",
       "Result": "PASS",

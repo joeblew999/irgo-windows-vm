@@ -1,9 +1,9 @@
 {
   "Target": "irgo-win11",
-  "When": "2026-10-01T12:42:03.951621+07:00",
+  "When": "2026-10-01T14:33:54.007621+07:00",
   "Platform": "windows/arm64, VM irgo-win11 (through app-create: as SYSTEM, and -gui in dev's session)",
-  "Commit": "f0b88cd6e1d13e3102b2cf2f823e1b3f5744d906",
-  "Verdict": "NO: failed: TestDeviceEncryptionOff/prevented TestDeviceEncryptionOff/volume_decrypted TestHibernationOff",
+  "Commit": "264eb82e194c954e4c694ec4099d92767cdc7903",
+  "Verdict": "YES: 44 passed, 0 skipped",
   "Tests": [
     {
       "Test": "TestSessionDesktop",

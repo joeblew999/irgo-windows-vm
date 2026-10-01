@@ -25,13 +25,13 @@ func TestRewriteLinks(t *testing.T) {
 	}{
 		{
 			name: "markdown file that becomes a page",
-			in:   "see [DEVELOPMENT.md](docs/DEVELOPMENT.md) first",
-			want: "see [DEVELOPMENT.md](development.html) first",
+			in:   "see [USING.md](docs/USING.md) first",
+			want: "see [USING.md](using.html) first",
 		},
 		{
 			name: "page link keeps its anchor",
-			in:   "[the traps](docs/DEVELOPMENT.md#things-that-cost-hours)",
-			want: "[the traps](development.html#things-that-cost-hours)",
+			in:   "[the exit codes](docs/USING.md#what-it-exits-with)",
+			want: "[the exit codes](using.html#what-it-exits-with)",
 		},
 		{
 			name: "generated page name is left alone",
@@ -98,7 +98,7 @@ func TestRewriteLinksResolvesFromTheSourceFile(t *testing.T) {
 }
 
 func TestRewriteLinksNeverDoublesAScheme(t *testing.T) {
-	in := []byte("[a](https://example.com) [b](http://x.dev/y) [c](LICENSE) [d](docs/DEVELOPMENT.md)")
+	in := []byte("[a](https://example.com) [b](http://x.dev/y) [c](LICENSE) [d](docs/USING.md)")
 	got := string(rewriteLinks(in, repo, "README.md"))
 	for _, bad := range []string{"main/https://", "main/http://", "main/mailto:"} {
 		if strings.Contains(got, bad) {

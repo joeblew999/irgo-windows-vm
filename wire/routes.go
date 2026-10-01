@@ -323,7 +323,7 @@ func hasCode(cs []Code, c Code) bool {
 // are the path's {name} values in order, unescaped as r.URL.Path is.
 //
 // Matched by hand, not by net/http's "GET /x/{y}" patterns, which never
-// match under TinyGo 0.42 (docs/DEVELOPMENT.md, "Go or TinyGo").
+// match under TinyGo 0.42 (docs/WORKER.md, "Traps").
 func Match(method, path string) (route Route, params []string, allowed []string, ok bool) {
 	for _, r := range Routes {
 		p, hit := matchPath(r.Path, path)

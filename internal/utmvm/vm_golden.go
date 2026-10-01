@@ -10,8 +10,8 @@ package utmvm
 // this process ls, cat and touch in UTM's container, and UTM can do all three.
 //
 // Built locally only: the Windows licence forbids redistribution, and every
-// running clone needs its own licence. docs/DEVELOPMENT.md, "The golden
-// image", has the rest.
+// running clone needs its own licence. docs/ARCHITECTURE.md, "The golden
+// image: sealing and cloning", has the rest.
 
 import (
 	_ "embed"

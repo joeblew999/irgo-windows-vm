@@ -3,7 +3,7 @@
 // no business in the graph of the binary users download, the same reason site/
 // and examples/ are separate. The root module is required, through the
 // replace below, for package wire alone: the route table, standard library
-// only (docs/DEVELOPMENT.md, "The Worker API").
+// only (docs/WORKER.md, "The route table").
 module github.com/joeblew999/irgo-windows-vm/worker
 
 go 1.27.1

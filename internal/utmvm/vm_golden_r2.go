@@ -125,7 +125,7 @@ func R2ConfigFromEnv(write bool) (R2Config, error) {
 		return c, fmt.Errorf("%w: %s.\n"+
 			"  Export them in your shell; in a checkout, .env.r2 at the root is loaded by mise.\n"+
 			"  How to get each one: %s",
-			ErrR2NotConfigured, what, SiteURL+"development.html#the-private-r2-cache")
+			ErrR2NotConfigured, what, SiteURL+"using.html#setting-up-the-bucket")
 	}
 	return c, nil
 }

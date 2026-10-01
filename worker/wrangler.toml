@@ -1,4 +1,4 @@
-# The Cloudflare Worker for irgo-windows-vm. docs/DEVELOPMENT.md, "The
+# The Cloudflare Worker for irgo-windows-vm. docs/WORKER.md, "The
 # Cloudflare Worker", says what it does, how to run it locally and the exact
 # steps to deploy it. Nothing here is a secret: secrets are set with
 # `wrangler secret put`, and locally in .dev.vars (gitignored).
@@ -25,7 +25,7 @@ bucket_name = "irgo-windows-vm-site"
 # The golden image's private bucket. Bound here and reached only through
 # /api/golden/*, behind GOLDEN_TOKEN (read) and GOLDEN_PUSH_TOKEN (write); a
 # binding is not a public route, so the bucket keeps no public access
-# (docs/DEVELOPMENT.md, "The private R2 cache").
+# (docs/USING.md, "The private R2 cache").
 [[r2_buckets]]
 binding = "GOLDEN"
 bucket_name = "irgo-golden"
@@ -33,7 +33,7 @@ bucket_name = "irgo-golden"
 # The ledger: which agent used which VM, on which machine, doing what. Private,
 # reached only through /api/ledger/*, behind LEDGER_TOKEN (write) and
 # LEDGER_READ_TOKEN (read). The schema is migrations/, applied with
-# `wrangler d1 migrations apply irgo-ledger --remote` (docs/DEVELOPMENT.md,
+# `wrangler d1 migrations apply irgo-ledger --remote` (docs/WORKER.md,
 # "The ledger").
 [[d1_databases]]
 binding = "LEDGER"

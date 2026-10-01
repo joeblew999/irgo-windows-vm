@@ -3,7 +3,7 @@ package wire
 import "time"
 
 // The ledger: who used which VM, on which machine, doing what
-// (docs/DEVELOPMENT.md, "The ledger"). internal/ledger posts events; the
+// (docs/WORKER.md, "The ledger"). internal/ledger posts events; the
 // Worker stores them in D1 and answers history and the current view.
 
 // LedgerType is an event's type.

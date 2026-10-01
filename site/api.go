@@ -29,7 +29,7 @@ func generateAPI() []byte {
 	b.WriteString("so this page, the Worker and its clients cannot disagree. The same table, as OpenAPI 3.1,\n")
 	b.WriteString("is served by the Worker at `" + wire.MustFind(wire.RouteOpenAPI).Path + "`.\n\n")
 	b.WriteString("How the Worker is built and deployed, and how to add a route, is in\n")
-	b.WriteString("[Development](development.html#the-worker-api).\n\n")
+	b.WriteString("[The Cloudflare Worker](worker.html#the-route-table).\n\n")
 
 	b.WriteString("## Routes\n\n| route | method and path | token | success |\n|---|---|---|---|\n")
 	for _, r := range wire.Routes {

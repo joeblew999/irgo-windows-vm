@@ -1,10 +1,8 @@
 # Contributing
 
-This page covers the mechanics: how to set up, what to run, and how to land a
-change.
-
-How the code is written is in [DEVELOPMENT.md](DEVELOPMENT.md). **Read it
-before you write code.** Most of the duplication this project has had to remove
+How to set up, what to run, and how to land a change. Before you write code,
+read [Conventions](CONVENTIONS.md), [Architecture](ARCHITECTURE.md) and
+[Known traps](TRAPS.md): most of the duplication this project has had to remove
 was written by someone who didn't check what already existed.
 
 ## Set up
@@ -12,14 +10,16 @@ was written by someone who didn't check what already existed.
 [mise](https://mise.jdx.dev) pins the toolchain:
 
 ```sh
-mise install       # Go and golangci-lint, at the versions CI uses
+mise install       # every tool pinned in mise.toml, at the versions CI uses
 mise run go:check  # confirms the setup works
 ```
 
-That is all you need to build and test the Go code. Work on the VM itself also
+`mise install` also fetches the Worker's TinyGo (1.2 GB), binaryen, node and
+wrangler ([why](WORKER.md#traps)). That is all you need to build and test the
+Go code. Work on the VM itself also
 needs macOS on Apple Silicon and UTM, which `vm-create` installs.
 
-`mise tasks` lists every task. Each task's name matches the command it runs.
+`mise tasks` lists every task ([what they are](#mise-tasks)).
 
 ## Before you push
 
@@ -36,123 +36,103 @@ After you push, wait for CI with:
 mise run ci:watch   # exits non-zero if any workflow on your commit failed
 ```
 
-Don't write your own `sleep` loop around `gh run list --commit`. It matches only
-the full 40-character SHA, and a short one returns an empty list, which looks
-exactly like a run that hasn't started.
+Run the [glaze gates](TESTING.md#does-glaze-work) when you touch anything they
+exercise, and the [cycle test](TESTING.md#run-the-cycle-tests) for the stage you
+changed.
 
-`go:check` covers all **three** Go modules (the root, `examples` and `site`) and
-cross-compiles for Linux and Windows as well as macOS. Deleting a function from
-`sysfile_other.go` once passed every check being run, because they were all
-darwin.
+### What the checks cover
 
-The modules are split so each binary carries only what it needs:
+- **`go:check` covers all four Go modules** (the root, `examples`, `site` and
+  `worker`) and cross-compiles for Linux and Windows as well as macOS. Deleting
+  a function from `sysfile_other.go` once passed every check being run, because
+  they all ran on darwin. The module split is in
+  [Architecture](ARCHITECTURE.md#go-modules); `go list -deps ./cmd/irgo-winvm`
+  names nineteen third-party modules, and neither glaze nor native is among
+  them.
+- **`go:lint` pins `GOOS=darwin`**, so a Mac and the Linux CI runner lint the
+  same code. On Linux `statfsAvailable` is a stub that always errors, and
+  staticcheck rightly reports `fErr == nil && free < n` in `iso_create.go` as
+  never true (SA4023). That failed CI on every push from e1a4243 to 79f8a55,
+  while the same command passed on the Mac that wrote it.
+- **Nothing that touches a real guest is in CI.** Unit tests cover the iso
+  stage well, and the vm and app stages only at the edges; those paths are
+  proven by running them ([Testing](TESTING.md#run-the-cycle-tests)).
+- **Wait for CI with `mise run ci:watch`**, never a hand-written `sleep` loop
+  around `gh run list --commit`, which matches only the full 40-character SHA:
+  a short one returns an empty list, which looks exactly like a run that
+  hasn't started. There were five such loops before the task existed; two were
+  wrong in the same way. It watches every workflow the commit started, not just
+  `check`, exits non-zero if any failed, and takes `SHA=<commit>` for a commit
+  other than HEAD.
 
-- `examples` builds against glaze and native, the libraries under test, which
-  must never reach the binary users download. `go list -deps ./cmd/irgo-winvm`
-  names nineteen third-party modules, and neither is among them.
-- `site` needs a markdown parser the tool has no reason to ship.
+### mise tasks
 
-More on the layout is in [DEVELOPMENT.md](DEVELOPMENT.md#repository-layout).
+`mise tasks` lists them. `mise.toml` holds the tools, the environment and the
+one-line tasks. Anything longer is an executable script in `mise-tasks/`, where
+the path is the name (`mise-tasks/go/check` is `go:check`), `#MISE` lines at the
+top declare its description and dependencies, and findings are comments beside
+the lines they explain. Until 30 Sep 2026 all of it was shell inside TOML
+strings: 516 lines that no editor, `bash -n` or shellcheck could see.
 
-## Run the cycle tests
+A task exists only for what the binary cannot do on its own: checks, builds,
+the glaze gates, upstream work and the create-and-delete cycles. No task merely
+wraps a command; call the command.
 
-These need UTM, an Apple Silicon host and real media, so CI can't run them.
-Run the one for the stage you changed.
+- **Tools are pinned in `mise.toml` and nowhere else**, so CI installs what a
+  maintainer has; `jdx/mise-action` reads it. Every `go.mod` says `go 1.27.1` to
+  match. mise's reading of the Go version from `go.mod` is deprecated (removed
+  in 2026.11.0), hence the pin.
+- **`go:tool` is the one build of the tool.** Every task runs `.bin/irgo-winvm`
+  rather than `go run ./cmd/irgo-winvm`, and `.bin` is on `PATH` in this
+  directory, so `irgo-winvm doctor` works by hand. `sources` and `outputs` let
+  mise skip the build when nothing under `cmd/` or `internal/` changed. From
+  977136e to 30 Sep 2026 the task built `./irgo-winvm` while `outputs` named
+  `.bin/irgo-winvm`, so every task and `.mcp.json` ran whatever stale binary
+  `.bin` held (in a fresh clone, none). mise warned on every run — `did not
+  generate expected output` — and nobody read it. After editing `cmd/` or
+  `internal/`, run any task or `mise run go:tool` before calling the binary by
+  hand.
+- **`site:build` renders the markdown and never hand-written pages**, so the
+  site cannot drift from the repository. **`site:serve` builds and serves in one
+  command** on purpose: a separate server can be pointed at a stale `dist`.
+- **`vm:shots` copies the newest screenshot of each stage** from `shots/` into
+  `docs/screens/vm` under its stage name. The originals carry timestamps, so no
+  document can point at them.
+- **`UPSTREAM_DIR`** is where the local glaze and native clones live, read by the
+  `upstream:*` tasks. It was restored from the `mise.toml` deleted in e533764.
 
-| task | what it does | cost |
-|---|---|---|
-| `mise run iso:test` | deletes the ISO and rebuilds it from the `.esd` | ~50 s, and 4.9 GB of disk once (see the note in the task) |
-| `mise run vm:test` | creates and deletes a VM under a disposable name | minutes; leaves running VMs alone (UTM imports the bundle, no restart) |
-| `mise run app:test` | pushes a binary to the VM, runs it, removes it | ~20 s; needs a VM with Windows installed |
+## Fix glaze and native bugs upstream
 
-Use a disposable VM for anything destructive. `vm:test` already does: it builds
-`irgo-test-cycle`, never your real VM. Losing a 45-minute install to a test is
-not worth it.
+**This is non-negotiable, and it is why the project exists.** A failing probe
+means a patch to [crgimenes/glaze](https://github.com/crgimenes/glaze) or
+[crgimenes/native](https://github.com/crgimenes/native), never a workaround
+here. A bug worked around in an example still ships to everyone using those
+libraries, and the workaround hides it.
 
-## Does glaze work?
+Record what you found, and where it was fixed, in [UPSTREAM.md](UPSTREAM.md).
 
-One test suite answers this: `examples/conformance` (the tests are listed in
-[DEVELOPMENT.md](DEVELOPMENT.md#the-conformance-suite)). Run it with:
+To build and test this repository against your local clones of glaze and native,
+see [Test your own changes to glaze or native](TESTING.md#test-your-own-changes-to-glaze-or-native).
 
-```sh
-mise run glaze:mac       # natively on this Mac: ~5 s, no VM
-mise run glaze:windows   # in the VM: the real gate
-```
+## Commits
 
-Both run `irgo-winvm glaze-check` (`-windows` for the VM): build the suite with
-`go test -c`, run the binary with `-test.v=test2json`, and read the results
-through `go tool test2json` — no output is grepped. Each ends with one line:
-
-| verdict | means | exit |
-|---|---|---|
-| `YES` | everything passed or skipped by design | 0 |
-| `KNOWN BUGS ONLY` | the only failures are upstream bugs recorded in UPSTREAM.md (`glazecheck.KnownUpstream`), reported or not | 0 |
-| `NO` | a test failed that is not a known upstream bug | non-zero |
-| `UNEXPECTED PASS` | a known upstream failure passes: update the list and [UPSTREAM.md](UPSTREAM.md) | non-zero |
-| `CANNOT TELL` | the suite never ran (the guest agent went away), which says nothing about glaze | non-zero |
-
-Every run records every test in [GLAZE-STATUS.md](GLAZE-STATUS.md): commit,
-glaze and native versions (or the linked clone's branch and commit), and each
-test's result with its first message. The full output and the test2json events
-go to the log directory, and both paths are printed. Commit that file with the
-change it describes.
-
-To read the last answer without running anything: `irgo-winvm glaze-status`. It
-also says whether the answer still matches the tree. Agents get the same through
-the `glaze-status` and `glaze-check` MCP tools.
-
-The suite is plain `go test`, so it also runs by hand:
-`go -C examples test ./conformance` (opens windows), `-short` for the headless
-tests only, `-run TestAppScheme` for one.
-
-CI runs it too: the `conformance` workflow runs `glaze-check` on GitHub's
-`macos-latest` and `windows-11-arm`, shows the table in the job summary, and
-uploads the record, the log and the events as an artifact.
-
-- Run `glaze:mac` on every edit.
-- Run `glaze:windows` before you commit.
-
-### Test your own changes to glaze or native
-
-Point everything at local clones first. Both commands above then test your
-edits:
-
-```sh
-mise run upstream:clone && mise run upstream:link
-mise run glaze:mac && mise run glaze:windows
-mise run upstream:verify         # their own tests, then this repo's, against the clones
-mise run upstream:lint && mise run upstream:test:windows
-mise run upstream:unlink         # back to the released versions
-```
-
-### Run one test on the VM by hand
-
-Build the suite for Windows, then hand the binary to `app-create` with the
-test flags you want:
-
-```sh
-GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go -C examples test -c -o $PWD/.bin/win/conformance.test.exe ./conformance
-irgo-winvm app-create -gui .bin/win/conformance.test.exe -test.v -test.run TestAppScheme
-```
-
-Inside the repo,
-`irgo-winvm` is on your PATH: mise puts `.bin/` there, and any task (or
-`mise run go:tool`) rebuilds it.
-
-- `mise run glaze:hands` leaves glaze-all's window open on the guest's desktop,
-  so you can drive it by hand.
-- If a `-gui` run fails because there is no desktop session, run
-  `irgo-winvm vm-repair -reboot`.
-- If something looks stuck, run `irgo-winvm vm-screen` to photograph the guest.
-  From the host, a stuck boot and a working one look identical.
+- **One concern per commit**, each verified on its own. A refactor landed as one
+  commit can't be reviewed or bisected.
+- **Say what changed and why the old code was wrong.** The commit log is the only
+  record of things that cost hours and don't show in the diff, such as `utmctl`
+  exiting 0 on failure, or `del` exiting 1 when a glob matches nothing.
+- **Include measurements.** If you measured something to be sure, put the
+  numbers in the message.
+- **Correct a measurement everywhere it appears**, including
+  [RESULTS.md](RESULTS.md), which is dated on purpose.
 
 ## The docs site
 
 <https://joeblew999.github.io/irgo-windows-vm/> is generated from the markdown
 in this repository and published by `pages.yml` on every push to `main`. There
-is no separate copy to edit: if a page is wrong, fix the markdown. The one
-exception is the [command reference](#the-command-reference), which has no
-source file.
+is no separate copy to edit: if a page is wrong, fix the markdown. The
+exceptions are the [command reference](#the-command-reference) and the MCP
+page, which are captured from the binary.
 
 ```sh
 mise run site:serve    # build and serve at http://localhost:8127
@@ -179,7 +159,7 @@ CI fails on:
 Beside each HTML page, the site publishes the same page as plain markdown, with
 the extension swapped (`results.html` has `results.md`). It also publishes
 **`llms.txt`**, an index, and **`llms-full.txt`**, all the documentation in one
-file (~67 KB) for readers that prefer one request to six.
+file for readers that prefer one request to many.
 
 Point machines at these rather than at the repository's `.md` files, which lack
 the command reference.
@@ -188,11 +168,37 @@ They are not a second copy. Each corpus entry is written in the same loop that
 renders the HTML page, from the same markdown, in one pass over the page list
 in `site/main.go`.
 
+### Where a topic goes
+
+Each topic has one page, and every other page links to it. A new section goes
+on the page for its reader:
+
+| page | holds |
+|---|---|
+| `README.md` | what this is, install, a three-step quick start, links. Nothing else |
+| `docs/GETTING-STARTED.md` | requirements, every way to install, the first VM and the first program |
+| `docs/USING.md` | each command for its user: exit codes, costs, the VM, `-gui`, the golden image, the private cache |
+| `docs/FOR-AGENTS.md` | using it from an agent: MCP, HTTP, filing issues |
+| `docs/TESTING.md` | the glaze gates, the conformance suite, `examples/drive`, desktop hygiene, the cycle tests |
+| `docs/ARCHITECTURE.md` | how the code is built: stages, packages, locks, jobs, data, pushes, the golden image and cache internals |
+| `docs/WORKER.md` | the Cloudflare Worker |
+| `docs/CONVENTIONS.md` | how code here is written |
+| `docs/TRAPS.md` | what fails silently, one line each |
+| `docs/CONTRIBUTING.md` | this page: setup, checks, the site, commits, releases, triage, licence |
+| `docs/RESULTS.md` | what was measured, dated. History goes here, not in the reference pages |
+| `docs/UPSTREAM.md` | bugs in glaze, native and UTM, and their status |
+| `docs/ROADMAP.md`, `docs/THREAT-MODEL.md` | intent, and what the HTTP transport exposes |
+| `docs/GLAZE-STATUS.md` | generated by `glaze-check`: never edit it by hand |
+
+`AGENTS.md` and `CLAUDE.md` at the root only point into `docs/`.
+
 ### Add a page
 
-`README.md`, `RESULTS.md`, `UPSTREAM.md`, `DEVELOPMENT.md` and this file each
-become a page. To add one, add a line to `pages` in `site/main.go`. Nothing is
-discovered by scanning a directory, so nothing is published by accident.
+Every file above becomes a page. To add one, add a line to `pages` in
+`site/main.go`. Nothing is discovered by scanning a directory, so nothing is
+published by accident. A page with a `Nav` label is in the header; one with
+`Under` set is listed in the footer and lights up its parent's entry, which
+keeps the header to one line at 1280 px.
 
 ### The command reference
 
@@ -201,13 +207,8 @@ The reference has no source file. The site build compiles the CLI and captures
 string is ever transcribed. `iso-create -fetch` computes its usage text from a
 constant, so only a captured copy is correct.
 
-Two commands exist for tooling rather than for people:
-
-- **`irgo-winvm commands`** prints one command name per line. The reference
-  generator and the documentation test both read it, so neither scrapes the
-  usage text or drifts from what the binary accepts.
-- **`irgo-winvm version`** prints the version stamped in at build time, or
-  `dev` when built by hand. `doctor` shows the same value in its first row.
+It asks the binary for the list with `irgo-winvm commands`
+([tooling commands](ARCHITECTURE.md#adding-a-command)).
 
 ### Screenshots
 
@@ -219,121 +220,6 @@ Don't copy them in by hand.
 `booting-3`, `booting-4` and so on, and `vm:shots` publishes whatever a run
 produced. Give each new shot a caption that names its file, or delete it. A
 picture nobody explains is not evidence.
-
-## Fix glaze and native bugs upstream
-
-**This is non-negotiable, and it is why the project exists.** A failing probe
-means a patch to [crgimenes/glaze](https://github.com/crgimenes/glaze) or
-[crgimenes/native](https://github.com/crgimenes/native), never a workaround
-here. A bug worked around in an example still ships to everyone using those
-libraries, and the workaround hides it.
-
-Record what you found, and where it was fixed, in [UPSTREAM.md](UPSTREAM.md).
-
-## Reporting issues (for agents)
-
-Repositories that use `irgo-winvm` through their agents file issues here when
-they need something. This is how to file one that can be acted on without a
-round of questions.
-
-**File here** when `irgo-winvm` does the wrong thing (a wrong exit code, a
-step that hangs, output that lies), or when your repository needs it to do
-something it does not.
-
-**Do not file here** when:
-
-- the bug is in glaze, native or UTM. Read [UPSTREAM.md](UPSTREAM.md) first:
-  if it is listed, add what you found to that entry's linked issue. If it is
-  not, use the *upstream* kind below, so it is triaged into the ledger rather
-  than misfiled as ours. It is upstream only if a correct caller, reading only
-  that project's documentation, would hit it.
-- your own program failed. Exit 1 from `app-create` is your `.exe` failing,
-  with its own exit code named in the message (see
-  [What it exits with](DEVELOPMENT.md#what-it-exits-with)). Exits 4 and 6 are
-  worth retrying before filing.
-
-**Write the body with one command**, right after the failure, so the log still
-holds it:
-
-```sh
-irgo-winvm report -issue bug > body.md       # or: feature, upstream
-```
-
-It prints the issue body with the same headings as the web form, the
-diagnostic report already inside it (version, macOS, UTM, golden image, the
-last commands and their exits, the log around the last error, glaze-status,
-`doctor -json`), and the `gh` command that files it at the top. Over MCP, call
-the `report` tool with `-issue bug`. Plain `irgo-winvm report` prints only the
-report, to paste into an existing issue. Home directories become `~`, and
-tokens, keys and every `.env.r2` value become `[redacted:...]`; read it before
-posting anyway.
-
-Replace every _italic_ line, keep every `###` heading in order, tick the
-checks, and file it:
-
-```sh
-gh issue create --repo joeblew999/irgo-windows-vm \
-  --title "[bug] app-create -gui exits 4 on a fresh clone" \
-  --label bug,needs-triage,agent-filed \
-  --body-file body.md
-```
-
-The forms in `.github/ISSUE_TEMPLATE` work only in a browser; `gh` and the API
-skip them, so the body is the template. Use `--label feature,needs-triage,agent-filed`
-for a feature and `--label needs-triage,agent-filed` for an upstream bug (add
-`upstream-glaze`, `upstream-native` or `upstream-utm` if you are sure). If gh
-says a label is not found, file without `--label`.
-
-**What makes it actionable:**
-
-- the exact command, every flag, and its full output with the exit code: not
-  a paraphrase;
-- the report, run after the failure and before anything else, so the last
-  commands and the log excerpt are about this failure;
-- expected against actual, in a sentence each;
-- for a feature, what your repository is trying to get done and how you will
-  both know it is done, not only the flag you want;
-- which repository and which agent filed it, so a question has somewhere to go.
-
-An issue without the report gets `needs-report` and waits for it.
-
-### Labels
-
-The labels are declared once, in `.github/labels.tsv` (name, colour and
-description, tab-separated), and `mise run gh:labels` creates or updates them
-on GitHub with `gh label create --force`. It deletes nothing. `DRY_RUN=1`
-prints the commands instead of running them, and `REPO=owner/name` points it
-at another repository. `cmd/irgo-winvm/issue_test.go` fails if a form,
-`report -issue` or this page names a label the file does not define, or if a
-form and `report -issue` disagree about the headings.
-
-| label | means |
-|---|---|
-| `bug` | `irgo-winvm` does the wrong thing |
-| `feature` | a calling repository needs something it does not do |
-| `upstream-glaze`, `upstream-native`, `upstream-utm` | the bug is theirs: recorded in UPSTREAM.md, fixed there |
-| `needs-triage` | nobody has looked yet; every form adds it |
-| `needs-report` | a bug without the report; triage waits for it |
-| `triaged` | classified, labelled, and the next step is named in a comment |
-| `agent-filed` | filed by an agent for a calling repository |
-| `good first issue` | small and self-contained, with the fix described |
-| `duplicate`, `wontfix` | closed, with a comment linking the original or saying why |
-
-Triage: read the report, move an upstream bug into [UPSTREAM.md](UPSTREAM.md)
-and label it `upstream-*`, swap `needs-triage` for `triaged`, and say the next
-step in a comment.
-
-## Commits
-
-- **One concern per commit**, each verified on its own. A refactor landed as one
-  commit can't be reviewed or bisected.
-- **Say what changed and why the old code was wrong.** The commit log is the only
-  record of things that cost hours and don't show in the diff, such as `utmctl`
-  exiting 0 on failure, or `del` exiting 1 when a glob matches nothing.
-- **Include measurements.** If you measured something to be sure, put the
-  numbers in the message.
-- **Correct a measurement everywhere it appears**, including
-  [RESULTS.md](RESULTS.md), which is dated on purpose.
 
 ## Releases
 
@@ -378,12 +264,8 @@ release workflow's own token, so nothing needs setting up. The cask clears the q
 install, because the binary is not signed with an Apple Developer ID and Homebrew quarantines what a
 cask downloads.
 
-**Gatekeeper.** The binaries are ad-hoc signed by the Go linker (arm64 requires
-a signature to run at all) and not notarized. A file with no quarantine flag
-runs; one a browser downloaded is refused until `xattr -d
-com.apple.quarantine` clears it. `curl`, `go install` and the cask's hook leave
-no flag. Signing and notarizing need an Apple Developer account, which this
-project does not have.
+**Gatekeeper.** The binaries are ad-hoc signed and not notarized; what that
+means for a user is in [Getting started](GETTING-STARTED.md#install).
 
 `release.yml` then:
 
@@ -421,6 +303,34 @@ why the build reads it from the tag your checkout is on. Before v0.2.1 it
 didn't: CI passed `VERSION` and a hand-run build didn't, so a local build said
 `dev` and hashed differently. The byte-for-byte check against a published
 release is in [RESULTS.md](RESULTS.md).
+
+## Triage and labels
+
+The labels are declared once, in `.github/labels.tsv` (name, colour and
+description, tab-separated), and `mise run gh:labels` creates or updates them
+on GitHub with `gh label create --force`. It deletes nothing. `DRY_RUN=1`
+prints the commands instead of running them, and `REPO=owner/name` points it
+at another repository. `cmd/irgo-winvm/issue_test.go` fails if a form,
+`report -issue` or [For agents](FOR-AGENTS.md#reporting-issues) names a label the file does not define, or if a
+form and `report -issue` disagree about the headings.
+
+| label | means |
+|---|---|
+| `bug` | `irgo-winvm` does the wrong thing |
+| `feature` | a calling repository needs something it does not do |
+| `upstream-glaze`, `upstream-native`, `upstream-utm` | the bug is theirs: recorded in UPSTREAM.md, fixed there |
+| `needs-triage` | nobody has looked yet; every form adds it |
+| `needs-report` | a bug without the report; triage waits for it |
+| `triaged` | classified, labelled, and the next step is named in a comment |
+| `agent-filed` | filed by an agent for a calling repository |
+| `good first issue` | small and self-contained, with the fix described |
+| `duplicate`, `wontfix` | closed, with a comment linking the original or saying why |
+
+How agents file issues is in [For agents](FOR-AGENTS.md#reporting-issues).
+
+Triage: read the report, move an upstream bug into [UPSTREAM.md](UPSTREAM.md)
+and label it `upstream-*`, swap `needs-triage` for `triaged`, and say the next
+step in a comment.
 
 ## Licence
 

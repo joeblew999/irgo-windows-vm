@@ -306,6 +306,11 @@ func TestDrainIsBounded(t *testing.T) {
 	if spooled(t, c) != 1 {
 		t.Error("the event was lost when the send timed out")
 	}
+	// The background send is still blocked on the hanging fake. End it and
+	// wait, or it writes its back-off file while the temp dir is being
+	// removed ("directory not empty", 1 in 3 runs).
+	srv.CloseClientConnections()
+	c.wg.Wait()
 }
 
 func TestConcurrentRecordsDuringFlushAreKept(t *testing.T) {

@@ -17,7 +17,7 @@ main session's background agents; the main session reviews and merges their bran
 | 4 | [`2026-10-01_1040_vm-conformance.md`](2026-10-01_1040_vm-conformance.md) — the glaze suite's machinery pointed at the VM; VM-STATUS.md | agent BB | in progress |
 | 5 | [`2026-10-01_1100_remote-cross-platform.md`](2026-10-01_1100_remote-cross-platform.md) — Windows/Linux/GitHub clients drive a Mac through the Worker | agent CC | starting |
 | 5a | [`2026-10-01_1130_vm-capacity.md`](2026-10-01_1130_vm-capacity.md) — disk/RAM budget, quotas, retention, capacity in CLI/MCP/Worker | agent DD | starting |
-| 5b | [`2026-10-01_1140_docs-restructure.md`](2026-10-01_1140_docs-restructure.md) — docs by audience, single source per topic | agent EE | starting (merges last) |
+| 5b | [`2026-10-01_1140_docs-restructure.md`](2026-10-01_1140_docs-restructure.md) — docs by audience, single source per topic | — | **merged 1 Oct** (9 pages by audience; BB/CC/DD write into them) |
 | 5c | [`2026-10-01_1150_worker-api-single-source.md`](2026-10-01_1150_worker-api-single-source.md) — one route table for Worker + every client, docs and OpenAPI generated | agent FF | starting (lands before AA/CC/DD) |
 | 6 | [`2026-10-01_1010_issue-intake-and-triage.md`](2026-10-01_1010_issue-intake-and-triage.md) — report command, forms, labels done; triage routine next | main session | intake done; routine next |
 | 7 | [`2026-10-01_1050_native-input-and-drive.md`](2026-10-01_1050_native-input-and-drive.md) — fork PRs #1/#2, examples/drive, Windows CI reliable | — | done; owner merges fork PRs |
@@ -33,4 +33,4 @@ VM hardened (`vm-repair`, never-expiring password, fail-fast `-gui`).
 
 ## Working on glaze or native
 
-See [docs/CONTRIBUTING.md](../docs/CONTRIBUTING.md#does-glaze-work) — not repeated here.
+See [docs/TESTING.md](../docs/TESTING.md#does-glaze-work) — not repeated here.

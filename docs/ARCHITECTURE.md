@@ -212,6 +212,8 @@ Every command that changes state takes the locks it declares in
 | stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
 | capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
 
+| UTM restart (`mutation-utm-restart.lock`) | the restart of a UTM that does not answer, until the VM it was restarted for has started | whatever starts a VM, inside `StartWithDisplay`, only when that happens |
+
 `vm-reap` takes each VM's lock itself, one at a time, without waiting, and
 keeps a VM whose lock is held: that VM is in use.
 
@@ -499,9 +501,11 @@ Why it is built this way:
 - **It keeps the MAC** unless UTM's global `IsRegenerateMACOnClone` is on, which
   defaults to off. Two clones with one MAC compete for one DHCP lease, so every
   clone is given `randomMAC()`, and the MAC UTM reports back is checked.
-- **Nothing restarts UTM.** A new bundle is written to `vm/staging/` and UTM
-  imports it; the install medium is ejected with `update configuration` on the
-  stopped VM. Quitting UTM would stop every VM it runs.
+- **Nothing restarts UTM while a VM is running.** A new bundle is written to
+  `vm/staging/` and UTM imports it; the install medium is ejected with
+  `update configuration` on the stopped VM. Quitting UTM would stop every VM
+  it runs. The one restart is of a UTM that does not answer a start request
+  ([below](#when-utm-does-not-answer-a-start)).
 - **Decrypted, because ciphertext does not compress.** Windows 11 24H2 turned
   Device Encryption on by itself; the answer file now prevents it at install,
   and sealing decrypts VMs made before that. This also removes the risk of a
@@ -514,6 +518,31 @@ Why it is built this way:
 
 The research, and what is measured and what is not, is in
 `.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
+
+### When UTM does not answer a start
+
+Every boot goes through `VM.StartWithDisplay` (`internal/utmvm/vm_start.go`):
+`vm-create`, an install's reboots, and `EnsureReady` under `app-create`. A UTM
+that is up can take the request and never reply
+([the trap](TRAPS.md#host-utm-and-the-iso)); osascript then gives up after two
+minutes with `AppleEvent timed out. (-1712)`. On that error, and no other,
+`recoverUTM`:
+
+1. takes the UTM restart lock, or refuses as busy (exit 6): another command is
+   restarting UTM;
+2. asks `utmctl list`, which still answers, and goes on only if the VM being
+   started is in the list and **every** VM is `stopped`. A VM in any other
+   state refuses, naming it; a list that fails or lacks the VM is cannot tell,
+   and refuses. Both name the command that restarts UTM by hand;
+3. quits UTM, checks with macOS that it has gone, opens it in the background
+   and waits until it lists the VM (`restartUTM`);
+4. sends the start once more, and keeps the lock until it returns. A second
+   timeout is reported, not recovered.
+
+UTM is reached through `utmStarter`, four functions, so the tests run all of
+this against a fake. `restartUTM` itself has no test and has not been run
+against a UTM in that state: the commands in it are the ones that worked by
+hand on 2 Oct 2026.
 
 ## The private R2 cache: storage and transfer
 

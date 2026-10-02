@@ -201,6 +201,20 @@ waiting out its timeout. `vm-repair` also re-applies the desktop settings
 described in [Desktop hygiene](TESTING.md#desktop-hygiene) and the SMB share
 (`-share=false` removes it).
 
+### When UTM does not answer
+
+UTM can be up and not answer a request to start a VM. A command that boots one
+(`vm-create`, `app-create` on a stopped VM) then waits two minutes, says so,
+and looks at what UTM lists:
+
+- **every VM is stopped**: it quits UTM, opens it again and starts the VM,
+  once, printing each step. Nothing is lost, because nothing was running;
+- **any VM is not stopped**, or the list cannot be read: it does not restart
+  UTM, since that stops every VM UTM runs. It exits 1 naming the VMs that are
+  up and the command to run once they can be stopped:
+  `osascript -e 'quit app "UTM"' && open -g -a UTM`;
+- **another command is already restarting UTM**: exit 6. Run it again.
+
 ## The golden image
 
 A golden image is an installed Windows, sealed once, that every new VM is

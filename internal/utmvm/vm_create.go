@@ -964,7 +964,7 @@ func RunInstall(opts InstallOptions) error {
 	// VM silently swallows them.
 	vm := Named(opts.VMRef)
 	if !vm.IsRunning() {
-		if err := vm.StartWithDisplay(); err != nil {
+		if err := vm.StartWithDisplay(logf); err != nil {
 			return err
 		}
 		if selfBooting {

@@ -492,15 +492,12 @@ is one script, `assets/vm-ssh.ps1`, whose `-Remove` is the undo.
 
 **What has been run.** The Go side is unit-tested (the key parser, the banner
 check against listeners on loopback, the split of the script's output from
-`ipconfig`'s, the refusals before UTM is asked). **The script has not been run
-in a guest by this command**, as of 2 Oct 2026. The steps it is built from
-worked by hand that day on a clone (Windows 11 ARM64 26100.4349): the
-capability, the service, a firewall rule for every profile, the key in
-`administrators_authorized_keys` restricted with `icacls`. The script differs
-from that in ways that are therefore unproven: its own rule limited to the
-local subnet with Windows' rule turned off, the file written through .NET and
-compared before writing, the grants by SID, and the administrator check. Run
-it on a clone and record it in [RESULTS.md](RESULTS.md) before relying on it.
+`ipconfig`'s, the refusals before UTM is asked). The script was run in a guest
+on 2 Oct 2026, on a fresh clone (Windows 11 ARM64 26100.4349): first run,
+login over SSH, a repeat, the undo and the undo again. The numbers are in
+[RESULTS.md](RESULTS.md#ssh-into-a-clone--measured-2-oct-2026). Not run: a
+guest account that is not an administrator, a key other than ed25519, and an
+x64 guest.
 
 ## The golden image: sealing and cloning
 

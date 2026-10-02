@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -268,6 +269,82 @@ func orNone(names []string) string {
 		return "none"
 	}
 	return strings.Join(names, ", ")
+}
+
+func vmSSHCreateFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-ssh-create", flag.ContinueOnError)
+	fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
+	ownerFlag(fs)
+	fs.String("key", "~/.ssh/id_ed25519.pub", "the public key to authorize: a .pub file on this Mac. Never a private key")
+	fs.String("user", "dev", "the guest account to log in as; it must be an administrator")
+	fs.Duration("timeout", 20*time.Minute, "how long to allow the guest, which installs OpenSSH Server the first time")
+	return fs
+}
+
+// sshUser is what -user may be: it goes into a command line in the guest and
+// into the ssh line printed for the caller to run.
+var sshUser = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$`)
+
+// runVMSSHCreate turns on the OpenSSH server in a VM, authorizes one public
+// key, waits for port 22 to answer from this Mac, and prints the ssh line. On
+// a VM that already has all of it, it says so and changes nothing.
+func runVMSSHCreate(v values, _ []string) error {
+	name, user := v.String("vm"), v.String("user")
+	if !sshUser.MatchString(user) {
+		return fmt.Errorf("%w: -user %q is not an account name this command accepts (letters, digits, . _ -)", errUsage, user)
+	}
+	// Before UTM is asked anything: a wrong key should not boot a VM.
+	key, err := utmvm.ReadSSHPublicKey(v.String("key"))
+	if err != nil {
+		return err
+	}
+	say := utmvm.Printer("vm-ssh-create")
+	e, err := utmvm.Find(name)
+	if err != nil {
+		return err
+	}
+	if err := ensureAgent(e, say); err != nil {
+		return err
+	}
+	say("vm:     %s", e.Name)
+	say("key:    %s %s (%s)", key.Type, key.Comment, v.String("key"))
+	host, err := utmvm.VMSSHCreate(e.UUID, user, key, v.Duration("timeout"), say)
+	if err != nil {
+		return err
+	}
+	say("turn it off with: irgo-winvm vm-ssh-delete -vm %s", e.Name)
+	say("connect with:")
+	// The last line, and nothing else on it, so it can be copied or captured.
+	_, _ = fmt.Fprintf(utmvm.Out, "ssh %s@%s\n", user, host)
+	return nil
+}
+
+func vmSSHDeleteFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("vm-ssh-delete", flag.ContinueOnError)
+	fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
+	ownerFlag(fs)
+	return fs
+}
+
+// runVMSSHDelete turns SSH off in a VM again. A VM UTM says does not exist has
+// nothing to turn off, which is success, so the undo can run twice.
+func runVMSSHDelete(v values, _ []string) error {
+	name := v.String("vm")
+	say := utmvm.Printer("vm-ssh-delete")
+	say("vm:     %s", name)
+	e, found, err := findForUndo(name)
+	if err != nil {
+		return err
+	}
+	if !found {
+		say("UTM knows no VM %q; nothing to turn off", name)
+		return nil
+	}
+	if err := utmvm.VMSSHDelete(e.UUID, say); err != nil {
+		return err
+	}
+	say("SSH is off in %s", e.Name)
+	return nil
 }
 
 // ensureAgent recovers a VM whose guest agent is not answering. Windows

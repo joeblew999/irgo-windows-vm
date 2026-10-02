@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -93,5 +95,55 @@ func TestJobsRunAsTheirCaller(t *testing.T) {
 	}
 	if got := jobArgs(parse("iso-create", "-fetch"), []string{"-fetch"}); strings.Join(got, " ") != "-fetch" {
 		t.Errorf("iso-create, which has no -owner, got %q", got)
+	}
+}
+
+// TestVMSSHCreateRefusesBeforeUTM: a key that cannot be used, a private key
+// above all, and a -user that is not an account name are usage errors (exit
+// 2) decided on this Mac, before UTM is asked for the VM: a call that got as
+// far as Find would fail as no such VM, or as UTM not answering. And both
+// commands take their VM's lock, like every command that changes a VM.
+//
+// Negative control, run by hand 2 Oct 2026: drop ErrSSHKey from exitCode and
+// the two key cases exit 1; read the key after utmvm.Find and they are "no
+// such VM", exit 3.
+func TestVMSSHCreateRefusesBeforeUTM(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("vm-ssh-create is macOS-only; on " + runtime.GOOS + " it is refused before any of this")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(utmvm.OwnerEnv, "ssh-test")
+	priv := filepath.Join(home, "id_ed25519")
+	if err := os.WriteFile(priv, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		args []string
+		is   error
+	}{
+		{"a private key", []string{"-vm", "z1", "-key", priv}, utmvm.ErrSSHKey},
+		{"the default key, which this HOME does not have", []string{"-vm", "z1"}, utmvm.ErrSSHKey},
+		{"a -user that is a command line", []string{"-vm", "z1", "-user", "dev & calc"}, errUsage},
+	} {
+		_, err := utmvm.Capture(func() error { return runTool("vm-ssh-create", c.args) })
+		if !errors.Is(err, c.is) || exitCode(err) != command.CodeUsage {
+			t.Errorf("%s: %v (exit %d), want %v and exit %d", c.name, err, exitCode(err), c.is, command.CodeUsage)
+		}
+	}
+	if err := runTool("vm-ssh-create", nil); !errors.Is(err, utmvm.ErrDefaultVMReserved) {
+		t.Errorf("a named caller, no -vm: %v, want the default VM refused", err)
+	}
+
+	release, err := utmvm.Acquire(utmvm.VMLock("z1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	for _, name := range []string{"vm-ssh-create", "vm-ssh-delete"} {
+		if err := runTool(name, []string{"-vm", "Z1"}); !errors.Is(err, utmvm.ErrMutationInProgress) {
+			t.Errorf("%s while z1 is busy: %v, want ErrMutationInProgress", name, err)
+		}
 	}
 }

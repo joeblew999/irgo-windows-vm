@@ -93,6 +93,10 @@ var All = []Command{
 	// job over MCP. An Undo with a flag names the command and the flag.
 	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
 	{Name: "vm-golden-pull", Summary: "pull the golden image from your private R2 bucket", Undo: "vm-golden-pull -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	// SSH into a VM the caller owns. The first run installs a Windows
+	// capability, minutes; not a job, because the answer is the line it
+	// prints, and status reports only whether a job is alive.
+	{Name: "vm-ssh-create", Summary: "turn on SSH in the VM for your public key, and print the ssh line to use", Undo: "vm-ssh-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
 	// The remote job queue: from any OS, through the Worker, to a Mac running
 	// serve. Nothing local changes, so no locks; the Mac's own commands take
 	// theirs when it runs the job.
@@ -101,6 +105,8 @@ var All = []Command{
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, MacOnly: true, OverMCP: true},
 	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, OverMCP: true},
+	// Not destructive: what it removes comes back with one vm-ssh-create.
+	{Name: "vm-ssh-delete", Summary: "turn SSH off in the VM again and remove every authorized key", IsUndo: true, Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
 	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
 	// Not an undo of one command: it removes whatever clones callers left

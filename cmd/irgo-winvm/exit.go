@@ -43,7 +43,7 @@ func exitCode(err error) command.Code {
 		return command.CodeBusy
 	case errors.Is(err, utmvm.ErrNoRoom):
 		return command.CodeNoRoom
-	case errors.Is(err, errUsage), errors.Is(err, utmvm.ErrDefaultVMReserved):
+	case errors.Is(err, errUsage), errors.Is(err, utmvm.ErrDefaultVMReserved), errors.Is(err, utmvm.ErrSSHKey):
 		return command.CodeUsage
 	default:
 		return command.CodeFailed

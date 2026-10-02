@@ -12,11 +12,12 @@ import (
 
 // TestUndoTellsNoVMFromNoAnswer: UTM saying there is no such VM is an undo
 // with nothing to do, exit 0; UTM not answering is an error that is neither 0
-// nor "no such VM", for vm-delete and app-delete both.
+// nor "no such VM", for vm-delete, app-delete and vm-ssh-delete.
 //
 // Negative control, run by hand: return (Entry{}, false, nil) for every error
 // in findForUndo, which is what both commands did before, and the
-// unanswerable cases exit 0 (run 1 Oct 2026: all three failed).
+// unanswerable cases exit 0 (run 1 Oct 2026: all three failed; 2 Oct 2026,
+// with vm-ssh-delete: all four).
 func TestUndoTellsNoVMFromNoAnswer(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("vm-delete resolves the bundle in UTM's container first, which exists only on macOS")
@@ -33,6 +34,7 @@ func TestUndoTellsNoVMFromNoAnswer(t *testing.T) {
 		{"vm-delete", "-vm", "z9"},
 		{"vm-delete", "-vm", "z9", "-force"},
 		{"app-delete", "-vm", "z9"},
+		{"vm-ssh-delete", "-vm", "z9"},
 	} {
 		name := strings.Join(cmdline, " ")
 		findVM = absent

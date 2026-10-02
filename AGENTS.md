@@ -21,7 +21,7 @@ project has had to clean up was written by an agent that did not check.
 | [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | say whether glaze works (generated: never edit it) |
 | [docs/VM-STATUS.md](docs/VM-STATUS.md) | say whether a VM has what the project relies on (generated: never edit it) |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | pick up what is next |
-| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | touch the HTTP transport |
+| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | touch the HTTP transport, or open a port in the guest |
 
 Using `irgo-winvm` from another repository, and filing an issue here:
 [For agents](docs/FOR-AGENTS.md).

@@ -51,6 +51,9 @@ are [on its page](WORKER.md#traps).
 | `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](ARCHITECTURE.md#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |
+| Windows' own firewall rule for OpenSSH Server | the guest's network is filed as Public, and connections to port 22 were dropped until the rule was set for every profile (by hand, 2 Oct 2026, build 26100.4349) | `vm-ssh.ps1` adds its own rule for every profile, from the local subnet, and turns Windows' off |
+| an administrator's SSH key in `~\.ssh\authorized_keys` | sshd does not read it: for an administrator the keys are in `C:\ProgramData\ssh\administrators_authorized_keys`, and that file is ignored unless only Administrators and SYSTEM can write it | write that file and restrict it with `icacls`, as `vm-ssh.ps1` does |
+| `Add-WindowsCapability` for `OpenSSH.Server` | minutes the first time, with nothing printed | `vm-ssh-create` says so before it starts and allows 20 minutes |
 
 ## Driving a window on Windows, and the hosted runner
 

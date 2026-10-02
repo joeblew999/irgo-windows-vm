@@ -55,6 +55,35 @@ contract for an agent from another repository:
 4. `irgo-winvm vm-delete -vm <name> -force` when done. If you go away, a clone
    idle for a day is removed by whoever runs `vm-reap -force`.
 
+## SSH into your VM
+
+When your work drives a machine over SSH rather than running one `.exe`
+(installers, provisioning, a remote shell), turn SSH on in a VM you made:
+
+```sh
+irgo-winvm vm-ssh-create -vm <name> -key ~/.ssh/id_ed25519.pub
+```
+
+Its last line is the command to run, `ssh dev@<address>`, printed only after
+an SSH server answered there from the Mac. Add
+`-o StrictHostKeyChecking=accept-new` the first time: every clone has host keys
+of its own. What it changes in the guest, and its exit codes, are in
+[Using it](USING.md#ssh-into-a-vm).
+
+- **The key is a `.pub` file on the Mac.** Never pass a private key: it is
+  refused (exit 2) and nothing is sent.
+- **Run it again whenever you need the line.** Done work is reported, not
+  redone, in seconds; and the address can change when the VM restarts.
+- **The first run takes minutes** (Windows installs OpenSSH Server). Over MCP
+  it is an ordinary call, not a job, because the answer is the line it prints.
+  If your client stops waiting, the work carries on in the server: call again,
+  expect `busy` (6) until it has finished, then the line.
+- **`irgo-winvm vm-ssh-delete -vm <name>`** turns it off; `vm-delete` removes
+  it with the VM.
+- **It is not a private channel.** Read
+  [who can reach port 22](THREAT-MODEL.md#ssh-into-a-guest) before putting
+  anything in that VM you would not put in a throwaway.
+
 ## Over HTTP
 
 `irgo-winvm mcp -http <address>` serves the same tools over Streamable HTTP,

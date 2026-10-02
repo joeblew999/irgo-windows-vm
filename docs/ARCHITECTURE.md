@@ -208,7 +208,7 @@ Every command that changes state takes the locks it declares in
 | lock | guards | taken by |
 |---|---|---|
 | machine (`mutation.lock`) | the media and the golden image | `iso-*`, `vm-golden-*`, and `vm-create` only while it writes or clones the bundle |
-| per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `app-create`, `app-delete`, `glaze-check -windows` |
+| per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `vm-ssh-create`, `vm-ssh-delete`, `app-create`, `app-delete`, `glaze-check -windows` |
 | stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
 | capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
 
@@ -457,6 +457,50 @@ leaves them on after the share is removed ([traps](TRAPS.md#host-utm-and-the-iso
 `LocalAccountTokenFilterPolicy` is not set, because it only matters for admin
 shares (`C$`). `dev` reaches `irgo-drop` with its filtered network token,
 through the grants above.
+
+## SSH into the guest
+
+What `vm-ssh-create` and `vm-ssh-delete` do for their user is in
+[Using it](USING.md#ssh-into-a-vm). `VMSSHCreate` and `VMSSHDelete`
+(`internal/utmvm/vm_ssh.go`) are the whole of it, and everything in the guest
+is one script, `assets/vm-ssh.ps1`, whose `-Remove` is the undo.
+
+- **It runs the way `vm-repair` does**: the script is pushed and run as SYSTEM
+  through the guest agent in a batch that captures its output and exit code
+  (`appExecSteps`). `utmctl exec` alone returns neither
+  ([traps](TRAPS.md#host-utm-and-the-iso)), and this must be checked.
+- **The key travels as a file**, pushed beside the script and deleted by it,
+  not as an argument: a comment may hold anything, and `cmd` would expand it.
+  `ReadSSHPublicKey` is the only reader of `-key`. It takes one line of
+  `type base64 [comment]` whose base64 names the same type inside, and refuses
+  anything containing `PRIVATE KEY`, so a private key is never held, pushed or
+  logged.
+- **The address is the guest's own account of itself**: `ipconfig` runs as
+  the second step of the same batch, and `ipconfigIPv4` reads it. Not the
+  address cached in `net/`, which a push tolerates being stale because it
+  checks a hash in the guest afterwards; here a stale address would put
+  another VM in the line the caller is told to connect to.
+- **Success is an SSH banner, read from the Mac** (`sshBanner`): the line
+  starting `SSH-` that a server sends first. An open port that says anything
+  else fails. The undo checks the opposite, that nothing answers.
+- **Not a job over MCP**, though the first run is minutes: `status` reports
+  whether a job is alive, not what it printed, and the answer here is the last
+  line.
+- **Our own firewall rule, as for [the share](#how-a-binary-gets-into-the-guest)**:
+  local subnet only, every profile, with Windows' own rule turned off so there
+  is one way in and the undo leaves the port closed.
+
+**What has been run.** The Go side is unit-tested (the key parser, the banner
+check against listeners on loopback, the split of the script's output from
+`ipconfig`'s, the refusals before UTM is asked). **The script has not been run
+in a guest by this command**, as of 2 Oct 2026. The steps it is built from
+worked by hand that day on a clone (Windows 11 ARM64 26100.4349): the
+capability, the service, a firewall rule for every profile, the key in
+`administrators_authorized_keys` restricted with `icacls`. The script differs
+from that in ways that are therefore unproven: its own rule limited to the
+local subnet with Windows' rule turned off, the file written through .NET and
+compared before writing, the grants by SID, and the administrator check. Run
+it on a clone and record it in [RESULTS.md](RESULTS.md) before relying on it.
 
 ## The golden image: sealing and cloning
 

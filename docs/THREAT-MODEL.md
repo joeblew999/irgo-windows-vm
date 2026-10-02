@@ -23,6 +23,7 @@ Assume someone can send authenticated MCP calls to the HTTP transport.
 |---|---|
 | `app-create` with an uploaded `.exe` | arbitrary code execution inside the Windows VM, as `dev`, with a desktop session and network |
 | `app-create -gui` | the same, on a visible desktop: anything a person at the machine could do |
+| `vm-ssh-create` with a key of theirs | a shell in that VM as `dev`, an administrator, for as long as the VM lives or until `vm-ssh-delete`: it outlasts the call ([below](#ssh-into-a-guest)) |
 | `vm-screen` | a picture of that desktop, including whatever you had open in the guest |
 | `vm-delete -force` | a destroyed 45-minute install |
 | `iso-delete -force -all` | a destroyed 4.2 GB download, from a source that rate-limits |
@@ -124,3 +125,62 @@ from `-http`, and narrower.
 - **The Windows licence.** Every clone is a running copy of Windows and needs
   its own licence. This is for your own machines and your own CI; it is not a
   service to offer to others, and `serve` says so when it starts.
+
+## SSH into a guest
+
+[`vm-ssh-create`](USING.md#ssh-into-a-vm) opens a port in a guest that had
+none listening there. What that adds, and what it does not:
+
+**What it opens.** TCP 22 in that one VM, by a firewall rule that allows the
+guest's local subnet only, and `sshd` started and set to start at boot. It
+stays open across reboots until `vm-ssh-delete` or the VM's deletion.
+
+**Who can reach it.** The VM is on UTM's Shared Network: a private subnet on
+the Mac (the guest's address is `192.168.64.x`, the Mac's `192.168.64.1`)
+behind the Mac's own address translation. So:
+
+- **the Mac can**, and so can anything running on it, including every user of
+  the Mac and whatever they run;
+- **other VMs on the same shared network should be expected to**: they are on
+  the same subnet, and the rule allows that subnet. Every clone and
+  `irgo-win11` are on it. Not measured;
+- **the rest of your network and the internet cannot start a connection to
+  it**: nothing forwards a port from the Mac to the guest, and this tool adds
+  no forward. That is how UTM documents the mode; it has not been probed from
+  another machine.
+
+**What lets someone in.** The command adds one thing, a public key for `dev`.
+It does not write `sshd_config`, so it neither turns password login on nor
+off: that stays whatever Windows' sshd defaults to, which is to accept
+passwords, and `dev`'s password is `dev` (not checked on a guest by this
+command). **Treat the port as open to anyone who can reach it**, exactly as
+RDP and the file share already are on this VM. The key is so that you can log
+in without typing; it is not what keeps others out. What keeps others out is
+that only the Mac and its VMs can reach the port.
+
+**What is defended:**
+
+- **No private key leaves the Mac, or is read at all.** `-key` takes a public
+  key file; anything containing `PRIVATE KEY` is refused before it is parsed,
+  and only the one parsed public line is pushed. Nothing generates or stores a
+  key pair.
+- **The authorized-keys file is writable only by Administrators and SYSTEM**,
+  which is also the condition under which sshd will read it.
+- **One caller per VM.** The command takes the VM's lock and is refused the
+  owner's VM by default, like `app-create`; ownership is a label, not
+  authentication, as everywhere here.
+- **The undo closes it and checks.** `vm-ssh-delete` stops `sshd`, ends its
+  sessions, removes the rule and every key, and fails if port 22 still answers
+  from the Mac.
+
+**What is not defended:**
+
+- **Whoever can call `vm-ssh-create` gets a shell that outlasts the call.**
+  They could already run anything with `app-create`; this makes it
+  interactive and persistent. Over `-http` it is one more reason for the token.
+- **The host's identity.** A clone makes its host keys when its `sshd` first
+  starts; nothing tells the caller their fingerprint out of band, so the first
+  connection trusts whatever answers at that address.
+- **A golden image sealed with SSH on.** Its clones would all carry the same
+  host keys and the same authorized keys. Seal a VM that never had
+  `vm-ssh-create` run on it.

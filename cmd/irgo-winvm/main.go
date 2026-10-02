@@ -271,6 +271,9 @@ func init() {
 		"vm-delete":  {flags: vmDeleteFlags, run: runVMDelete},
 		"app-delete": {flags: appDeleteFlags, run: runAppDelete},
 
+		"vm-ssh-create": {flags: vmSSHCreateFlags, run: runVMSSHCreate},
+		"vm-ssh-delete": {flags: vmSSHDeleteFlags, run: runVMSSHDelete},
+
 		"vm-golden-create": {flags: vmGoldenCreateFlags, run: runVMGoldenCreate},
 		"vm-golden-delete": {flags: vmGoldenDeleteFlags, run: runVMGoldenDelete},
 		"vm-reap":          {flags: vmReapFlags, run: runVMReap},

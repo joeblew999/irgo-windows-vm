@@ -215,6 +215,57 @@ and looks at what UTM lists:
   `osascript -e 'quit app "UTM"' && open -g -a UTM`;
 - **another command is already restarting UTM**: exit 6. Run it again.
 
+### SSH into a VM
+
+`app-create` runs one program and returns. For a shell, or for anything that
+drives a machine over SSH, turn the guest's own OpenSSH server on:
+
+| command | what it does | undo |
+|---|---|---|
+| **`vm-ssh-create -vm <name>`** | turns on the OpenSSH server in the VM, allows your public key in, waits until port 22 answers from the Mac, and prints `ssh dev@<address>` | `vm-ssh-delete` |
+
+```sh
+irgo-winvm vm-ssh-create -vm z1 -key ~/.ssh/id_ed25519.pub
+ssh -o StrictHostKeyChecking=accept-new dev@192.168.64.12    # its last line
+irgo-winvm vm-ssh-delete -vm z1
+```
+
+- **`-key` is a public key file on the Mac**, `~/.ssh/id_ed25519.pub` unless
+  you say otherwise. It must hold exactly one key. A private key is refused
+  with exit 2 before anything is sent: only the public line ever leaves the
+  Mac. A key already there (same type and key, whatever its comment) is not
+  added twice; run the command once per key to allow several.
+- **In the guest**, as SYSTEM, in this order: install the Windows capability
+  `OpenSSH.Server` if there is no `sshd` service; set `sshd` to start
+  automatically and start it; add the firewall rule `irgo-winvm: SSH from the
+  host` (TCP 22, from the local subnet, every profile) and turn off Windows'
+  own rule, which is for any address; put the key in
+  `C:\ProgramData\ssh\administrators_authorized_keys`, writable only by
+  Administrators and SYSTEM, which is where sshd reads an administrator's
+  keys. `-user` (default `dev`) must be an administrator. sshd's own
+  configuration is not touched.
+- **Cheap to repeat.** Each step prints `ok` when it was already so, and the
+  run ends `ssh: already on, nothing changed`. The first run is the slow one:
+  the capability comes from Windows Update and takes minutes, which is what
+  `-timeout` (20 minutes) is for.
+- **The last line is the command, alone on its line**, so it can be copied or
+  captured. It is printed only after an SSH server answered at that address
+  from the Mac. The address is the guest's own (`ipconfig`), given by DHCP: it
+  can change when the VM restarts, and running the command again prints the
+  current one.
+- **It exits** 2 for a key or `-user` it cannot use, 3 and 4 as everywhere,
+  6 while another command holds the VM, and 1 when the guest's script failed
+  or nothing answered on port 22; the script's own lines say which step.
+- **`vm-ssh-delete`** stops and disables `sshd`, ends its sessions, removes
+  the firewall rule and **every** authorized key, and checks from the Mac that
+  port 22 no longer answers. The capability stays installed, so the next
+  `vm-ssh-create` takes seconds. A VM that does not exist is nothing to undo.
+
+Who can reach that port, and what else lets them in, is in the
+[threat model](THREAT-MODEL.md#ssh-into-a-guest). How it is built, and what of
+it has been run against a guest, is in
+[Architecture](ARCHITECTURE.md#ssh-into-the-guest).
+
 ## The golden image
 
 A golden image is an installed Windows, sealed once, that every new VM is
@@ -409,8 +460,8 @@ is taken, and told to make a VM of their own:
 the identity came from, created, last used, and the pid of the `vm-create`
 still making it. It is written before the clone or install starts, so a create
 that is killed still leaves an owner, and removed again if no VM came of it.
-`app-create`, `app-delete`, `vm-repair`, `vm-screen` and `glaze-check -windows`
-move "last used"; `vm-delete` removes the record. A VM without a record —
+`app-create`, `app-delete`, `vm-repair`, `vm-screen`, `vm-ssh-create`,
+`vm-ssh-delete` and `glaze-check -windows` move "last used"; `vm-delete` removes the record. A VM without a record —
 `irgo-win11`, the golden image, anything made before records — has no known
 owner and is never reaped. `status` lists every VM UTM knows with its owner,
 last use and idle time, and any record whose VM is gone; `doctor` counts the

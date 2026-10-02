@@ -53,6 +53,13 @@ A VM in seconds, once one has been installed the slow way:
                        licence forbids sharing it, and every clone needs its
                        own licence
 
+A shell in the VM instead of one program:
+
+     vm-ssh-create  turn on the OpenSSH server in the VM, allow your public
+                    key in (-key, default ~/.ssh/id_ed25519.pub), and print
+                    the ssh line to use
+     vm-ssh-delete  turn it off again and remove every authorized key
+
 When something is wrong:
 
      vm-screen    save a PNG of the VM's screen — the only way to see a

@@ -171,7 +171,7 @@ func TestStartRestartsUTMOnlyOnce(t *testing.T) {
 // Negative control, run by hand: ignore u.lock()'s error in recoverUTM and
 // this one goes on to the restart, then panics releasing a lock it never had.
 func TestStartRefusesWhileAnotherCommandRestartsUTM(t *testing.T) {
-	f := &fakeUTM{starts: []string{sayTimedOut, ""}, entries: stopped("a1"), lockErr: busy(UTMRestartLock)}
+	f := &fakeUTM{starts: []string{sayTimedOut, ""}, entries: stopped("a1"), lockErr: busy(UTMLaunchLock)}
 	err := f.starter().startWithDisplay("a1", f.say)
 	if got, want := f.did(), "start a1"; got != want {
 		t.Errorf("did:  %s\nwant: %s", got, want)

@@ -3,10 +3,10 @@ package utmvm
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -225,7 +225,7 @@ func pushRaw(vmRef, localPath, guestPath string) error {
 	}
 	defer func() { _ = f.Close() }() // read-only
 
-	cmd := exec.Command(utmctlPath(), "file", "push", vmRef, guestPath)
+	cmd := utmCommand(context.Background(), utmctlPath(), "file", "push", vmRef, guestPath)
 	cmd.Stdin = f
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
@@ -237,7 +237,7 @@ func pushRaw(vmRef, localPath, guestPath string) error {
 
 // Pull reads a file out of the guest.
 func Pull(vmRef, guestPath string) ([]byte, error) {
-	cmd := exec.Command(utmctlPath(), "file", "pull", vmRef, guestPath)
+	cmd := utmCommand(context.Background(), utmctlPath(), "file", "pull", vmRef, guestPath)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

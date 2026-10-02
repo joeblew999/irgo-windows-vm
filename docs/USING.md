@@ -201,9 +201,22 @@ waiting out its timeout. `vm-repair` also re-applies the desktop settings
 described in [Desktop hygiene](TESTING.md#desktop-hygiene) and the SMB share
 (`-share=false` removes it).
 
+### When UTM is not running
+
+Any command that needs UTM opens it, in the background, and waits two seconds
+before asking it anything, saying so as it does: `UTM is not running: opening
+/Applications/UTM.app in the background, then waiting 2s before asking it
+anything`. A UTM that a request has to launch, or that gets one as it
+launches, can stop answering VM starts
+([the trap](TRAPS.md#host-utm-and-the-iso)). So open it that way yourself, or
+leave it to the command, and do not run `utmctl` or an AppleScript against a
+closed UTM. A second command arriving meanwhile waits for the first, up to
+30 s, then fails as busy.
+
 ### When UTM does not answer
 
-UTM can be up and not answer a request to start a VM. A command that boots one
+UTM can be up and not answer a request to start a VM, when something outside
+this tool launched it with a request. A command that boots one
 (`vm-create`, `app-create` on a stopped VM) then waits two minutes, says so,
 and looks at what UTM lists:
 
@@ -212,7 +225,7 @@ and looks at what UTM lists:
 - **any VM is not stopped**, or the list cannot be read: it does not restart
   UTM, since that stops every VM UTM runs. It exits 1 naming the VMs that are
   up and the command to run once they can be stopped:
-  `osascript -e 'quit app "UTM"' && open -g -a UTM`;
+  `osascript -e 'quit app "UTM"' && sleep 2 && open -g -a UTM && sleep 2`;
 - **another command is already restarting UTM**: exit 6. Run it again.
 
 ### SSH into a VM

@@ -32,6 +32,7 @@ so the distinction stays visible.
 | [`ip-address` hangs rather than failing](#utmctl-ip-address-hangs-rather-than-failing) | UTM | medium | `FILED` 1 Oct 2026 | [UTM#7935](https://github.com/utmapp/UTM/issues/7935) |
 | [a rejected config names no field](#a-rejected-config-names-no-field) | UTM | medium | `FILED` 1 Oct 2026 (feature request) | [UTM#7936](https://github.com/utmapp/UTM/issues/7936) |
 | [the guest agent stops answering](#the-guest-agent-stops-answering) | UTM (unconfirmed) | — | `OPEN` — cause not isolated | — |
+| [UTM stops answering start requests](#utm-stops-answering-start-requests) once an AppleEvent from outside its bundle has launched it | UTM | high | `FOUND HERE` 2 Oct 2026, reproduced on demand, ready to file, not reported | — |
 
 What was sent, and the exact text, is recorded in
 `.plans/2026-09-30_1800_upstream-reports.md` and
@@ -51,7 +52,8 @@ Chosen so that none of them overstates progress:
 **Reported upstream by this project:** glaze#34 (30 Sep 2026), then on
 1 Oct 2026 glaze#35, #37, #39, native#9 and UTM#7932–#7936, with PRs glaze#36,
 #38, #40 and native#10. Still unreported: §5, §6 and the guest agent entry,
-whose causes are not isolated. glaze#31 is the same defect as
+whose causes are not isolated, and UTM not answering starts, which has a
+reproduction and is ready to file. glaze#31 is the same defect as
 §1, filed on 12 Aug 2026 by **@nako-ruru**, who hit it independently twelve days
 after it was diagnosed here; the maintainer's fix for *that* report is what
 shipped. Unreported findings get fixed on someone else's schedule, or not at
@@ -590,25 +592,76 @@ then, a report would cost a maintainer time without being actionable.
 
 ### UTM stops answering start requests
 
-**Status:** `OPEN` — seen once, cause not isolated, not reproduced. Not
-filable as a UTM bug yet.
+**Severity:** high. One request at the wrong moment and no VM can be started
+until UTM is quit, which stops every VM it runs; nothing says so, and `list`
+and `status` go on answering.
 
-**Summary.** 2 Oct 2026, UTM 4.7.5: UTM had been closed down earlier to free
-memory and its process was still there. `utmctl list` and `utmctl status <vm>`
-answered at once; `utmctl start <vm>` and `utmctl ip-address <vm>` failed with
-`OSStatus error -1712`, and AppleScript's `start virtual machine named …`
-returned `UTM got an error: AppleEvent timed out. (-1712)` after two minutes.
-No VM was running. `osascript -e 'quit app "UTM"'`, `open -g -a UTM`, and the
-same `utmctl start` then worked at once. The tool's log has no earlier `-1712`.
+**Status:** `FOUND HERE` 2 Oct 2026 — reproduced on demand, cause in UTM not
+isolated. Ready to file; not filed.
 
-**Not established.** What put UTM in that state (closing its window, memory
-pressure, something else), and whether `list` and `status` report a VM's real
-state while it is in it.
+**Summary.** UTM 4.7.5, macOS 27.0 on Apple Silicon. When UTM is launched by
+an AppleEvent from outside its bundle, it answers that event and then never
+answers a request to start a VM: `utmctl start <vm>` and
+`utmctl ip-address <vm>` fail with `OSStatus error -1712`, and AppleScript's
+`start virtual machine named …` returns
+`UTM got an error: AppleEvent timed out. (-1712)` after two minutes.
+`utmctl list` and `utmctl status <vm>` answer at once throughout. Quitting UTM
+and opening it with `open` clears it.
 
-**In this repository.** `StartWithDisplay` restarts UTM once and starts the VM
-again, only when UTM lists every VM as stopped
-(`internal/utmvm/vm_start.go`). That is covered by unit tests against a fake;
-it has not been run against a UTM in this state.
+**Reproduction.** Each line from a UTM that is not running, with one stopped
+VM; `utmctl` is `/Applications/UTM.app/Contents/MacOS/utmctl`.
+
+```sh
+# hangs: the AppleScript launches UTM                              (4 of 4)
+osascript -e 'quit app "UTM"'; sleep 2
+osascript -e 'tell application "UTM" to count virtual machines'   # answers: 3
+utmctl start <vm>                                                 # no answer; -1712
+
+# works: UTM is opened first                                      (3 of 3)
+osascript -e 'quit app "UTM"'; sleep 2
+open -g -a UTM
+osascript -e 'tell application "UTM" to count virtual machines'
+utmctl start <vm>                                                 # running in 2.7 s
+```
+
+The same through Homebrew's symlink, `/opt/homebrew/bin/utmctl`, which is how
+most people run it:
+
+```sh
+# hangs                                                           (10 of 10)
+osascript -e 'quit app "UTM"'; sleep 2
+open -g -a UTM; /opt/homebrew/bin/utmctl list; /opt/homebrew/bin/utmctl start <vm>
+
+# works                                                           (17 of 17, sleeping 0.3 s to 8 s)
+osascript -e 'quit app "UTM"'; sleep 2
+open -g -a UTM; sleep 1; /opt/homebrew/bin/utmctl list; /opt/homebrew/bin/utmctl start <vm>
+```
+
+`/opt/homebrew/bin/utmctl list` against a closed UTM, with no `open`, hangs
+the later start too (2 of 2). The same `utmctl` run by its path inside
+UTM.app did none of this: against a closed UTM (`list` 4 of 4, `start` 2 of
+2) and at 0 s after `open` (4 of 4) the start that followed worked. Every
+count is in
+[RESULTS.md](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026).
+
+**Not established.** What in UTM is left undone. The senders that do the harm
+(`osascript`, `utmctl` through a symlink) are outside UTM's bundle and the one
+that does not is inside it, which is a pattern, not a cause: `utmctl` resolves
+the symlink before it looks for UTM.app (`utmctl/UTMCtl.swift`, `utmAppUrl`),
+and launches UTM with `launchFlags = [.defaults, .andHide]` either way.
+Whether `list` and `status` report a VM's real state in a UTM in this state is
+not known either. Not searched for upstream yet: do that before filing.
+
+**In this repository.** The first request of `vm-create` and of `capacity` is
+an AppleScript, so either of them, run with UTM closed, did this to itself:
+it is the failure of 2 Oct 2026, when `vm-create` cloned in 2.2 s and then
+waited two minutes for a start. Now every request goes through `utmCommand`,
+which asks macOS whether UTM is running and, if not, opens it and sends
+nothing for two seconds (`internal/utmvm/vm_utm_open.go`). For a UTM
+something else put in this state, `StartWithDisplay` restarts UTM once and
+starts the VM again, only when UTM lists every VM as stopped
+(`internal/utmvm/vm_start.go`); that recovery is covered by unit tests
+against a fake and has not been run against a UTM in this state.
 
 ## Not bugs
 

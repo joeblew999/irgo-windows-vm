@@ -1,9 +1,9 @@
 package utmvm
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -174,7 +174,7 @@ func Delete(ref string, force bool, log func(string, ...any)) (Removal, error) {
 	// this worked on the machine that wrote it). Found by name, a missing
 	// utmctl failed here in silence and the RemoveAll below made exactly the
 	// phantom this comment is about.
-	_ = exec.Command(utmctlPath(), "delete", r.UUID).Run()
+	_ = utmCommand(context.Background(), utmctlPath(), "delete", r.UUID).Run()
 	if _, err := os.Stat(r.Path); err == nil {
 		step("… UTM left the bundle behind; removing it")
 		if rmErr := os.RemoveAll(r.Path); rmErr != nil {

@@ -34,13 +34,54 @@ Each stage owns its own paths and constants, in its own files:
 
 A change that makes one stage reach into another's paths is a design error.
 
-### Scope: Windows only
+### Scope: Windows, and Linux to SSH into
 
 Windows is the platform whose behaviour cannot be checked by reading code on a
-Mac, and everything here — the answer file, ISO mastering, the guest agent, the
-session model — is Windows-specific. Linux guests would need their own image
-and path and are not built. The `linux` builds in CI exist only so the tool
-compiles for a developer on another OS.
+Mac, and it is what the three stages are for: the answer file, ISO mastering,
+the session model and the app stage are Windows-specific.
+
+A **Linux guest** is the vm stage alone. `vm-create -os linux` makes an Ubuntu
+Server VM from Ubuntu's cloud image, with no iso stage before it (there is no
+installer) and no app stage after it yet: it is reached over SSH
+([A Linux VM](USING.md#a-linux-vm)). It uses the same bundle, import, start,
+guest agent, locks, records and capacity guard as a Windows VM, and differs
+only in [the guest description](#the-guest-description) and in
+`internal/utmvm/linux_vm.go`, which fetches and converts the image and builds
+the seed. Not built: a Linux golden image and clones, `app-create` for a Linux
+binary, `vm-check` on Linux, and remote jobs; the plan and its phases are
+`.plans/2026-10-02_1950_linux-vms.md`.
+
+The tool itself runs on macOS only. The `linux` builds in CI exist so that it
+compiles for a developer on another OS; Linux as a *host* is
+[issue #7](https://github.com/joeblew999/irgo-windows-vm/issues/7).
+
+### The guest description
+
+What the shared code asks of the system inside a VM is one type, `guestOS`
+(`internal/utmvm/guest.go`), with a value for each system: `windowsGuest` and
+`linuxGuest`. An operation that runs something in a guest takes the
+description of the VM it is given and keeps one body:
+
+| the question | Windows | Linux |
+|---|---|---|
+| scratch for one command; what outlasts it | `C:\Windows\Temp`; `C:\Users\Public` | `/tmp`; `/var/tmp` |
+| a script, and what runs it | a `.bat`, by `cmd.exe /c` | a `.sh`, by `/bin/sh` |
+| output and exit code back (`utmctl exec` returns neither) | `batchSteps` | `shSteps` |
+| the guest's own addresses | `ipconfig` | `ip -4 -o addr show scope global`, after a header line |
+| the script that turns SSH on | `vm-ssh.ps1`, as SYSTEM | `vm-ssh.sh`, as root |
+| the machine: system disk, display, TPM, clock, memory | NVMe, `virtio-ramfb-gl`, TPM, local time, 8 GiB | VirtIO, `virtio-ramfb`, no TPM, UTC, 2 GiB |
+
+`appExecSteps`, `VMSSHCreate`, `VMSSHDelete`, `EnsureReady` and the plist
+(`Config.Plist`, one template) read it. The app stage's own code (`-gui`,
+`vm-repair`, the share, the seal) names `windowsGuest` directly, because it is
+Windows only; a command declared `WindowsGuest` in `command.All` is refused on
+a Linux VM in `runTool`, before it takes a lock.
+
+**Which system a VM holds is in its record** (`vms/<name>.json`, the `os`
+field), written by `vm-create` and read by `guestOf`. Three answers: the
+record says; there is no record or no field, which is Windows (every VM made
+before the field); or the record cannot be read, which is cannot tell and
+refuses (`ErrGuestOS`).
 
 ## Repository layout
 
@@ -87,7 +128,8 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
 
 ```
 ~/Library/Application Support/irgo-winvm/
-  media/    the ISO, the .esd it was built from, and scratch
+  media/    the ISO, the .esd it was built from, and scratch; the pinned
+            Ubuntu cloud image, once a Linux VM has been made
   bin/      binaries staged into a VM, one directory per caller
   logs/     every command, appended across runs
   shots/    a screenshot per stage of every run
@@ -287,8 +329,8 @@ still answers), pointing at `remote-submit`.
 
 What a VM costs the Mac, and how many are allowed, is one model in
 `internal/utmvm/capacity_model.go`: the memory of `irgo-win11` and installs
-(8 GiB) and of clones (4 GiB, which `cloneVM` sets in UTM's configuration and
-reads back), the memory and disk kept
+(8 GiB), of clones (4 GiB, which `cloneVM` sets in UTM's configuration and
+reads back) and of Linux VMs (2 GiB), the memory and disk kept
 for macOS, the reserve each clone may grow into, the install reserve, and the
 per-owner quota. Three readers, one answer: `vm-create`'s guard
 (`vm_capacity.go`, three-way, cannot tell refuses with exit 7), `capacity`
@@ -462,7 +504,10 @@ through the grants above.
 What `vm-ssh-create` and `vm-ssh-delete` do for their user is in
 [Using it](USING.md#ssh-into-a-vm). `VMSSHCreate` and `VMSSHDelete`
 (`internal/utmvm/vm_ssh.go`) are the whole of it, and everything in the guest
-is one script, `assets/vm-ssh.ps1`, whose `-Remove` is the undo.
+is one script, whose `-Remove` is the undo: `assets/vm-ssh.ps1` in a Windows
+guest and `assets/vm-ssh.sh` in a Linux one, taking the same arguments
+([the guest description](#the-guest-description)). What follows is the
+Windows guest; the Linux differences are the last item.
 
 - **It runs the way `vm-repair` does**: the script is pushed and run as SYSTEM
   through the guest agent in a batch that captures its output and exit code
@@ -488,6 +533,11 @@ is one script, `assets/vm-ssh.ps1`, whose `-Remove` is the undo.
 - **Our own firewall rule, as for [the share](#how-a-binary-gets-into-the-guest)**:
   local subnet only, every profile, with Windows' own rule turned off so there
   is one way in and the undo leaves the port closed.
+- **In a Linux guest** the script runs as root by `/bin/sh`; the address
+  comes from `ip -4 -o addr`; there is no firewall rule to add, because the
+  image has no firewall; and the script does write sshd's configuration, one
+  file of its own that refuses passwords, checked with `sshd -T`. Ubuntu
+  listens with `ssh.socket`, so that is the unit enabled and disabled.
 
 **What has been run.** The Go side is unit-tested (the key parser, the banner
 check against listeners on loopback, the split of the script's output from
@@ -496,7 +546,50 @@ on 2 Oct 2026, on a fresh clone (Windows 11 ARM64 26100.4349): first run,
 login over SSH, a repeat, the undo and the undo again. The numbers are in
 [RESULTS.md](RESULTS.md#ssh-into-a-clone--measured-2-oct-2026). Not run: a
 guest account that is not an administrator, a key other than ed25519, and an
-x64 guest.
+x64 guest. The Linux script was run the same day on a VM made by
+`vm-create -os linux`
+([RESULTS.md](RESULTS.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026));
+not run: an account other than `dev`, a guest with `ufw` active, and a
+distribution other than Ubuntu 24.04.
+
+## A Linux VM from the cloud image
+
+What `vm-create -os linux` gives its user is in
+[Using it](USING.md#a-linux-vm). `vmCreateLinux` (`internal/utmvm/linux_vm.go`)
+is the whole of it, entered from `VMCreate` after the UTM step:
+
+1. **The image**, in `media/` (`ensureLinuxImage`): one dated release pinned
+   by URL and SHA-256. A download goes through `isoDownload`, which resumes
+   and renames only on a matching hash; a file already there is hashed again
+   every time, about a second.
+2. **The bundle** (`createLinuxBundle`), under the machine lock, in
+   `vm/staging/`, imported by UTM like a Windows one:
+   - `Data/disk.img`: the qcow2 image converted to a raw sparse file by
+     [lima-vm/go-qcow2reader](https://github.com/lima-vm/go-qcow2reader)
+     (pure Go; UTM's own `qemu-img` cannot be run from outside it) and
+     extended to 64 GiB. Raw, because it is the one kind of disk the capacity
+     model measures and UTM clones. Checked: its size, and a GPT signature
+     where the firmware looks.
+   - `Data/seed.iso`: `user-data` (`assets/linux-user-data.yaml`, the same
+     for every VM) and a `meta-data` naming this one, written by
+     `isoBuildImage` under the label `cidata`. Attached as a **VirtIO** CD:
+     on a USB one cloud-init never saw it
+     ([traps](TRAPS.md#host-utm-and-the-iso)). It stays attached.
+   - `config.plist`: the one template, with `linuxGuest`'s values.
+3. **The first boot**, through `EnsureReady` like any boot. Nothing is typed:
+   the firmware boots the disk by itself. cloud-init makes the account,
+   installs `qemu-guest-agent` and turns the image's sshd off. Until the
+   agent is installed the VM cannot be told from one that will never answer,
+   so it gets ten minutes.
+4. **The check** (`assets/vm-linux-check.sh`, run through the agent): waits
+   for cloud-init to finish and requires it to report no error, then that the
+   account exists, can `sudo` with no password and has a locked one, and, on
+   a VM this run made, that nothing listens on port 22 (on one that existed,
+   `vm-ssh-create` may have turned it on, and the check only says which).
+   `vm-create` reports the VM ready only after that.
+
+A VM that exists is booted if it is stopped and checked the same way, so the
+command is as cheap to repeat as for Windows.
 
 ## The golden image: sealing and cloning
 

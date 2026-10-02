@@ -11,6 +11,7 @@ require (
 	github.com/ebitengine/purego v0.11.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/klauspost/compress v1.20.1
+	github.com/lima-vm/go-qcow2reader v0.8.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/sys v0.48.0
 )

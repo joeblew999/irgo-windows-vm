@@ -45,6 +45,10 @@ type VMCreateOptions struct {
 	// NoGolden installs from the ISO even when a golden image exists — which
 	// is how the VM a new golden image is sealed from gets made.
 	NoGolden bool
+
+	// OS is the system to make: GuestWindows, which empty also means, or
+	// GuestLinux. For a VM that exists it is the system its record says.
+	OS string
 }
 
 // VMCreateStage is one step, and what happened to it.
@@ -80,6 +84,9 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	last := time.Now()
 	step := 0
 	steps := 7 // 2 for a clone of the golden image
+	if opts.OS == GuestLinux {
+		steps = 6 // 4 for a VM that exists (linux_vm.go)
+	}
 
 	// bootWait is how long an already-installed VM gets to answer before
 	// vm-create gives up and says so. Two minutes, not ten: booting Windows
@@ -125,6 +132,12 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	}
 	if err := stage("UTM", true, in.Version+" at "+in.Path, nil); err != nil {
 		return res, err
+	}
+
+	// A Linux VM shares that step and nothing after it: no installer, no
+	// guest tools CD, no boot to drive (linux_vm.go).
+	if opts.OS == GuestLinux {
+		return res, vmCreateLinux(opts, &res, &steps, begin, stage, say)
 	}
 
 	// A new VM comes from the golden image when there is one: a clone in
@@ -469,7 +482,7 @@ func Create(opts Options) (string, error) {
 	// was once guarded by checking newUUID's error; it has none now, because
 	// crypto/rand.Read cannot fail (see newUUID).
 	cfg.Drives = append(cfg.Drives,
-		Drive{ID: newUUID(), ImageName: diskImage, Type: DriveDisk, Interface: IfaceNVMe},
+		Drive{ID: newUUID(), ImageName: diskImage, Type: DriveDisk, Interface: windowsGuest.diskIface},
 		Drive{ID: newUUID(), ImageName: installISO, Type: DriveCD, Interface: IfaceUSB, ReadOnly: true},
 	)
 
@@ -626,10 +639,25 @@ type Config struct {
 	// Drives are emitted in order. Order matters: UTM assigns bootindex by
 	// position, so the install medium must precede anything optional.
 	Drives []Drive
+
+	// guest is the system the machine is for (guest.go): its icon and note,
+	// TPM, clock and display. The zero value is Windows.
+	guest guestOS
+}
+
+// system is the guest this config is for: Windows unless it says otherwise.
+func (c Config) system() guestOS {
+	if c.guest.name == "" {
+		return windowsGuest
+	}
+	return c.guest
 }
 
 // DisplayHardware is the display device this config will use.
 func (c Config) DisplayHardware() string {
+	if d := c.system().display; d != "" {
+		return d
+	}
 	if c.NoGPUAccel {
 		return displayRAMFB
 	}
@@ -657,8 +685,10 @@ const (
 	// NVMe is required for the Windows system disk: Windows ARM64 has no inbox
 	// VirtIO driver, so a VirtIO disk is invisible to Setup and it reports that
 	// no drive can be found.
-	IfaceNVMe   DriveInterface = "NVMe"
-	IfaceUSB    DriveInterface = "USB"
+	IfaceNVMe DriveInterface = "NVMe"
+	IfaceUSB  DriveInterface = "USB"
+	// VirtIO is a Linux guest's system disk, and its seed CD: as a USB CD
+	// cloud-init never saw the seed (linux_vm.go).
 	IfaceVirtIO DriveInterface = "VirtIO"
 )
 
@@ -724,20 +754,26 @@ func (c Config) Plist() (string, error) {
 
 	var drives strings.Builder
 	for _, d := range c.Drives {
-		ro := "false"
-		if d.ReadOnly {
-			ro = "true"
-		}
-		_, _ = fmt.Fprintf(&drives, driveTemplate, d.ID, d.ImageName, d.Type, d.Interface, ro)
+		_, _ = fmt.Fprintf(&drives, driveTemplate, d.ID, d.ImageName, d.Type, d.Interface, plistBool(d.ReadOnly))
 	}
 
+	g := c.system()
 	return fmt.Sprintf(plistTemplate,
-		xmlEscape(c.Name), c.UUID,
+		xmlEscape(c.Name), c.UUID, g.icon, xmlEscape(g.notes),
 		c.MemoryMiB, c.CPUCount,
+		plistBool(g.tpm), plistBool(g.localClock),
 		drives.String(),
 		c.DisplayHardware(),
 		c.MACAddress,
 	), nil
+}
+
+// plistBool is a boolean as a plist element's name.
+func plistBool(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // xmlEscape covers the characters a VM name can plausibly contain. The plist is
@@ -823,7 +859,7 @@ func BuildPayload(imagePath string, opts PayloadOptions) error {
 	// encoding mangles names inside nested directories into UCS-2 garbage —
 	// root entries survive intact. Flat is uglier and it works.
 
-	return isoBuildImage(imagePath, stage, opts.SizeMiB)
+	return isoBuildImage(imagePath, stage, opts.SizeMiB, unattendLabel)
 }
 
 // Phase is where an unattended install has got to, inferred from the host side

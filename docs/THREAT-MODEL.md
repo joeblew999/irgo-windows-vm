@@ -133,7 +133,9 @@ none listening there. What that adds, and what it does not:
 
 **What it opens.** TCP 22 in that one VM, by a firewall rule that allows the
 guest's local subnet only, and `sshd` started and set to start at boot. It
-stays open across reboots until `vm-ssh-delete` or the VM's deletion.
+stays open across reboots until `vm-ssh-delete` or the VM's deletion. In a
+[Linux VM](USING.md#a-linux-vm) there is no firewall and none is added: the
+port is open on every address the guest has.
 
 **Who can reach it.** The VM is on UTM's Shared Network: a private subnet on
 the Mac (the guest's address is `192.168.64.x`, the Mac's `192.168.64.1`)
@@ -158,6 +160,15 @@ RDP and the file share already are on this VM. The key is so that you can log
 in without typing; it is not what keeps others out. What keeps others out is
 that only the Mac and its VMs can reach the port.
 
+**A Linux VM is stricter, and here the key is what keeps others out.** The
+script writes `PasswordAuthentication no` and
+`KbdInteractiveAuthentication no` into a file of its own under
+`sshd_config.d`, and fails unless `sshd -T` then reports passwords refused;
+`dev`'s password is locked, so there is none to guess; and root has no key. A
+login attempt with a password was refused with `Permission denied
+(publickey)` (2 Oct 2026). The account can `sudo` without a password, so
+whoever holds the key is root in that VM.
+
 **What is defended:**
 
 - **No private key leaves the Mac, or is read at all.** `-key` takes a public
@@ -165,7 +176,11 @@ that only the Mac and its VMs can reach the port.
   and only the one parsed public line is pushed. Nothing generates or stores a
   key pair.
 - **The authorized-keys file is writable only by Administrators and SYSTEM**,
-  which is also the condition under which sshd will read it.
+  which is also the condition under which sshd will read it. On Linux it is
+  the account's own, mode 600 in a 700 directory.
+- **A new Linux VM has the port closed.** Ubuntu's image listens on 22 from
+  its first boot; `vm-create` turns that off and fails unless nothing is
+  listening.
 - **One caller per VM.** The command takes the VM's lock and is refused the
   owner's VM by default, like `app-create`; ownership is a label, not
   authentication, as everywhere here.
@@ -184,3 +199,6 @@ that only the Mac and its VMs can reach the port.
 - **A golden image sealed with SSH on.** Its clones would all carry the same
   host keys and the same authorized keys. Seal a VM that never had
   `vm-ssh-create` run on it.
+- **A Linux VM trusts Ubuntu's archive on its first boot.** The guest agent is
+  installed from it by `apt`, with `apt`'s own signature checks and nothing
+  more; the cloud image itself is checked against a pinned SHA-256.

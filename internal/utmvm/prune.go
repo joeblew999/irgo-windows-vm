@@ -159,6 +159,19 @@ func PrunePlan(p PrunePolicy, now time.Time) []PruneItem {
 			left = append(left, struct{ kind, path string }{"staged bundles", filepath.Join(stagingDir(), e.Name())})
 		}
 	}
+	// Linux cloud images of a pin this version no longer uses: vm-create
+	// fetches the pinned one by name and never reads another.
+	if es, err := os.ReadDir(ISODir()); err == nil {
+		for _, e := range es {
+			n := e.Name()
+			if e.IsDir() || !strings.HasPrefix(n, linuxImagePrefix) || n == linuxImageName {
+				continue
+			}
+			path := filepath.Join(ISODir(), n)
+			out = append(out, PruneItem{Kind: "old Linux images", Path: path, Bytes: privateBytes(path),
+				Why: "not the image this version is pinned to, " + linuxImageName, lock: MachineLock})
+		}
+	}
 	for _, l := range left {
 		fi, err := os.Stat(l.path)
 		if err != nil || p.LeftAge <= 0 || now.Sub(fi.ModTime()) <= p.LeftAge {

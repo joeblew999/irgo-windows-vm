@@ -33,6 +33,9 @@ deleting nothing is success.
   and returns. Over HTTP, `app-upload` stages a binary for it
   ([For agents](FOR-AGENTS.md#over-http)).
 
+**A Linux VM** is the same second step with `-os linux`, and has no first or
+third step yet: [A Linux VM](#a-linux-vm).
+
 Long work returns a job instead of blocking: `vm-create -install` (about 45
 minutes), `iso-create -fetch`, and the `vm-golden-*` commands. The job outlives
 the terminal or client that started it; `status` reports what is running, what
@@ -88,7 +91,7 @@ thing:
 |---|---|
 | **0** | it worked — including `-h`, and an undo that found nothing to undo |
 | **1** | your program ran and failed |
-| **2** | the command was called wrongly |
+| **2** | the command was called wrongly, a Windows-only command on a Linux VM included |
 | **3** | that VM does not exist |
 | **4** | the VM is there, the guest agent is not answering |
 | **5** | refused — a destructive command without `-force` |
@@ -127,6 +130,7 @@ intends to close.
 | `iso-create -fetch` | minutes, and the 4.2 GB `.esd` below | downloaded once; a rebuild from the kept `.esd` needs no network ([measured](RESULTS.md#the-iso-scan-verdict-is-recorded-at-build-time--13-aug-2026)) |
 | `vm-create -install` | **about 45 minutes** | an estimate, not a measurement — unattended, you click nothing |
 | `vm-create` from a golden image | **about 23 s** to an answering agent | [measured](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
+| `vm-create -os linux -install` | **1 min 42 s** with the 620 MB download, about a minute without | [measured](RESULTS.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
 | `app-create` | seconds | [measured](RESULTS.md#the-inner-loop-works), cross-compiled on the Mac with no toolchain |
 
 | on disk | size | |
@@ -136,7 +140,10 @@ intends to close.
 | the built ISO | **~4.9 GB** | cloned into the VM (APFS), not copied |
 | the installed VM | **~30 GiB** | on a 64 GiB sparse disk |
 
-About **33 GB** once installed. `iso-delete` keeps the `.esd` unless you pass
+| the Ubuntu cloud image | **0.6 GB** | only for a Linux VM; downloaded once, kept in `media/` |
+| a Linux VM | **2.5 GiB** new, 5.6 GiB with the claude-rig tools in it | on a 64 GiB sparse disk |
+
+About **33 GB** once Windows is installed. `iso-delete` keeps the `.esd` unless you pass
 `-all`, because rebuilding the ISO from it is local work, while losing it means
 downloading 4.2 GB again.
 
@@ -169,6 +176,58 @@ password that never expires.
 
 Binaries reach the guest over an SMB share the guest serves, in about a second
 for 8 MB ([how](ARCHITECTURE.md#how-a-binary-gets-into-the-guest)).
+
+### A Linux VM
+
+```sh
+irgo-winvm vm-create -os linux -vm rig-linux -install   # about a minute, after one 620 MB download
+irgo-winvm vm-ssh-create -vm rig-linux                  # seconds; its last line is `ssh dev@<address>`
+irgo-winvm vm-ssh-delete -vm rig-linux
+irgo-winvm vm-delete -vm rig-linux -force
+```
+
+`vm-create -os linux` makes an **Ubuntu Server 24.04 ARM64** machine from
+Ubuntu's own cloud image: a real machine with systemd to SSH into, which is
+what [claude-rig](https://github.com/joeblew999/claude-rig) tests on. There is
+no installer and nothing is typed. The image is an installed system; its first
+boot creates the account and installs the guest agent, and the command returns
+when that has finished and been checked.
+
+- **`-os` is given once, where the VM is made.** It is recorded with the VM
+  (`status` and `capacity` show it), and every other command reads it from
+  there, so none of them has an `-os` flag. On a VM that exists, an `-os` that
+  disagrees is exit 2. A VM made before this, or with no record, is Windows.
+- **`-vm` is required**: `irgo-win11` is the Windows VM and there is no default
+  Linux one. `-install` is required to make it: without it the command says
+  what it would do and stops. There is no Linux golden image yet, so every
+  Linux VM is made from the cloud image; `-golden` changes nothing.
+- **The image is pinned**: the release of 26 Sep 2026, checked against its
+  SHA-256 when it is downloaded and again each time it is used. Not Ubuntu's
+  `current`, which changes daily, for the same reason the VM's shape is fixed.
+- **The account is `dev`**, in `sudo` with no password asked, and with **no
+  password at all**: it is locked, so nothing can log in with one. The way in
+  is a key, through `vm-ssh-create`.
+- **SSH is off until you turn it on.** Ubuntu's image listens on port 22 from
+  its first boot; `vm-create` turns that off and checks nothing is listening,
+  so `vm-ssh-create` and its undo mean the same on both systems.
+- **Its shape**: 2048 MiB of memory (275 MiB in use after its first boot),
+  4 CPUs, a 64 GiB sparse disk that the first boot grows the root partition
+  into, the clock in UTC, no TPM.
+- **The first boot needs the network**: the guest agent is not in the image
+  and is installed from Ubuntu's archive. An offline Mac cannot make one.
+- **Ubuntu's unattended upgrades are left on**, as a real machine has them.
+  They can hold `apt`'s lock for a while after a boot.
+- **What does not work on it yet**: `app-create`, `app-delete`, `vm-repair`,
+  `vm-check`, `vm-golden-create` and `glaze-check -windows` refuse a Linux VM
+  with exit 2. Run things in it over SSH. `vm-screen`, `vm-delete`, `status`
+  and `capacity` treat it like any VM.
+- **The hostname** is the VM's name, in lower case with anything but letters
+  and digits turned into hyphens.
+
+A VM that starts and never answers is, on a first boot, either still
+installing the agent or one whose first boot did not find its seed
+([traps](TRAPS.md#host-utm-and-the-iso)); `vm-create` waits ten minutes and
+then says so.
 
 ### Why `-gui` exists
 
@@ -248,7 +307,7 @@ irgo-winvm vm-ssh-delete -vm z1
   with exit 2 before anything is sent: only the public line ever leaves the
   Mac. A key already there (same type and key, whatever its comment) is not
   added twice; run the command once per key to allow several.
-- **In the guest**, as SYSTEM, in this order: install the Windows capability
+- **In a Windows guest**, as SYSTEM, in this order: install the Windows capability
   `OpenSSH.Server` if there is no `sshd` service; set `sshd` to start
   automatically and start it; add the firewall rule `irgo-winvm: SSH from the
   host` (TCP 22, from the local subnet, every profile) and turn off Windows'
@@ -257,13 +316,20 @@ irgo-winvm vm-ssh-delete -vm z1
   Administrators and SYSTEM, which is where sshd reads an administrator's
   keys. `-user` (default `dev`) must be an administrator. sshd's own
   configuration is not touched.
+- **In a Linux guest**, as root: generate host keys if there are none; write
+  `/etc/ssh/sshd_config.d/00-irgo-winvm.conf` so that **no password is
+  accepted**, and check with `sshd -T` that sshd agrees; put the key in
+  `-user`'s `~/.ssh/authorized_keys`, readable by that account alone; enable
+  and start `ssh.socket`. There is no firewall on the image, and none is
+  added. The server is already in the image, so the first run is seconds.
 - **Cheap to repeat.** Each step prints `ok` when it was already so, and the
-  run ends `ssh: already on, nothing changed`. The first run is the slow one:
-  the capability comes from Windows Update and takes minutes, which is what
-  `-timeout` (20 minutes) is for.
+  run ends `ssh: already on, nothing changed`. On Windows the first run is
+  the slow one: the capability comes from Windows Update and takes minutes,
+  which is what `-timeout` (20 minutes) is for.
 - **The last line is the command, alone on its line**, so it can be copied or
   captured. It is printed only after an SSH server answered at that address
-  from the Mac. The address is the guest's own (`ipconfig`), given by DHCP: it
+  from the Mac. The address is the guest's own (`ipconfig`, or `ip addr` on
+  Linux), given by DHCP: it
   can change when the VM restarts, and running the command again prints the
   current one.
 - **It exits** 2 for a key or `-user` it cannot use, 3 and 4 as everywhere,
@@ -272,7 +338,10 @@ irgo-winvm vm-ssh-delete -vm z1
 - **`vm-ssh-delete`** stops and disables `sshd`, ends its sessions, removes
   the firewall rule and **every** authorized key, and checks from the Mac that
   port 22 no longer answers. The capability stays installed, so the next
-  `vm-ssh-create` takes seconds. A VM that does not exist is nothing to undo.
+  `vm-ssh-create` takes seconds. On Linux it disables `ssh.socket` and
+  `ssh.service`, ends the sessions, and removes its configuration file and
+  the `authorized_keys` of root and of every account under `/home`. A VM that
+  does not exist is nothing to undo.
 
 Who can reach that port, and what else lets them in, is in the
 [threat model](THREAT-MODEL.md#ssh-into-a-guest). How it is built, and what of
@@ -518,7 +587,9 @@ refuse with exit 7, the numbers, and the running VMs by name.
   on 1 Oct 2026 `irgo-win11` (8192 MiB) had a footprint of 8327 MB, 8051 MB of
   it dirty, with 6.3 GB of the Mac's 7 GB swap in use. **A clone of the golden
   image is made with 4 GiB** (`cloneMemoryMiB`, set in UTM's configuration as
-  it is cloned and read back); `irgo-win11` and installs keep 8 GiB. So a
+  it is cloned and read back); `irgo-win11` and installs keep 8 GiB; **a Linux
+  VM is made with 2 GiB** (`linuxMemoryMiB`), so one fits beside `irgo-win11`
+  or beside a clone, and not beside both running (16 − 8 − 4 − 2 = 2). So a
   16 GiB Mac runs `irgo-win11` and one clone (16 − 8 − 4 = 4 left) and refuses
   a second; 32 GiB runs `irgo-win11` and four. A 4 GiB clone beside
   `irgo-win11` passed `glaze-check -windows` and `vm-check`
@@ -530,7 +601,7 @@ refuse with exit 7, the numbers, and the running VMs by name.
   which keeps macOS, whose swap lives on that volume, out of its low-space
   warnings. A new clone needs `cloneReserveBytes`, **4 GiB**; an install, or a
   pull of the golden image when there is none here, `installReserveBytes`,
-  **30 GiB**. Every VM is allowed to grow to its reserve: one that has written
+  **30 GiB**; a Linux VM from the cloud image `linuxReserveBytes`, **8 GiB**. Every VM is allowed to grow to its reserve: one that has written
   1 GiB of its own is still promised 3, and that space counts as taken. A clone
   measured on 1 Oct 2026 wrote 0.28 GiB of its own through a boot, a
   `glaze-check -windows`, twenty `app-create`s and 90 idle minutes

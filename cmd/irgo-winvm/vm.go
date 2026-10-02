@@ -16,15 +16,17 @@ func vmCreateFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("vm-create", flag.ContinueOnError)
 	fs.String("vm", utmvm.DefaultVMName, "VM name")
 	ownerFlag(fs)
-	fs.Bool("install", false, "run the unattended Windows install (about 45 minutes)")
+	fs.String("os", utmvm.GuestWindows, "the system in a new VM: windows, or linux (Ubuntu Server 24.04 from its cloud image; needs -vm and -install). A VM that exists keeps its own")
+	fs.Bool("install", false, "make the VM when there is no golden image to clone: the unattended Windows install (about 45 minutes), or with -os linux a download and a first boot (about a minute)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
 	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
 	fs.Bool("overcommit", false, "start the VM even when the running VMs' configured memory leaves this Mac too little; they will swap")
 	return fs
 }
 
-// runVMCreate makes a VM and, with -install, installs Windows on it. Every
-// stage is idempotent, so a second run skips what is done and takes seconds.
+// runVMCreate makes a VM and, with -install, installs Windows on it, or with
+// -os linux makes one from Ubuntu's cloud image. Every stage is idempotent,
+// so a second run skips what is done and takes seconds.
 func runVMCreate(v values, _ []string) error {
 	name, install, timeout := v.String("vm"), v.Bool("install"), v.Duration("timeout")
 	say := utmvm.Printer("vm-create")
@@ -33,7 +35,12 @@ func runVMCreate(v values, _ []string) error {
 	if err != nil {
 		return err
 	}
+	osName, err := createOS(v, name)
+	if err != nil {
+		return err
+	}
 	say("vm:     %s", name)
+	say("os:     %s", osName)
 	say("bundle: %s", utmvm.Home(bundle))
 	say("media:  %s", utmvm.Home(utmvm.ISODir()))
 
@@ -42,7 +49,7 @@ func runVMCreate(v values, _ []string) error {
 	// counts against the room (prune.go).
 	autoPrune(say)
 	finish, err := beginCreateReaping(func() (func(), error) {
-		return utmvm.BeginCreate(name, v.caller, !v.Bool("golden"), v.Bool("overcommit"), say)
+		return utmvm.BeginCreate(name, v.caller, osName, !v.Bool("golden"), v.Bool("overcommit"), say)
 	}, say)
 	if err != nil {
 		return err
@@ -55,6 +62,7 @@ func runVMCreate(v values, _ []string) error {
 		Install:  install,
 		Timeout:  timeout,
 		NoGolden: !v.Bool("golden"),
+		OS:       osName,
 	}, func(line string) { say("%s", line) })
 	if err != nil {
 		return err
@@ -65,6 +73,41 @@ func runVMCreate(v values, _ []string) error {
 	}
 	say("%s is not ready yet — see the steps above for what remains", res.VM)
 	return nil
+}
+
+// createOS is the system vm-create is to make or boot: what -os says for a VM
+// that does not exist, and what the VM's record says for one that does. An
+// -os that disagrees with a VM that exists is refused, as is a Linux VM under
+// a name that means Windows to every other command.
+func createOS(v values, name string) (string, error) {
+	want, err := utmvm.GuestOSNamed(v.String("os"))
+	if err != nil {
+		return "", fmt.Errorf("%w: -os %w", errUsage, err)
+	}
+	var osGiven bool
+	v.fs.Visit(func(f *flag.Flag) { osGiven = osGiven || f.Name == "os" })
+	if _, fErr := findVM(name); fErr == nil {
+		have, err := guestOSOf(name)
+		if err != nil {
+			return "", err
+		}
+		if osGiven && have != want {
+			return "", fmt.Errorf("%w: %s is a %s VM, and -os says %s; a VM keeps the system it was made with. "+
+				"Leave -os out, or vm-delete it first", errUsage, name, have, want)
+		}
+		return have, nil
+	}
+	if want == utmvm.GuestWindows {
+		return want, nil
+	}
+	// Leaving -vm out lands here too: the default VM is the first of these.
+	for _, reserved := range []string{utmvm.DefaultVMName, utmvm.GoldenVMName} {
+		if strings.EqualFold(name, reserved) {
+			return "", fmt.Errorf("%w: -os %s needs -vm <name> with a name of its own: %s is a name every command takes "+
+				"to be a Windows VM, and there is no default %s one", errUsage, want, reserved, want)
+		}
+	}
+	return want, nil
 }
 
 func vmDeleteFlags() *flag.FlagSet {
@@ -112,6 +155,13 @@ func runVMDelete(v values, _ []string) error {
 		say("          it is running and will be stopped first")
 	}
 	if !force {
+		// What is lost, which depends on what is in it. A VM whose system
+		// cannot be told is described as the expensive one.
+		if os, oErr := guestOSOf(name); oErr == nil && os == utmvm.GuestLinux {
+			return fmt.Errorf("%s of VM, and the Linux on it.\n"+
+				"  Making it again is vm-create -os linux -install, about a minute. Pass -force to do it (%w)",
+				utmvm.HumanBytes(r.TotalBytes), errRefused)
+		}
 		return fmt.Errorf("%s of VM, and the Windows on it.\n"+
 			"  Reinstalling takes about 45 minutes. Pass -force to do it (%w)",
 			utmvm.HumanBytes(r.TotalBytes), errRefused)
@@ -276,8 +326,8 @@ func vmSSHCreateFlags() *flag.FlagSet {
 	fs.String("vm", utmvm.DefaultVMName, "VM name or UUID")
 	ownerFlag(fs)
 	fs.String("key", "~/.ssh/id_ed25519.pub", "the public key to authorize: a .pub file on this Mac. Never a private key")
-	fs.String("user", "dev", "the guest account to log in as; it must be an administrator")
-	fs.Duration("timeout", 20*time.Minute, "how long to allow the guest, which installs OpenSSH Server the first time")
+	fs.String("user", "dev", "the guest account to log in as; on Windows it must be an administrator")
+	fs.Duration("timeout", 20*time.Minute, "how long to allow the guest; Windows installs OpenSSH Server the first time, which takes minutes")
 	return fs
 }
 
@@ -287,7 +337,8 @@ var sshUser = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$`)
 
 // runVMSSHCreate turns on the OpenSSH server in a VM, authorizes one public
 // key, waits for port 22 to answer from this Mac, and prints the ssh line. On
-// a VM that already has all of it, it says so and changes nothing.
+// a VM that already has all of it, it says so and changes nothing. Which
+// script does it in the guest follows from the system the VM's record names.
 func runVMSSHCreate(v values, _ []string) error {
 	name, user := v.String("vm"), v.String("user")
 	if !sshUser.MatchString(user) {

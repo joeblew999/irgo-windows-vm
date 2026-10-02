@@ -607,7 +607,10 @@ func isoBuild(opts isoRemasterOptions) error {
 //
 // Joliet is enabled so long filenames survive; plain ISO9660 would truncate
 // autounattend.xml to 8.3 and VMCreate would never find it.
-func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
+//
+// label is the volume's name: nothing reads the answer-file CD's, and
+// cloud-init finds its seed by it.
+func isoBuildImage(imagePath, srcDir string, sizeMiB int, label string) error {
 	if sizeMiB < 16 {
 		sizeMiB = 16
 	}
@@ -624,7 +627,7 @@ func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	fs, err := d.CreateFilesystem(disk.FilesystemSpec{
 		Partition:   0,
 		FSType:      filesystem.TypeISO9660,
-		VolumeLabel: "UNATTEND",
+		VolumeLabel: label,
 	})
 	if err != nil {
 		return fmt.Errorf("create ISO9660: %w", err)
@@ -657,7 +660,7 @@ func isoBuildImage(imagePath, srcDir string, sizeMiB int) error {
 	// Without Finalize the descriptors are never written and the image is not
 	// a readable ISO at all.
 	if err := iso.Finalize(iso9660.FinalizeOptions{
-		VolumeIdentifier: "UNATTEND",
+		VolumeIdentifier: label,
 		RockRidge:        true,
 		// Joliet is what Windows reads. Without it the image is 8.3 only and
 		// autounattend.xml becomes AUTOUNAT.XML — a name Setup never looks for,

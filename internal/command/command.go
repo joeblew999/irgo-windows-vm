@@ -49,6 +49,11 @@ type Command struct {
 	// `remote-submit`, which runs the same work on a Mac elsewhere.
 	MacOnly bool
 
+	// WindowsGuest marks a command that works only on a VM with Windows in
+	// it: what it runs in the guest is a .exe, a batch file or PowerShell.
+	// On a Linux VM it refuses before taking a lock, saying so.
+	WindowsGuest bool
+
 	// OverMCP is false for commands a connected client has no use for:
 	// `commands`, `version` and `help` answer what the protocol already does.
 	OverMCP bool
@@ -83,12 +88,12 @@ const DetachAlways = "(always)"
 // not here does not exist.
 var All = []Command{
 	{Name: "iso-create", Summary: "the Windows installer, from Microsoft with -fetch", Undo: "iso-delete", Locks: LockMachine, Detach: "-fetch", OverMCP: true},
-	{Name: "vm-create", Summary: "a Windows VM, cloned from the golden image or -install", Undo: "vm-delete", Locks: LockVM, Detach: "-install", MacOnly: true, OverMCP: true},
-	{Name: "app-create", Summary: "your .exe pushed into that VM and run, output back", Undo: "app-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "vm-create", Summary: "a Windows VM, cloned from the golden image or -install; -os linux for Ubuntu", Undo: "vm-delete", Locks: LockVM, Detach: "-install", MacOnly: true, OverMCP: true},
+	{Name: "app-create", Summary: "your .exe pushed into that VM and run, output back", Undo: "app-delete", Locks: LockVM, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, MacOnly: true, OverMCP: true},
 	// Sealing is many minutes even with nothing to decrypt, so it is always a
 	// job over MCP.
-	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
 	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
@@ -104,7 +109,7 @@ var All = []Command{
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
 	{Name: "vm-delete", Summary: "remove the VM", IsUndo: true, Locks: LockVM, Destructive: true, MacOnly: true, OverMCP: true},
-	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, OverMCP: true},
+	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	// Not destructive: what it removes comes back with one vm-ssh-create.
 	{Name: "vm-ssh-delete", Summary: "turn SSH off in the VM again and remove every authorized key", IsUndo: true, Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
@@ -117,7 +122,7 @@ var All = []Command{
 	{Name: "prune", Summary: "remove screenshots, logs and staged binaries past their age or size bounds", Locks: LockEachVM, Destructive: true, OverMCP: true},
 
 	{Name: "vm-screen", Summary: "photograph the VM, for when it is stuck", ReadOnly: true, MacOnly: true, OverMCP: true},
-	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "vm-repair", Summary: "fix an expired password and a stale WebView2 registration, as SYSTEM", Locks: LockVM, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	{Name: "doctor", Summary: "what is here, and where the log and screenshots are", ReadOnly: true, OverMCP: true},
 	{Name: "capacity", Summary: "disk and memory: what each VM and the tool's data hold, by owner, and how many more VMs fit", ReadOnly: true, MacOnly: true, OverMCP: true},
 	// report gathers what an issue needs, redacted, for pasting into one.
@@ -127,13 +132,13 @@ var All = []Command{
 	// glaze-check takes no lock here: the Mac run touches no VM, and a lock
 	// would block it for the whole of an install. -windows takes that VM's lock
 	// itself, and takes a minute and a half or more, so over MCP it is a job.
-	{Name: "glaze-check", Summary: "does glaze work? its conformance suite, here or -windows (needs the source checkout)", Detach: "-windows", OverMCP: true},
+	{Name: "glaze-check", Summary: "does glaze work? its conformance suite, here or -windows (needs the source checkout)", Detach: "-windows", WindowsGuest: true, OverMCP: true},
 	{Name: "glaze-status", Summary: "the recorded glaze verdict and whether it still holds (needs the source checkout)", ReadOnly: true, OverMCP: true},
 	// vm-check and vm-status work only in a checkout too: the suite is
 	// examples/vmconformance. vm-check runs it in the VM, as SYSTEM and in the
 	// desktop session, changing nothing there; a minute or two, so a job over
 	// MCP.
-	{Name: "vm-check", Summary: "does the VM have what this project relies on? run the VM suite in it, record every check", Locks: LockVM, Detach: DetachAlways, MacOnly: true, OverMCP: true},
+	{Name: "vm-check", Summary: "does the VM have what this project relies on? run the VM suite in it, record every check", Locks: LockVM, Detach: DetachAlways, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	{Name: "vm-status", Summary: "the recorded VM verdicts, one per VM, and how far each still holds", ReadOnly: true, OverMCP: true},
 	{Name: "remote-status", Summary: "a remote job's state and place in the queue; with the admin token and no id, every job", ReadOnly: true, OverMCP: true},
 	{Name: "remote-logs", Summary: "what the Mac said while it ran a remote job", ReadOnly: true, OverMCP: true},

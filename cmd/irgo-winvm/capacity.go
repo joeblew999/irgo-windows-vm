@@ -56,11 +56,11 @@ func capacityLines(r utmvm.CapacityReport) []string {
 	if r.MemoryErr != "" {
 		add("memory:  cannot tell: %s", r.MemoryErr)
 	} else {
-		add("memory:  %s in this Mac, %s configured for running VMs, %s kept for macOS; a clone takes %s, an install %s",
-			gib(r.Memory), gib(r.RunningMemory), gib(p.MemoryReserve), gib(p.CloneMemory), gib(p.VMMemory))
+		add("memory:  %s in this Mac, %s configured for running VMs, %s kept for macOS; a clone takes %s, an install %s, a Linux VM %s",
+			gib(r.Memory), gib(r.RunningMemory), gib(p.MemoryReserve), gib(p.CloneMemory), gib(p.VMMemory), gib(p.LinuxMemory))
 	}
 	add("")
-	add("%-18s %-8s %-7s %-34s %-6s %-10s %-10s %-9s %s", "VM", "STATE", "KIND", "OWNER", "MEMORY", "ITS OWN", "PROMISED", "IDLE", "")
+	add("%-18s %-8s %-7s %-8s %-34s %-6s %-10s %-10s %-9s %s", "VM", "STATE", "KIND", "OS", "OWNER", "MEMORY", "ITS OWN", "PROMISED", "IDLE", "")
 	if r.VMsErr != "" {
 		add("cannot list UTM's VMs: %s", r.VMsErr)
 	}
@@ -91,7 +91,7 @@ func capacityLines(r utmvm.CapacityReport) []string {
 		case vm.Kind == "golden":
 			note = fmt.Sprintf("its %s are shared with its clones", gib(vm.Allocated))
 		}
-		add("%-18s %-8s %-7s %-34s %-6d %-10s %-10s %-9s %s", vm.Name, vm.Status, vm.Kind, trimTo(owner, 34),
+		add("%-18s %-8s %-7s %-8s %-34s %-6d %-10s %-10s %-9s %s", vm.Name, vm.Status, vm.Kind, vm.OS, trimTo(owner, 34),
 			vm.MemoryMiB, own, prom, idle, note)
 	}
 	add("")

@@ -58,7 +58,12 @@ contract for an agent from another repository:
 ## SSH into your VM
 
 When your work drives a machine over SSH rather than running one `.exe`
-(installers, provisioning, a remote shell), turn SSH on in a VM you made:
+(installers, provisioning, a remote shell), turn SSH on in a VM you made. For
+a Linux machine, make the VM with
+`irgo-winvm vm-create -os linux -vm <name> -install` first: Ubuntu Server
+24.04, about a minute, a job over MCP like any `-install`
+([A Linux VM](USING.md#a-linux-vm)). SSH is the only way to run anything in
+it: `app-create` is for Windows VMs.
 
 ```sh
 irgo-winvm vm-ssh-create -vm <name> -key ~/.ssh/id_ed25519.pub
@@ -74,7 +79,8 @@ of its own. What it changes in the guest, and its exit codes, are in
   refused (exit 2) and nothing is sent.
 - **Run it again whenever you need the line.** Done work is reported, not
   redone, in seconds; and the address can change when the VM restarts.
-- **The first run takes minutes** (Windows installs OpenSSH Server). Over MCP
+- **The first run on Windows takes minutes** (Windows installs OpenSSH
+  Server); on Linux, seconds. Over MCP
   it is an ordinary call, not a job, because the answer is the line it prints.
   If your client stops waiting, the work carries on in the server: call again,
   expect `busy` (6) until it has finished, then the line.

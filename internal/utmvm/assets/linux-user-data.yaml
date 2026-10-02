@@ -1,0 +1,22 @@
+#cloud-config
+# What cloud-init does on a Linux VM's first boot. vm-create -os linux puts
+# this on the seed CD (label cidata) as user-data, with meta-data beside it,
+# and vm-linux-check.sh checks afterwards that it happened.
+users:
+  # No password works anywhere: locked here, and sshd refuses passwords.
+  - name: dev
+    gecos: dev
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: true
+ssh_pwauth: false
+# The guest agent is not in the image, so the first boot needs the network.
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - [systemctl, start, qemu-guest-agent]
+  # The image listens on port 22 from its first boot. Off until
+  # vm-ssh-create turns it on, as on Windows.
+  - [systemctl, disable, --now, ssh.socket, ssh.service]

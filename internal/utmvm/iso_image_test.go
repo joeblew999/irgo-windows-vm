@@ -23,7 +23,7 @@ func buildTestISO(t *testing.T, files map[string]string) string {
 	out := filepath.Join(t.TempDir(), "test.iso")
 	// 64 MiB requested for a few bytes of content, so the trimming below is
 	// actually exercised.
-	if err := isoBuildImage(out, src, 64); err != nil {
+	if err := isoBuildImage(out, src, 64, unattendLabel); err != nil {
 		t.Fatalf("isoBuildImage: %v", err)
 	}
 	return out

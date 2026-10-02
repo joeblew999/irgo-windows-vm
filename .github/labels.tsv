@@ -1,8 +1,4 @@
-# The issue labels, synced to GitHub by `mise run gh:labels` (gh label create --force).
-# name<TAB>colour (hex, no #)<TAB>description. Tabs, not spaces: a name may hold spaces.
-# Syncing creates or updates these and deletes nothing, so a label removed here
-# must be deleted on GitHub by hand. cmd/irgo-winvm/issue_test.go checks that every
-# label the issue forms, `report -issue` and docs/FOR-AGENTS.md name is here.
+name	color	description
 bug	d73a4a	irgo-winvm does the wrong thing
 feature	a2eeef	a calling repository needs something irgo-winvm does not do
 upstream-glaze	5319e7	a bug in crgimenes/glaze: fixed there, recorded in docs/UPSTREAM.md

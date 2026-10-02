@@ -336,8 +336,9 @@ release is in [RESULTS.md](RESULTS.md).
 
 ## Triage and labels
 
-The labels are declared once, in `.github/labels.tsv` (name, colour and
-description, tab-separated), and `mise run gh:labels` creates or updates them
+The labels are declared once, in `.github/labels.tsv`: a header row
+(`name`, `color`, `description`) and one label per row, tab-separated, with no
+comment lines, so GitHub shows the file as a searchable table. Then `mise run gh:labels` creates or updates them
 on GitHub with `gh label create --force`. It deletes nothing. `DRY_RUN=1`
 prints the commands instead of running them, and `REPO=owner/name` points it
 at another repository. `cmd/irgo-winvm/issue_test.go` fails if a form,

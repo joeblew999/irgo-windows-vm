@@ -145,8 +145,20 @@ func labelsFile(t *testing.T) map[string]bool {
 	}
 	colour := regexp.MustCompile(`^[0-9a-f]{6}$`)
 	out := map[string]bool{}
-	for i, l := range strings.Split(string(b), "\n") {
+	// Pure data, so GitHub renders it as a table: the header row first, and no
+	// comment lines (a "#" line is a one-column row to GitHub, and the file
+	// shows as broken). Negative control, run by hand: put a "# note" line
+	// back at the top and this fails.
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "name\tcolor\tdescription" {
+		t.Errorf("labels.tsv must start with the header row name<TAB>color<TAB>description, got %q", lines[0])
+	}
+	for i, l := range lines {
+		if i == 0 {
+			continue
+		}
 		if l == "" || strings.HasPrefix(l, "#") {
+			t.Errorf("labels.tsv line %d: %q — no blank or comment lines; GitHub renders the file as a table", i+1, l)
 			continue
 		}
 		parts := strings.Split(l, "\t")

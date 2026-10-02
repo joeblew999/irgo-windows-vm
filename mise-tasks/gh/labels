@@ -2,6 +2,13 @@
 #MISE description="Create or update the issue labels in .github/labels.tsv on GitHub; DRY_RUN=1 prints the gh commands instead, REPO= targets another repo"
 set -euo pipefail
 # The labels are declared once, in .github/labels.tsv; this makes GitHub match.
+#
+# labels.tsv is pure data so GitHub renders it as a searchable table: a header
+# row "name<TAB>color<TAB>description", then one label per row (hex colour
+# without #). Tabs, not spaces: a name may hold spaces. No comment lines — a
+# "#" line is a one-column row to GitHub, and the table stops rendering.
+# cmd/irgo-winvm/issue_test.go checks the shape, and that every label the issue
+# forms, `report -issue` and docs/FOR-AGENTS.md name is defined here.
 # `gh label create --force` updates a label that already exists, so running it
 # again is safe. It never deletes: a label dropped from the file, or one of
 # GitHub's defaults, stays until someone removes it by hand.
@@ -12,7 +19,7 @@ if [ -n "${REPO:-}" ]; then repo=(--repo "$REPO"); fi
 
 n=0
 while IFS=$'\t' read -r name color desc; do
-  case "$name" in '' | '#'*) continue ;; esac
+  case "$name" in '' | name) continue ;; esac  # blank lines and the header row
   if [ -z "${color:-}" ] || [ -z "${desc:-}" ]; then
     echo "$file: '$name' needs a colour and a description, tab-separated" >&2
     exit 1

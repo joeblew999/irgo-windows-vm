@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
 | 2 Oct 2026 | [SSH into a clone: `vm-ssh-create` took 9 min 46 s the first time and 16 s on a repeat; a key login worked; `vm-ssh-delete` closed the port](#ssh-into-a-clone--measured-2-oct-2026) |
 | 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; a 4 GiB clone beside irgo-win11 passed glaze-check and vm-check; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
 | 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
@@ -33,6 +34,82 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## The request that launches UTM hangs every later start — measured 2 Oct 2026
+
+**Result:** a UTM that an AppleScript had to launch answers that script and
+then never answers a VM start, until it is quit and reopened. `vm-create` and
+`capacity` begin with an AppleScript, so run with UTM closed they did it to
+themselves: that is the two-minute `AppleEvent timed out. (-1712)` of the
+same morning. Opening UTM with `open -g -a` first prevents it. Why is not
+known ([UPSTREAM.md](UPSTREAM.md#utm-stops-answering-start-requests)).
+
+M2 Pro, 16 GiB, macOS 27.0.1, UTM 4.7.5, the screen locked throughout. One
+VM, `claude-rig-test`, a 4 GiB clone of the golden image (Windows 11 ARM64);
+`irgo-win11` and `irgo-golden` stopped and never touched.
+
+**Method.** Each trial: stop the VM, `osascript -e 'quit app "UTM"'`, wait
+until `pgrep` no longer finds UTM's process, sleep 2 s. Then the first request
+in the table, then `utmctl start` with a 15 s limit, then `utmctl status`
+every 0.2 s for 3 s. "Hung" is no answer from the start in 15 s and the VM
+still `stopped`; "worked" is `started`, each time 2.7 to 2.9 s after the
+start request. After a hang, AppleScript's `activate` and `start` was tried
+in the same UTM with a 20 s limit, and hung too, 7 of 7. Two sessions the
+same day: the first ran `utmctl` as found on `PATH`, which is Homebrew's
+symlink `/opt/homebrew/bin/utmctl`; the second ran both that and
+`/Applications/UTM.app/Contents/MacOS/utmctl`, alternating, after the tool's
+own runs did not show the hang the first session predicted.
+
+| UTM before the first request | first request, and when | later starts hung |
+|---|---|---|
+| closed | `osascript -e 'tell application "UTM" to count virtual machines'` | **3 of 3** |
+| closed | `osascript`, `start virtual machine named …` itself (30 s limit) | **1 of 1**, and once in the first session |
+| closed | `utmctl list` through the symlink | **2 of 2** |
+| closed | `utmctl list` by its path in UTM.app | 0 of 4 (one followed by the AppleScript start instead: running 4.6 s later) |
+| closed | `utmctl start` by its path in UTM.app | 0 of 2: the VM was running 3.0 and 3.1 s later |
+| `open -g -a UTM` | the same `osascript` count, at once | 0 of 3 |
+| `open -g -a UTM` | `utmctl list` by its path, at once, every 0.1 s until it lists the VM | 0 of 4 |
+| `open -g -a UTM` | `utmctl` through the symlink, at once (`list` 9 times, `status` once) | **10 of 10** |
+| `open -g -a UTM` | `utmctl list` through the symlink after 0.3, 0.6, 1.0 or 1.5 s | 0 of 8 |
+| `open -g -a UTM` | nothing for 1 to 8 s, then the start through the symlink | 0 of 9 |
+
+In the first session the same held with `open -a UTM`, in the foreground.
+`utmctl` resolves the symlink before it looks for UTM.app, so the two ways of
+running it differ in something else; it was not found.
+
+**How long things take.** Whether UTM is running: `pgrep` 0.01 s, `osascript
+-e 'application id "com.utmapp.UTM" is running'` 0.04 s (0.07 s the first
+time), against 0.14 s for `utmctl status`; asked with UTM closed it answered
+`false` and no UTM process existed a second later, 7 of 7. `quit app "UTM"`
+until the process is gone: 0.1 to 0.2 s. `open -g -a UTM` until `utmctl list`
+shows the VM: 0.7 to 1.3 s.
+
+**The tool, before and after.** Binaries built from `origin/main` (c6000d2)
+and from the branch that added `utmCommand`, each from UTM closed.
+
+| command | before | after |
+|---|---|---|
+| `capacity`, then `utmctl start` by its path | exit 0 in 4.0 and 2.9 s; the start **hung, 2 of 2** | exit 0 in 4.8 and 5.0 s, saying `UTM is not running: opening /Applications/UTM.app in the background, then waiting 2s before asking it anything` on stderr; the start worked, 2 of 2 |
+| `app-create -vm claude-rig-test hello.exe` on the stopped VM, which boots it through `StartWithDisplay` | exit 0 in 36.2 s, once: its first request is `utmctl list` by its path, which does no harm | exit 0 in 32.9, 38.4, 33.3 and 34.0 s. The line about opening UTM at 0.0 to 0.1 s, the next line at 2.7 s, the start answered by 10.1 s, Windows answering 17.7 s after that |
+
+One more run after the change did not finish: the start was answered and the
+VM was `started` at 10.1 s, and Windows had not answered six minutes later.
+The VM had been power-cut with `utmctl stop` before each of the first three
+runs; stopped and started by hand it answered in 66 s. The later runs shut
+Windows down from inside first.
+
+With UTM already open the new binary printed nothing about opening it and
+sent the start at once (0.5 s in, answered by 8.7 s). Windows then took 64 s
+to answer, not 17.7 s, so two runs under a 60 s limit were cut off waiting for
+it and a third finished in 102.2 s. The old binary took 100.1 s for the same,
+so that is not from this change; why a VM boots more slowly in a UTM that has
+already run it was not looked at.
+
+Not measured: `recoverUTM` and `utmApp.restart` against a UTM in this state
+(unit tests against a fake only); two commands racing to a closed UTM (the
+lock is tested with real `flock`, against a fake UTM); `vm-create` from UTM
+closed, which was the original failure (on `claude-rig-test`, an existing
+clone, it stops at "no media" before any start); any UTM but 4.7.5.
 
 ## SSH into a clone — measured 2 Oct 2026
 

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -118,7 +117,7 @@ func (v VM) run(args ...string) (string, error) { return v.runFor(utmctlTimeout,
 func (v VM) runFor(d time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, utmctlPath(), append(args, v.Ref)...)
+	cmd := utmCommand(ctx, utmctlPath(), append(args, v.Ref)...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -220,7 +219,7 @@ func (v VM) execFor(d time.Duration, cmdline ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	args := append([]string{"exec", v.Ref, "--cmd"}, cmdline...)
-	cmd := exec.CommandContext(ctx, utmctlPath(), args...)
+	cmd := utmCommand(ctx, utmctlPath(), args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -311,7 +310,7 @@ type Entry struct {
 // UTM only rescans its bundle directory at launch, so a VM generated while UTM
 // is running will not appear here until UTM is restarted.
 func List() ([]Entry, error) {
-	out, err := exec.Command(utmctlPath(), "list").Output()
+	out, err := utmCommand(context.Background(), utmctlPath(), "list").Output()
 	if err != nil {
 		return nil, fmt.Errorf("utmctl list: %w", err)
 	}
@@ -540,7 +539,7 @@ func DiskPath(bundle string) string { return filepath.Join(bundle, bundleData, d
 //
 // So it is asked FIRST, with a call that changes nothing.
 func CheckAutomation() error {
-	out, err := exec.Command("osascript", "-e", `tell application "UTM" to count virtual machines`).CombinedOutput()
+	out, err := utmCommand(context.Background(), "osascript", "-e", `tell application "UTM" to count virtual machines`).CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -560,7 +559,7 @@ func CheckAutomation() error {
 func utmScript(script string, limit time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	out, err := utmCommand(ctx, "osascript", "-e", script).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if ctx.Err() != nil {
 		return text, fmt.Errorf("UTM did not answer within %s", limit)

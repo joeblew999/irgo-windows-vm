@@ -211,8 +211,7 @@ Every command that changes state takes the locks it declares in
 | per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `vm-ssh-create`, `vm-ssh-delete`, `app-create`, `app-delete`, `glaze-check -windows` |
 | stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
 | capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
-
-| UTM restart (`mutation-utm-restart.lock`) | the restart of a UTM that does not answer, until the VM it was restarted for has started | whatever starts a VM, inside `StartWithDisplay`, only when that happens |
+| UTM launch (`mutation-utm-restart.lock`, the name it had when it guarded only the restart) | UTM while it is opened and left to finish launching, and the restart of a UTM that does not answer, until the VM it was restarted for has started | every request to UTM, inside `utmCommand`, for its check that UTM is running (0.04 s) or for the two seconds after opening it, waiting up to 30 s rather than refusing; and whatever starts a VM, inside `StartWithDisplay`, when it restarts UTM |
 
 `vm-reap` takes each VM's lock itself, one at a time, without waiting, and
 keeps a VM whose lock is held: that VM is in use.
@@ -547,6 +546,8 @@ Why it is built this way:
   `update configuration` on the stopped VM. Quitting UTM would stop every VM
   it runs. The one restart is of a UTM that does not answer a start request
   ([below](#when-utm-does-not-answer-a-start)).
+- **Nothing is sent to a UTM that is closed or still launching**
+  ([below](#every-request-to-utm-opens-it-first)).
 - **Decrypted, because ciphertext does not compress.** Windows 11 24H2 turned
   Device Encryption on by itself; the answer file now prevents it at install,
   and sealing decrypts VMs made before that. This also removes the risk of a
@@ -560,30 +561,75 @@ Why it is built this way:
 The research, and what is measured and what is not, is in
 `.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
 
+### Every request to UTM opens it first
+
+A UTM that a request has to launch can answer it, and then never answer a VM
+start again until it is quit and reopened
+([the trap](TRAPS.md#host-utm-and-the-iso)). With UTM closed an `osascript`
+request did that every time, and the first request of `vm-create` and
+`capacity` is one (the capacity model's memory table). So `utmctl` and
+`osascript` are run in one place, `utmCommand`
+(`internal/utmvm/vm_utm_open.go`), which every call site builds its command
+with, and which first (`ensureOpen`):
+
+1. takes the UTM launch lock, waiting up to 30 s for a command that is opening
+   or restarting UTM, after which the request fails as busy;
+2. asks **macOS** whether UTM is running (`utmRunning`: AppleScript's
+   `application id … is running`, which Apple documents as neither launching
+   the application nor sending it an event; 0.04 s). Running: the lock is
+   released and the request goes. Cannot tell: the request fails, unsent;
+3. otherwise runs `open -g -a /Applications/UTM.app`, sends UTM **nothing**
+   for two seconds (`utmSettle`), checks with macOS that it is running, and
+   releases the lock. The line it prints goes to the command's `Printer`, or
+   to stderr for a command that prints a report.
+
+The wait is a fixed time because UTM cannot be asked whether it has finished
+launching: for some senders that request is the harm. Which senders, and
+when, is measured and not understood
+([RESULTS](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)):
+after `open`, the two this tool uses were answered at 0 s with no harm, 7 of
+7, so the two seconds are margin. The lock is held across the wait
+because a second command would otherwise find the UTM the first has just
+opened running, and send its request into the launch. A test reads the
+package's syntax tree and fails on any other `exec.Command` of `utmctl` or
+`osascript`. A UTM that is not installed is passed through, so the request
+fails as it did, naming `utmctl`.
+
+Not covered: a UTM that something other than this tool opened in the last
+moment (its owner, a login item) is running, and is not waited for; and
+anything else that sends UTM a request, such as `utmctl` typed at a shell or
+`mise-tasks/vm/test`, which runs `utmctl status` itself.
+
 ### When UTM does not answer a start
 
 Every boot goes through `VM.StartWithDisplay` (`internal/utmvm/vm_start.go`):
 `vm-create`, an install's reboots, and `EnsureReady` under `app-create`. A UTM
-that is up can take the request and never reply
-([the trap](TRAPS.md#host-utm-and-the-iso)); osascript then gives up after two
-minutes with `AppleEvent timed out. (-1712)`. On that error, and no other,
-`recoverUTM`:
+that something outside this tool launched with a request takes the start and
+never replies ([the trap](TRAPS.md#host-utm-and-the-iso)); osascript then
+gives up after two minutes with `AppleEvent timed out. (-1712)`. On that
+error, and no other, `recoverUTM`:
 
-1. takes the UTM restart lock, or refuses as busy (exit 6): another command is
-   restarting UTM;
+1. takes the UTM launch lock, waiting up to 30 s, or refuses as busy (exit 6):
+   another command is restarting UTM. While it holds the lock no other
+   command's request reaches UTM, and its own pass without taking it again;
 2. asks `utmctl list`, which still answers, and goes on only if the VM being
    started is in the list and **every** VM is `stopped`. A VM in any other
    state refuses, naming it; a list that fails or lacks the VM is cannot tell,
    and refuses. Both name the command that restarts UTM by hand;
-3. quits UTM, checks with macOS that it has gone, opens it in the background
-   and waits until it lists the VM (`restartUTM`);
+3. quits UTM, checks with macOS that it has gone, opens it in the background,
+   sends it nothing for the same two seconds, and only then asks for the list
+   until the VM is in it (`utmApp.restart`). It used to poll the list from
+   the moment of `open`; that was not seen to do harm, and is not relied on;
 4. sends the start once more, and keeps the lock until it returns. A second
    timeout is reported, not recovered.
 
-UTM is reached through `utmStarter`, four functions, so the tests run all of
-this against a fake. `restartUTM` itself has no test and has not been run
-against a UTM in that state: the commands in it are the ones that worked by
-hand on 2 Oct 2026.
+UTM is reached through `utmStarter` and `utmApp`, structs of functions, so
+the tests run all of this against a fake: the guard, the lock, and the order
+of quit, open, wait and list. Opening a closed UTM before the first request
+has been run against the real one
+([RESULTS](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)).
+The recovery has not: no run has been made of `recoverUTM` or
+`utmApp.restart` against a UTM in that state, only its commands by hand.
 
 ## The private R2 cache: storage and transfer
 

@@ -27,8 +27,11 @@ import (
 //   - CapacityLock: the few hundred milliseconds in which vm-create decides
 //     whether there is room for another VM and records that it is making one,
 //     so two creates cannot both see the same free memory (vm_capacity.go).
-//   - UTMRestartLock: the restart of a UTM that does not answer a start
-//     request, so two commands cannot restart it under each other (vm_start.go).
+//   - UTMLaunchLock: UTM being opened, or restarted because it does not
+//     answer a start. Every request to UTM takes it for its check that UTM is
+//     running, and waits for it, so nothing reaches a UTM that is still
+//     launching and two commands cannot restart it under each other
+//     (vm_utm_open.go, vm_start.go).
 //
 // The primitive that releases on process death differs per platform, hence
 // lock_darwin.go and lock_other.go.
@@ -51,9 +54,12 @@ const (
 	// the VM it is about to start. See BeginCreate.
 	CapacityLock Lock = "mutation-capacity.lock"
 
-	// UTMRestartLock is held while a command restarts a UTM that does not
-	// answer, until the VM it restarted UTM for has started. See recoverUTM.
-	UTMRestartLock Lock = "mutation-utm-restart.lock"
+	// UTMLaunchLock is held while a command opens UTM and leaves it to finish
+	// launching (ensureOpen), and while one restarts a UTM that does not
+	// answer, until the VM it restarted UTM for has started (recoverUTM). It
+	// keeps the name it had when it guarded only the restart, so a binary
+	// from before still excludes one from after.
+	UTMLaunchLock Lock = "mutation-utm-restart.lock"
 )
 
 // vmLockPrefix is what every per-VM lock file starts with, and stageLockPrefix
@@ -117,8 +123,8 @@ func (l Lock) String() string {
 		return "the machine-wide lock (media and golden image)"
 	case l == CapacityLock:
 		return "the check for room for another VM (held for under a second)"
-	case l == UTMRestartLock:
-		return "the restart of UTM"
+	case l == UTMLaunchLock:
+		return "the opening or restart of UTM"
 	case strings.HasPrefix(string(l), stageLockPrefix):
 		return "the staged binaries of " + strings.TrimSuffix(strings.TrimPrefix(string(l), stageLockPrefix), ".lock")
 	case strings.HasPrefix(string(l), vmLockPrefix):

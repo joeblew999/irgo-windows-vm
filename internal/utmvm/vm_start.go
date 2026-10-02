@@ -3,16 +3,17 @@ package utmvm
 // Starting a VM with a display, and what to do when UTM does not answer.
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
-	"time"
 )
 
 // errUTMNotAnswering is UTM taking a start request and never replying. The
 // process is there and `utmctl list` and `status` answer at once; `start` and
-// `ip-address` time out (docs/TRAPS.md).
+// `ip-address` time out. A UTM gets that way from a request that had to
+// launch it, or that reached it as it launched (docs/TRAPS.md). utmCommand
+// sends neither; this is for a UTM something else did it to.
 var errUTMNotAnswering = errors.New("UTM is not answering start requests (AppleEvent timed out, -1712)")
 
 // appleEventTimeout is how osascript reports errAETimeout, after waiting the
@@ -21,14 +22,9 @@ var errUTMNotAnswering = errors.New("UTM is not answering start requests (AppleE
 const appleEventTimeout = "(-1712)"
 
 // utmRestartCommand is what restarts UTM by hand, for the messages that
-// decline to do it.
-const utmRestartCommand = `osascript -e 'quit app "UTM"' && open -g -a UTM`
-
-// How long a restart waits for UTM to go, and then to list its VMs again.
-const (
-	utmQuitWait   = 30 * time.Second
-	utmLaunchWait = 60 * time.Second
-)
+// decline to do it. The second sleep is utmSettle: whatever is typed next
+// must not reach UTM as it launches.
+const utmRestartCommand = `osascript -e 'quit app "UTM"' && sleep 2 && open -g -a UTM && sleep 2`
 
 // utmStarter is what starting a VM needs from UTM, as functions so the tests
 // can run a start against a UTM that does not answer without touching the
@@ -36,7 +32,7 @@ const (
 type utmStarter struct {
 	start   func(name string) (string, error) // has UTM start the VM of that name; what osascript printed
 	list    func() ([]Entry, error)
-	lock    func() (func(), error) // UTMRestartLock
+	lock    func() (func(), error) // UTMLaunchLock, kept until the VM has started
 	restart func(vm string, say func(string, ...any)) error
 }
 
@@ -44,8 +40,8 @@ type utmStarter struct {
 var starter = utmStarter{
 	start:   startScript,
 	list:    List,
-	lock:    func() (func(), error) { return Acquire(UTMRestartLock) },
-	restart: restartUTM,
+	lock:    holdUTMLaunchLock,
+	restart: func(vm string, say func(string, ...any)) error { return utm.restart(vm, say) },
 }
 
 // StartWithDisplay powers on the VM through UTM itself so a display window
@@ -57,8 +53,10 @@ var starter = utmStarter{
 // to go. Since UTM's aarch64 firmware always drops to the interactive UEFI
 // shell, a Windows VM is unusable without this.
 //
-// A UTM that does not answer the request is restarted, once, when no VM is
-// running, and the start is tried again (recoverUTM).
+// UTM is opened first if it is not running, and left to finish launching
+// (utmCommand): the start request must not be what launches it. A UTM that
+// still does not answer the request is restarted, once, when no VM is running,
+// and the start is tried again (recoverUTM).
 func (v VM) StartWithDisplay(say func(string, ...any)) error {
 	return starter.startWithDisplay(v.Ref, say)
 }
@@ -97,7 +95,7 @@ func (u utmStarter) startWithDisplay(ref string, say func(string, ...any)) error
 }
 
 // recoverUTM restarts a UTM that does not answer start requests, if that is
-// safe, and returns what releases UTMRestartLock once the caller has started
+// safe, and returns what releases UTMLaunchLock once the caller has started
 // its VM.
 //
 // Restarting UTM stops every VM it runs, so it is done only when UTM lists
@@ -107,6 +105,8 @@ func (u utmStarter) startWithDisplay(ref string, say func(string, ...any)) error
 // The lock is held from that check until the caller's start returns: a second
 // command recovering at the same moment would see no VM running in the
 // seconds between this one's restart and its start, and quit UTM under it.
+// It is the lock every request to UTM waits for (ensureOpen), so nothing from
+// another command reaches UTM while it is quit and reopened either.
 func (u utmStarter) recoverUTM(vm string, say func(string, ...any)) (release func(), err error) {
 	unlock, err := u.lock()
 	if err != nil {
@@ -182,59 +182,6 @@ func startScript(name string) (string, error) {
   activate
   start virtual machine named %q
 end tell`, name)
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	out, err := utmCommand(context.Background(), "osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
-}
-
-// utmRunning asks macOS, not UTM, whether UTM is running, so it answers when
-// UTM does not and never launches it. UTM's container is named by its bundle
-// id, which is what this asks by.
-func utmRunning() (bool, error) {
-	out, err := utmScript(fmt.Sprintf(`application id %q is running`, utmContainer), utmctlTimeout)
-	if err != nil {
-		return false, err
-	}
-	switch out {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	}
-	return false, fmt.Errorf("asked whether UTM is running, osascript said %q", out)
-}
-
-// restartUTM quits UTM, checks it has gone, opens it again in the background,
-// and returns once it lists vm. Only recoverUTM calls it, after checking that
-// no VM is running.
-func restartUTM(vm string, say func(string, ...any)) error {
-	began := time.Now()
-	if _, err := utmScript(`quit app "UTM"`, utmQuitWait); err != nil {
-		return fmt.Errorf("asking UTM to quit: %w", err)
-	}
-	for deadline := time.Now().Add(utmQuitWait); ; time.Sleep(500 * time.Millisecond) {
-		up, err := utmRunning()
-		if err != nil {
-			return fmt.Errorf("UTM was asked to quit, and whether it has is not known: %w", err)
-		}
-		if !up {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("UTM was asked to quit and is still running after %s", utmQuitWait)
-		}
-	}
-	say("UTM has quit (%.1fs); opening %s", time.Since(began).Seconds(), AppPath)
-	if out, err := exec.Command("open", "-g", "-a", AppPath).CombinedOutput(); err != nil {
-		return fmt.Errorf("UTM has quit, and opening %s failed: %w: %s", AppPath, err, strings.TrimSpace(string(out)))
-	}
-	for deadline := time.Now().Add(utmLaunchWait); ; time.Sleep(500 * time.Millisecond) {
-		if _, ok := entryFor(List, vm); ok {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("UTM was opened again and does not list %s after %s", vm, utmLaunchWait)
-		}
-	}
-	say("UTM is back and lists %s (%.1fs)", vm, time.Since(began).Seconds())
-	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -165,11 +166,33 @@ func Printer(command string) func(string, ...any) {
 	start := time.Now()
 	log := Logger().With("cmd", command)
 	log.Info("started")
-	return func(format string, a ...any) {
+	say := func(format string, a ...any) {
 		msg := fmt.Sprintf(format, a...)
 		printf("[%6.1fs] %s\n", time.Since(start).Seconds(), msg)
 		log.Info(msg, "elapsed", time.Since(start).Round(time.Millisecond).String())
 	}
+	progressTo.Store(&say)
+	return say
+}
+
+// progressTo is the newest Printer: where a line goes that is said from below
+// the command, by code with no printer handed to it.
+var progressTo atomic.Pointer[func(string, ...any)]
+
+// progress says one line of progress from code that was given no printer: the
+// opening of UTM, which any request to UTM can set off. It goes to the
+// command's Printer when it has one, and otherwise to stderr and the log
+// file, never to stdout: a report (doctor, status, capacity -json) is not
+// progress, and a line in the middle of its JSON would break whatever reads
+// it.
+func progress(format string, a ...any) {
+	if say := progressTo.Load(); say != nil {
+		(*say)(format, a...)
+		return
+	}
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintln(os.Stderr, msg)
+	Logger().Info(msg)
 }
 
 // Reporter is Printer for a command that prints a report rather than progress.

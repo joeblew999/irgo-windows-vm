@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -1167,7 +1166,7 @@ func typeBootCommand(vmRef, fsn, path string) error {
 	script := fmt.Sprintf(bootScript,
 		keystrokeDelay.Seconds(), vmRef, fsn, path)
 
-	cmd := exec.Command("osascript", "-e", script)
+	cmd := utmCommand(context.Background(), "osascript", "-e", script)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("sending keystrokes to %s: %w: %s", vmRef, err, strings.TrimSpace(string(out)))
 	}

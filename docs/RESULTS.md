@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 2 Oct 2026 | [`vm-create` on a Linux VM that has SSH on passes its check (3.6 s), where the first-boot check exits 1; a Windows clone: `vm-ssh-create` 6 min 56 s, repeat 23 s, the undo twice](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026) |
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
 | 2 Oct 2026 | [a Linux VM that claude-rig rigs over SSH: `vm-create -os linux` 1 min 42 s with the download, `vm-ssh-create` 2.7 s, the rig's second run changed nothing; a Windows clone behaved as before](#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
 | 2 Oct 2026 | [a Linux guest by hand, before any code: Ubuntu's cloud image boots untyped, cloud-init reads the seed on a VirtIO CD and not on a USB one, the guest agent answers 34 s after the first start](#a-linux-guest-by-hand-before-the-code--measured-2-oct-2026) |
@@ -36,6 +37,77 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## `vm-create` on a Linux VM that has SSH on, and the Windows clone again — measured 2 Oct 2026
+
+**Result:** the runs [the Linux phase](#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026)
+was cut short before. `vm-create` on a Linux VM that exists and has SSH on
+passes its check and says `ssh: on`; the check a first boot gets fails on that
+VM, as intended. On a Windows clone `vm-ssh-create` twice and `vm-ssh-delete`
+twice behaved as they did before the guest description.
+
+M2 Pro, 16 GiB, macOS 27.0.1, UTM 4.7.5 open throughout, the screen locked
+throughout. The binary was built from the branch after it was rebased onto
+[the change that sends every request through `utmCommand`](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026);
+nothing about opening UTM was printed, since it was open. `claude-rig-test`, a
+4 GiB Windows clone of another caller's, ran beside every step. Two VMs, one
+at a time, `linux-dev-b1` and `linux-dev-wincheck`, each deleted after; the
+key was the Mac's own `~/.ssh/id_ed25519.pub`.
+
+**Linux, `linux-dev-b1`:**
+
+| step | command | what happened |
+|---|---|---|
+| create | `vm-create -os linux -vm linux-dev-b1 -install -golden=false` | **60.5 s**, exit 0, the image already downloaded (its SHA-256 checked in 0.7 s): bundle made and imported in 5.1 s, started and answering in 49 s, the check 1.8 s with `ssh: ok (off: nothing listens on port 22 until vm-ssh-create)` |
+| SSH on | `vm-ssh-create -vm linux-dev-b1` | 3.2 s, 3 changes, port 22 answered `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19`; exit 0 |
+| **create again, SSH on** | `vm-create -vm linux-dev-b1` | **3.6 s, exit 0**, `linux-dev-b1 is ready`. The check: `cloud-init: ok (status: done)`, `account: ok (dev, sudo without a password, password locked)`, **`ssh: on (port 22 is listening; vm-ssh-delete turns it off)`**, `disk: ok (/ is 61G, 2.0G used)` |
+| the control | the script `vm-create` had just pushed, run by hand over SSH: `sudo /bin/sh /var/tmp/irgo-vm-linux-check.sh -User dev -New` | **exit 1**, `ssh: something listens on port 22, and the seed turns the image's sshd off`: what `vm-create` would have said on this VM before it passed `-New` only for a VM it had just made. Without `-New`: exit 0 |
+| login | `ssh dev@192.168.64.61 'whoami; sudo -n id -un; hostname'` with `BatchMode=yes` | `dev`, `root`, `linux-dev-b1` |
+| a password | the same with `PubkeyAuthentication=no`; `ssh root@…` with the key | `Permission denied (publickey)`, both |
+| repeat | `vm-ssh-create -vm linux-dev-b1`, twice | 2.6 and 2.5 s, `ssh: already on, nothing changed`; exit 0 |
+| undo | `vm-ssh-delete -vm linux-dev-b1` | 3.9 s: sshd stopped and disabled, 2 `authorized_keys` files and the configuration file removed, `no longer answers`; exit 0. From the Mac `nc -z` got no connection (it had, before) and `ssh` got `Connection refused` |
+| undo again | `vm-ssh-delete -vm linux-dev-b1` | 3.9 s, exit 0, 0 files removed |
+| create again, SSH off | `vm-create -vm linux-dev-b1` | 3.7 s, exit 0, `ssh: ok (off: nothing listens on port 22 until vm-ssh-create)` |
+| delete | `vm-delete -vm linux-dev-b1 -force` | 2.6 s, 4.3 GB reclaimed; `utmctl list` showed the three other VMs, `claude-rig-test` still `started` |
+
+**The guest lookup's cache** (`guestOf`, by UUID only, for the life of one
+process). What it saves is one `utmctl list` per command, and it was counted:
+`ps` in a loop, listing the `utmctl` processes whose parent was the command.
+The repeat `vm-ssh-create` above ran 20 of them, 2 of them `list`. A binary
+built with the cache's read turned off ran 21, 3 of them `list`, and took
+2.9 s instead of 2.5 to 2.6 s. Twice each, alternating, the same counts.
+Every command above reached the guest by UUID, so each took the cached path,
+and each ran the right system's script. **Not run:** the case the cache is
+by UUID for, a name deleted and made again as the other system while one
+process (an MCP server) goes on running. That is a unit test only.
+
+**Windows, `linux-dev-wincheck`** (a clone of the golden image, Windows 11
+ARM64 26100.4349, 4 GiB):
+
+| step | command | what happened |
+|---|---|---|
+| create | `vm-create -vm linux-dev-wincheck` | 34.5 s, exit 0: cloned in 1.9 s, answering in 26 s; its record says `windows` |
+| SSH on, first run | `vm-ssh-create -vm linux-dev-wincheck` | **6 min 56 s**, the same 5 changes as [the first time](#ssh-into-a-clone--measured-2-oct-2026): capability installed, sshd started and set automatic, our firewall rule opened, Windows' own turned off, key authorized. Port 22 answered `SSH-2.0-OpenSSH_for_Windows_9.5`; exit 0 |
+| login | `ssh dev@192.168.64.62 "whoami & ver"` | `win11arm\dev`, 10.0.26100.4349 |
+| **repeat** | `vm-ssh-create -vm linux-dev-wincheck` | **23.4 s**, every line `ok`, `ssh: already on, nothing changed`; exit 0; the login worked again |
+| undo | `vm-ssh-delete -vm linux-dev-wincheck` | 24.1 s: sshd stopped and disabled, the firewall rule and every key removed, `no longer answers`; exit 0; `nc -z` from the Mac got no connection |
+| **undo again** | `vm-ssh-delete -vm linux-dev-wincheck` | **21.2 s, exit 0**, the same line, the port still closed |
+| delete | `vm-delete -vm linux-dev-wincheck -force` | 8.6 s, 14.6 GB reclaimed; `utmctl list` showed `irgo-win11` and `irgo-golden` stopped and `claude-rig-test` started, as before |
+
+The first run was 9 min 46 s and then 7 min 22 s on earlier clones: the time
+is Windows Update's. The repeat was 16 s then; 23 s here.
+
+Not run, still:
+
+- **`vm-screen` on a Linux VM.** The Mac was locked
+  (`CGSSessionScreenIsLocked` in `ioreg -n Root -d1`), and a picture taken
+  then is of an empty window, so none was taken. Whether `virtio-ramfb` shows
+  Linux's console in UTM's window is unknown.
+- **A Windows install** with the template as it is now. The plist it renders
+  for Windows is byte for byte what it was (SHA-256, in the entry below); UTM
+  has not been given it by an install.
+- `app-create` on the Windows clone and claude-rig's `push` on the Linux VM
+  were run before the rebase (below) and not again after it.
 
 ## The request that launches UTM hangs every later start — measured 2 Oct 2026
 
@@ -156,7 +228,8 @@ that added `-os`; the key was the Mac's own `~/.ssh/id_ed25519.pub`. One VM,
   picture, and with the Mac locked the picture is an empty window, as it is
   for any VM. The boot photographs `vm-create` takes failed or were empty for
   the same reason. Whether `virtio-ramfb` shows Linux's console in UTM's
-  window is still unknown.
+  window is still unknown. The Mac was still locked for the later run, so
+  it was not tried again.
 - **Not measured:** the first boot on a slow or absent network; a VM name
   that is not already a hostname; two Linux VMs at once.
 
@@ -174,16 +247,15 @@ are shared, so Windows was run too, on one clone, `linux-dev-wincheck`
 | `vm-ssh-delete -vm linux-dev-wincheck` | 17.1 s, port 22 no longer answers; exit 0 |
 | `vm-delete -vm linux-dev-wincheck -force` | 12.8 GB reclaimed |
 
-**Cut short.** The owner needed UTM, so the session ended there, and these
-were not run:
-
-- on Windows, the repeat of `vm-ssh-create` and the second `vm-ssh-delete`;
-- on Linux, anything after two changes made late: `vm-create`'s check takes
-  `-New` and no longer fails on a VM that exists and has SSH on (before, a
-  `vm-create` after `vm-ssh-create` would have failed its check: found by
-  reading, never seen), and `guestOf` remembers a VM's system by UUID only.
-  Both are unit-tested and neither was run in a guest. The runs above used
-  the binary from before them; for a VM just made the check is the same.
+**Cut short, and finished later.** The owner needed UTM, so the session ended
+there. What was left was run the same day, after the branch was rebased
+([above](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026)):
+on Windows, the repeat of `vm-ssh-create` and the second `vm-ssh-delete`; on
+Linux, the two changes made late and until then only unit-tested, that
+`vm-create`'s check takes `-New` and no longer fails on a VM that exists and
+has SSH on, and that `guestOf` remembers a VM's system by UUID only. The runs
+in this entry used the binary from before those two changes; for a VM just
+made the check is the same.
 
 ## A Linux guest by hand, before the code — measured 2 Oct 2026
 

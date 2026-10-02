@@ -588,6 +588,28 @@ service is running and responsive while the host call fails, the bug is UTM's.
 If it is not, it belongs to the guest and this entry should be deleted. Until
 then, a report would cost a maintainer time without being actionable.
 
+### UTM stops answering start requests
+
+**Status:** `OPEN` — seen once, cause not isolated, not reproduced. Not
+filable as a UTM bug yet.
+
+**Summary.** 2 Oct 2026, UTM 4.7.5: UTM had been closed down earlier to free
+memory and its process was still there. `utmctl list` and `utmctl status <vm>`
+answered at once; `utmctl start <vm>` and `utmctl ip-address <vm>` failed with
+`OSStatus error -1712`, and AppleScript's `start virtual machine named …`
+returned `UTM got an error: AppleEvent timed out. (-1712)` after two minutes.
+No VM was running. `osascript -e 'quit app "UTM"'`, `open -g -a UTM`, and the
+same `utmctl start` then worked at once. The tool's log has no earlier `-1712`.
+
+**Not established.** What put UTM in that state (closing its window, memory
+pressure, something else), and whether `list` and `status` report a VM's real
+state while it is in it.
+
+**In this repository.** `StartWithDisplay` restarts UTM once and starts the VM
+again, only when UTM lists every VM as stopped
+(`internal/utmvm/vm_start.go`). That is covered by unit tests against a fake;
+it has not been run against a UTM in this state.
+
 ## Not bugs
 
 - **A package returning its own `ErrUnsupported` on a platform it documents as

@@ -153,33 +153,9 @@ func (v VM) Status() (string, error) { return v.run("status") }
 // Note this does NOT open a display window, which matters more than it sounds:
 // UTM routes keyboard input through the display, so a VM started this way
 // cannot be sent keystrokes at all — they are accepted and silently discarded.
-// Use StartWithDisplay when the UEFI shell will need driving, which on this
-// firmware is every boot.
+// Use StartWithDisplay (vm_start.go) when the UEFI shell will need driving,
+// which on this firmware is every boot.
 func (v VM) Start() error { _, err := v.run("start"); return err }
-
-// StartWithDisplay powers on the VM through UTM itself so a display window
-// opens.
-//
-// Discovered the hard way: identical VMs booted with utmctl start ignored every
-// keystroke, while the same VM started from the app accepted them. utmctl
-// starts the machine headless, and without a display there is nowhere for input
-// to go. Since UTM's aarch64 firmware always drops to the interactive UEFI
-// shell, a Windows VM is unusable without this.
-func (v VM) StartWithDisplay() error {
-	script := fmt.Sprintf(`tell application "UTM"
-  activate
-  start virtual machine named %q
-end tell`, v.Ref)
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
-	if err != nil {
-		// Fall back to the UUID form; AppleScript matches on name only.
-		if e, ferr := Find(v.Ref); ferr == nil && !strings.EqualFold(e.Name, v.Ref) {
-			return VM{Ref: e.Name}.StartWithDisplay()
-		}
-		return fmt.Errorf("starting %s with a display: %w: %s", v.Ref, err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
 
 // Stop requests a shutdown.
 func (v VM) Stop() error { _, err := v.run("stop"); return err }
@@ -394,8 +370,9 @@ var ejectScript string
 // This replaced writing the bundle into UTM's folder and restarting UTM so it
 // rescanned: the write is refused by macOS App Data protection for a process
 // that has not been granted access to other apps' data, and the restart
-// stopped every running VM. RestartUTM, and its guard, went with it — there
-// is nothing left that restarts UTM. See assets/utm-import.applescript.
+// stopped every running VM. RestartUTM, and its guard, went with it. The one
+// restart left is recoverUTM's (vm_start.go), of a UTM that does not answer,
+// and only when no VM is running. See assets/utm-import.applescript.
 func registerBundle(staged, name string) error {
 	// The staged bundle goes whatever happens: it is a clone of UTM's copy on
 	// success, and a half-registered nothing on failure. Removed through
@@ -645,7 +622,7 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 	if !vm.IsRunning() {
 		// Resuming a suspended VM restores RAM and never reaches the firmware,
 		// so this is both the fast path and the one needing no keystrokes.
-		if err := vm.StartWithDisplay(); err != nil {
+		if err := vm.StartWithDisplay(say); err != nil {
 			return err
 		}
 		say("waiting up to %s for Windows to answer", timeout)

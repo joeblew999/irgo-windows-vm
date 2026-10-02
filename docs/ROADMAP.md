@@ -48,7 +48,7 @@ To close it:
 4. Let it finish, then `app-create` a probe into the new VM.
 
 **Cost and risk:** about 45 minutes of wall clock. `vm-create` no longer restarts UTM
-(since 30 Sep 2026 UTM imports the bundle), so `irgo-win11` can keep running. Whoever owns the machine decides when this runs.
+while a VM is running (since 30 Sep 2026 UTM imports the bundle), so `irgo-win11` can keep running. Whoever owns the machine decides when this runs.
 
 **What it catches that nothing else can:**
 

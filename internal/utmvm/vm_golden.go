@@ -561,7 +561,7 @@ func finishInstall(vmRef string, logf func(string, ...any)) error {
 		logf("install medium out")
 	}
 	vm := Named(vmRef)
-	if err := vm.StartWithDisplay(); err != nil {
+	if err := vm.StartWithDisplay(logf); err != nil {
 		return err
 	}
 	return vm.waitForAgentEvery(10*time.Minute, 5*time.Second)

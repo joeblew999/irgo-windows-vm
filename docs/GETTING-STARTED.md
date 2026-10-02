@@ -9,9 +9,10 @@ AI agent is in [For agents](FOR-AGENTS.md).
 
 ## What you need
 
-- **A Mac with Apple Silicon.** Windows 11 ARM64 is the only guest: it is the
-  platform whose behaviour cannot be checked by reading code on a Mac
-  ([scope](ARCHITECTURE.md#scope-windows-only)).
+- **A Mac with Apple Silicon.** Windows 11 ARM64 is the guest all of this is
+  for: it is the platform whose behaviour cannot be checked by reading code on
+  a Mac. A Linux VM to SSH into can be made beside it
+  ([scope](ARCHITECTURE.md#scope-windows-and-linux-to-ssh-into)).
 - **About 33 GB of disk** once Windows is installed
   ([what it costs](USING.md#what-it-costs)).
 - **UTM**, the hypervisor. `vm-create` installs it from its signed `.dmg` if it

@@ -31,6 +31,7 @@ const (
 	diskNone       diskNeed = iota // the VM exists: booting it writes little
 	diskForClone                   // cloneReserveBytes
 	diskForInstall                 // installReserveBytes
+	diskForLinux                   // linuxReserveBytes
 )
 
 func (d diskNeed) bytes() int64 {
@@ -39,8 +40,21 @@ func (d diskNeed) bytes() int64 {
 		return cloneReserveBytes
 	case diskForInstall:
 		return installReserveBytes
+	case diskForLinux:
+		return linuxReserveBytes
 	}
 	return 0
+}
+
+// memoryMiB is the memory the VM that needs this disk is made with.
+func (d diskNeed) memoryMiB() int {
+	switch d {
+	case diskForClone:
+		return cloneMemoryMiB
+	case diskForLinux:
+		return linuxMemoryMiB
+	}
+	return vmMemoryMiB
 }
 
 func (d diskNeed) String() string {
@@ -49,6 +63,8 @@ func (d diskNeed) String() string {
 		return "a clone"
 	case diskForInstall:
 		return "an install"
+	case diskForLinux:
+		return "a Linux VM from the cloud image"
 	}
 	return "nothing new"
 }
@@ -150,10 +166,7 @@ func decideCapacity(f capacityFacts) (Answer, string) {
 	}
 	var used int64
 	var running []string
-	need := int64(vmMemoryMiB) << 20
-	if f.plan.Disk == diskForClone {
-		need = int64(cloneMemoryMiB) << 20
-	}
+	need := int64(f.plan.Disk.memoryMiB()) << 20
 	found := !f.plan.Exists
 	for _, v := range f.vms {
 		if strings.EqualFold(v.Name, f.plan.VM) {

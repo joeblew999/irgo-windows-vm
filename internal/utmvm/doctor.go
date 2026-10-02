@@ -109,6 +109,13 @@ func Externals() []External {
 			Fix: "irgo-winvm iso-create -fetch",
 		},
 		{
+			Name: "Ubuntu 24.04 ARM64 cloud image",
+			Path: LinuxImagePath(),
+			Why: "what a Linux VM is made from: Ubuntu's own image of " + linuxImageRelease + ", pinned by " +
+				"SHA-256. Only vm-create -os linux needs it.",
+			Fix: "irgo-winvm vm-create -os linux -vm <name> -install, which downloads it from " + linuxImageURL,
+		},
+		{
 			Name: "the VM itself",
 			Path: vmDirOrEmpty(),
 			Why: "machine state, not source: a 64 GB sparse disk with Windows installed on it. " +

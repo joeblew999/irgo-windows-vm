@@ -375,7 +375,7 @@ permissive; nothing in the module graph is copyleft.
 |---|---|
 | MIT | `anchore/go-lzo`, `diskfs/go-diskfs`, `djherbis/times`, `sirupsen/logrus`, `google/jsonschema-go`, `modelcontextprotocol/go-sdk`, `segmentio/asm`, `segmentio/encoding` |
 | BSD | `elliotwutingfeng/asciiset`, `google/uuid`, `pierrec/lz4`, `pkg/xattr`, `ulikunitz/xz`, `yosida95/uritemplate`, `golang.org/x/sys`, `golang.org/x/oauth2`, `golang.org/x/sync`, `golang.org/x/time` |
-| Apache-2.0 | `klauspost/compress` |
+| Apache-2.0 | `klauspost/compress`, `lima-vm/go-qcow2reader` |
 
 - **Nineteen modules**, up from eleven before the MCP server. The eight it added
   are `go-sdk` and what it pulls in: `jsonschema-go`, `segmentio/asm`,
@@ -385,9 +385,16 @@ permissive; nothing in the module graph is copyleft.
 - **`go-sdk` is mid-relicence**: Apache-2.0 for new contributions, MIT for older
   un-relicensed ones. Both are permissive and neither adds a condition beyond
   attribution. None of the eight ships a `NOTICE` file.
-- **`klauspost/compress` (Apache-2.0)** is the only licence with a condition
-  beyond attribution, and it ships no `NOTICE` file, so there is nothing to
-  carry.
+- **`klauspost/compress` and `lima-vm/go-qcow2reader` are Apache-2.0**, which
+  has a condition beyond attribution: carrying a `NOTICE` file. Neither ships
+  one, so there is nothing to carry.
+- **`go-qcow2reader`** (added 2 Oct 2026) converts Ubuntu's qcow2 cloud image
+  to the raw disk a VM has. Its `go.mod` requires no module of its own.
+- **This table is behind the binary.** On 2 Oct 2026 `go list -deps` named 35
+  modules, 34 before `go-qcow2reader`: the R2 client (`aws-sdk-go-v2`,
+  `smithy-go`), the SMB client (`cloudsoda/go-smb2` and the `jcmturner`
+  modules under it), `ebitengine/purego` and others arrived without a row
+  here. Their licences have not been re-checked in this table.
 
 **If you add a dependency, re-check this table.** `go list -deps ./cmd/irgo-winvm`
 lists what actually reaches a user.

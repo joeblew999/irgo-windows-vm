@@ -114,6 +114,9 @@ func runToolFor(mcpClient, name string, args []string) (err error) {
 	if err := admit(c, v); err != nil {
 		return err
 	}
+	if err := windowsGuest(c, v); err != nil {
+		return err
+	}
 	if c.Mutates() {
 		release, err := utmvm.Acquire(locksFor(c.Command, v)...)
 		if err != nil {
@@ -177,6 +180,33 @@ func admit(c cmd, v values) error {
 		return nil
 	}
 	return utmvm.CheckVMChoice(v.caller, vm, given)
+}
+
+// guestOSOf is utmvm.GuestOSOf, a variable so tests can say what a VM holds
+// without a record on disk.
+var guestOSOf = utmvm.GuestOSOf
+
+// windowsGuest refuses a command that works only in a Windows guest when the
+// VM it names holds another system. A VM whose system cannot be told is
+// refused too: what these commands push and run would fail in the guest in
+// ways that name nothing.
+func windowsGuest(c cmd, v values) error {
+	if !c.WindowsGuest {
+		return nil
+	}
+	vm, _, ok := vmFlag(c, v)
+	if !ok {
+		return nil
+	}
+	os, err := guestOSOf(vm)
+	if err != nil {
+		return err
+	}
+	if os != utmvm.GuestWindows {
+		return fmt.Errorf("%w: %s is a %s VM, and %s works on Windows VMs only in this version. "+
+			"Reach a Linux VM with vm-ssh-create and ssh", errUsage, vm, os, c.Name)
+	}
+	return nil
 }
 
 // usedVM is the VM whose lease this command renews. vm-create records its own

@@ -57,6 +57,7 @@ type CapacityReport struct {
 type CapacityPolicy struct {
 	VMMemory         int64  `json:"vm_memory_bytes"`    // irgo-win11 and installs
 	CloneMemory      int64  `json:"clone_memory_bytes"` // clones of the golden image
+	LinuxMemory      int64  `json:"linux_memory_bytes"` // Linux VMs
 	MemoryReserve    int64  `json:"memory_reserve_bytes"`
 	DiskReserve      int64  `json:"disk_reserve_bytes"`
 	CloneReserve     int64  `json:"clone_reserve_bytes"`
@@ -71,6 +72,7 @@ type VMUsage struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Kind      string `json:"kind"`  // owner (irgo-win11), golden, or vm
+	OS        string `json:"os"`    // windows or linux, from its record; windows when it has none
 	Owner     string `json:"owner"` // from its record; "" when it has none
 	MemoryMiB int    `json:"memory_mib"`
 	Allocated int64  `json:"allocated_bytes"` // st_blocks, shared blocks included
@@ -112,7 +114,7 @@ type Room struct {
 // code that already keeps it small. Something under Root not named here was
 // not written by this tool, and is reported as such.
 var dataBounds = map[string]string{
-	"media":             "kept: iso-delete removes it; prune removes left-over scratch",
+	"media":             "kept: iso-delete removes the Windows media; the pinned Linux image stays; prune removes left-over scratch and Linux images of an older pin",
 	"bin":               "prune: staged binaries unused for 7 days",
 	"logs":              "irgo-winvm.log rotates at 8 MiB; prune: glaze run logs past 30 days or 100 MiB",
 	"shots":             "prune: past 14 days or 200 MiB, the newest of each stage kept",
@@ -138,6 +140,7 @@ func Capacity() CapacityReport {
 	r := CapacityReport{Taken: time.Now().UTC(), VMs: []VMUsage{}, Data: []DataUsage{}, Owners: []OwnerUsage{}}
 	q, qErr := QuotaFromEnv()
 	r.Policy = CapacityPolicy{VMMemory: int64(vmMemoryMiB) << 20, CloneMemory: int64(cloneMemoryMiB) << 20,
+		LinuxMemory:   int64(linuxMemoryMiB) << 20,
 		MemoryReserve: hostMemoryReserveBytes,
 		DiskReserve:   hostDiskReserveBytes, CloneReserve: cloneReserveBytes, InstallReserve: installReserveBytes,
 		Quota: q, StaleAfterSecond: int64(reportLease / time.Second)}
@@ -188,7 +191,7 @@ func Capacity() CapacityReport {
 	owners := map[string]*OwnerUsage{}
 	now := time.Now()
 	for _, v := range f.vms {
-		u := VMUsage{Name: v.Name, Status: v.Status, Kind: "vm", MemoryMiB: v.MiB}
+		u := VMUsage{Name: v.Name, Status: v.Status, Kind: "vm", OS: GuestWindows, MemoryMiB: v.MiB}
 		switch {
 		case strings.EqualFold(v.Name, DefaultVMName):
 			u.Kind = "owner"
@@ -208,6 +211,9 @@ func Capacity() CapacityReport {
 		}
 		if rec, ok := byName[strings.ToLower(v.Name)]; ok {
 			u.Owner = rec.Owner
+			if rec.OS != "" {
+				u.OS = rec.OS
+			}
 			idle := rec.Idle(now)
 			u.IdleS = int64(idle / time.Second)
 			u.Stale = idle > reportLease && !protectedVM(v.Name)

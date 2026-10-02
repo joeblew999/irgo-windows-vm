@@ -80,6 +80,11 @@ const (
 	installISO  = "install.iso"
 	guestISO    = "guest-tools.iso"
 	unattendISO = "unattend.iso"
+	seedISO     = "seed.iso"
+
+	// unattendLabel is the answer-file CD's volume name. Nothing looks for
+	// it; Setup finds autounattend.xml on any CD.
+	unattendLabel = "UNATTEND"
 )
 
 // DefaultVMDir is where UTM looks for bundles. Note UTM only rescans this

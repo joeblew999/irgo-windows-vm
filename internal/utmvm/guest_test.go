@@ -16,12 +16,27 @@ import (
 // Negative controls, run by hand 2 Oct 2026: with guestNamed returning
 // windowsGuest for a name it does not know, "an unknown system" is accepted;
 // with readRecord's error dropped in guestOf, "an unreadable record" is
-// Windows.
+// Windows; with names remembered like UUIDs, "again" is still Windows after
+// it was made anew as Linux.
 func TestGuestOfReadsTheRecord(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	guestCache.Clear()
 	t.Cleanup(guestCache.Clear)
 	now := time.Now().UTC()
+	// A name is read from its record every time, never remembered: a VM
+	// deleted and made again under the same name may hold another system.
+	if err := writeRecord(VMRecord{Name: "again", Created: now, LastUsed: now}); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := guestOf("again"); err != nil || g.name != GuestWindows {
+		t.Fatalf("again, first: %q, %v", g.name, err)
+	}
+	if err := writeRecord(VMRecord{Name: "again", Created: now, LastUsed: now, OS: GuestLinux}); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := guestOf("again"); err != nil || g.name != GuestLinux {
+		t.Fatalf("again, made anew as Linux: %q, %v; want linux", g.name, err)
+	}
 	for _, r := range []VMRecord{
 		{Name: "old", Owner: "a", Created: now, LastUsed: now},
 		{Name: "win", Owner: "a", Created: now, LastUsed: now, OS: "windows"},

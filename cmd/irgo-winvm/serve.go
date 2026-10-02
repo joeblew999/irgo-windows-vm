@@ -107,7 +107,7 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	// another VM would leave too little memory or disk, and the clone
 	// recorded as the job's caller's, so status and vm-reap see whose it is.
 	owner := utmvm.Caller{ID: remote.Owner(j), Source: "remote job"}
-	finish, err := utmvm.BeginCreate(vm, owner, false, e.overcommit, say)
+	finish, err := utmvm.BeginCreate(vm, owner, utmvm.GuestWindows, false, e.overcommit, say)
 	if err != nil {
 		return fail(err, "admitting a VM for the job")
 	}

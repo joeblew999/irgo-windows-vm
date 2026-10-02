@@ -16,6 +16,7 @@ run per platform.
 | date | result |
 |---|---|
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
+| 2 Oct 2026 | [a Linux VM that claude-rig rigs over SSH: `vm-create -os linux` 1 min 42 s with the download, `vm-ssh-create` 2.7 s, the rig's second run changed nothing; a Windows clone behaved as before](#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
 | 2 Oct 2026 | [a Linux guest by hand, before any code: Ubuntu's cloud image boots untyped, cloud-init reads the seed on a VirtIO CD and not on a USB one, the guest agent answers 34 s after the first start](#a-linux-guest-by-hand-before-the-code--measured-2-oct-2026) |
 | 2 Oct 2026 | [SSH into a clone: `vm-ssh-create` took 9 min 46 s the first time and 16 s on a repeat; a key login worked; `vm-ssh-delete` closed the port](#ssh-into-a-clone--measured-2-oct-2026) |
 | 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; a 4 GiB clone beside irgo-win11 passed glaze-check and vm-check; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
@@ -111,6 +112,79 @@ Not measured: `recoverUTM` and `utmApp.restart` against a UTM in this state
 lock is tested with real `flock`, against a fake UTM); `vm-create` from UTM
 closed, which was the original failure (on `claude-rig-test`, an existing
 clone, it stops at "no media" before any start); any UTM but 4.7.5.
+
+## A Linux VM that claude-rig rigs over SSH — measured 2 Oct 2026
+
+**Result:** `vm-create -os linux` made an Ubuntu Server 24.04 VM from nothing
+in 1 min 42 s, `vm-ssh-create` let the Mac's key in in 2.7 s, and
+[claude-rig](https://github.com/joeblew999/claude-rig)'s `push` rigged it and,
+run again, changed nothing. M2 Pro, 16 GiB, UTM 4.7.5, a 4 GiB Windows clone
+of another caller's running throughout. The binary was built from the branch
+that added `-os`; the key was the Mac's own `~/.ssh/id_ed25519.pub`. One VM,
+`linux-dev-a1`, deleted after. The Mac's screen was locked throughout.
+
+| step | command | what happened |
+|---|---|---|
+| create | `vm-create -os linux -vm linux-dev-a1 -install -golden=false` | **1 min 42 s**, exit 0. The image downloaded in 43 s (620,224,512 bytes, SHA-256 as pinned); converted to a raw disk, the seed written and the bundle imported by UTM in 5.0 s; started and answering in 48 s, 7 s of it the start request; the check 1.5 s: `cloud-init: ok (status: done)`, `account: ok (dev, sudo without a password, password locked)`, `ssh: ok (off: nothing listens on port 22 until vm-ssh-create)`, `/` 61G with 2.0G used, hostname `linux-dev-a1`. The guard counted it at 2.0 GiB of memory and 8.0 GiB of disk |
+| again, running | `vm-create -vm linux-dev-a1` | 3.2 s, four steps, the same check; no `-os` needed |
+| again, stopped | `vm-create -vm linux-dev-a1`, after `shutdown -h now` in the guest | 37.5 s: answering 32.8 s after the start, then the check |
+| SSH on, first run | `vm-ssh-create -vm linux-dev-a1` | **2.7 s**, 3 changes: passwords refused (`/etc/ssh/sshd_config.d/00-irgo-winvm.conf`), key authorized (`/home/dev/.ssh/authorized_keys`), `ssh.socket` enabled and started. Host keys were already there, from cloud-init. Port 22 answered `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19`; exit 0 |
+| login | `ssh dev@192.168.64.59 'whoami; sudo -n id -un'` with `BatchMode=yes` | `dev`, `root`: the key was accepted and sudo asked nothing |
+| a password | the same with `PubkeyAuthentication=no` | `Permission denied (publickey)`: the server offers no password method. `ssh root@…` with the key: the same refusal |
+| repeat | `vm-ssh-create -vm linux-dev-a1` | 2.2 s, `ssh: already on, nothing changed`; exit 0 |
+| the rig, looking | `mise run push -- dev@192.168.64.59 --known-hosts /dev/null --dry-run`, in claude-rig | `bootstrap: ok git, curl, bash`, three `would` lines, `Nothing was changed`; exit 0 |
+| the rig, first run | the same without `--dry-run` | exit 0, **10 `change` lines**: the tool list, the tools, `PATH` in `.bashrc` and `.profile`, Claude Code 2.1.287 by the native installer, and five for the Claude config. `Login` and `Session` each print `skip`: there is no terminal to ask on |
+| the rig, second run | the same again | exit 0, **no `change` line**: every row `ok`, `apply: already up to date`, the same two `skip` lines |
+| a reboot inside | `ssh … 'sudo reboot'`, then `ssh` 20 s later | logged in again: `ssh.socket` is enabled, so it comes back by itself |
+| undo | `vm-ssh-delete -vm linux-dev-a1` | 3.9 s: sshd stopped and disabled, 2 `authorized_keys` files and the configuration file removed, port 22 no longer answers (and `nc -z` from the Mac got no connection); exit 0 |
+| undo again | `vm-ssh-delete -vm linux-dev-a1` | 3.4 s, exit 0, 0 files removed |
+| on again | `vm-ssh-create -vm linux-dev-a1` | 3.5 s, 3 changes, key login worked |
+| Windows-only commands | `app-create`, `vm-repair` with `-vm linux-dev-a1`; `vm-create -vm linux-dev-a1 -os windows` | each exit 2, naming the VM and its system; nothing was run in the guest |
+| delete without `-force` | `vm-delete -vm linux-dev-a1` | exit 5: "5.6 GB of VM, and the Linux on it" |
+| delete | `vm-delete -vm linux-dev-a1 -force` | 3.9 s, 5.6 GB reclaimed, the record gone; again: nothing to delete, exit 0. The three other VMs untouched |
+
+- **M8, the rig in 2 GiB:** it installed and nothing was killed for memory
+  (no `oom-kill` in the kernel log). Afterwards 263 MiB in use, 1689 MiB
+  available, no swap configured; `claude --version` and the mise tools ran;
+  `/home/dev` held 1.5 GB and the VM's disk 5.6 GiB. **Not measured:** a
+  logged-in Claude session at work in it, which needs a terminal for the
+  login.
+- **The image's allocated size:** 2.5 GiB as converted, 4.3 GiB after a first
+  boot and three more ([by hand](#a-linux-guest-by-hand-before-the-code--measured-2-oct-2026)),
+  5.6 GiB with the rig in it.
+- **`vm-screen` on a Linux VM: not verified.** It exits 0 and writes a
+  picture, and with the Mac locked the picture is an empty window, as it is
+  for any VM. The boot photographs `vm-create` takes failed or were empty for
+  the same reason. Whether `virtio-ramfb` shows Linux's console in UTM's
+  window is still unknown.
+- **Not measured:** the first boot on a slow or absent network; a VM name
+  that is not already a hostname; two Linux VMs at once.
+
+**Windows, after the same changes.** The guest description and the template
+are shared, so Windows was run too, on one clone, `linux-dev-wincheck`
+(Windows 11 ARM64, 4 GiB), deleted after:
+
+| check | what happened |
+|---|---|
+| the plist a Windows `vm-create` writes | **byte for byte what it was**: the SHA-256 of `Config.Plist()` for a fixed name, UUID and MAC, with and without GPU acceleration, is the same before and after the template gained its four values (`e021b9a1…5fc1`, `f5cff3f1…6a25`). No Windows install was run: it needs 30 GiB and the Mac had 31 free |
+| `vm-create -vm linux-dev-wincheck` | cloned in 1.7 s, answering in 26 s, 32.5 s in all; its record says `windows` |
+| `app-create` of the conformance suite, `-test.short` | 4.7 s, PASS, exit 0; `app-delete` twice, exit 0 both times |
+| `vm-ssh-create -vm linux-dev-wincheck`, first run | 7 min 22 s, the same 5 changes [as before](#ssh-into-a-clone--measured-2-oct-2026): capability installed, sshd started and set automatic, our firewall rule opened, Windows' own turned off, key authorized. Port 22 answered `SSH-2.0-OpenSSH_for_Windows_9.5`; exit 0 |
+| `ssh dev@192.168.64.60 "whoami & ver"` | `win11arm\dev`, 10.0.26100.4349 |
+| `vm-ssh-delete -vm linux-dev-wincheck` | 17.1 s, port 22 no longer answers; exit 0 |
+| `vm-delete -vm linux-dev-wincheck -force` | 12.8 GB reclaimed |
+
+**Cut short.** The owner needed UTM, so the session ended there, and these
+were not run:
+
+- on Windows, the repeat of `vm-ssh-create` and the second `vm-ssh-delete`;
+- on Linux, anything after two changes made late: `vm-create`'s check takes
+  `-New` and no longer fails on a VM that exists and has SSH on (before, a
+  `vm-create` after `vm-ssh-create` would have failed its check: found by
+  reading, never seen), and `guestOf` remembers a VM's system by UUID only.
+  Both are unit-tested and neither was run in a guest. The runs above used
+  the binary from before them; for a VM just made the check is the same.
+
 ## A Linux guest by hand, before the code — measured 2 Oct 2026
 
 The five questions the Linux plan (`.plans/2026-10-02_1950_linux-vms.md`)

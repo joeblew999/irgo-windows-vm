@@ -75,12 +75,13 @@ func reportVMs(say func(string, ...any)) {
 		byName[strings.ToLower(r.Name)] = r
 	}
 	now := time.Now()
-	say("%-20s %-8s %-40s %-17s %s", "VM", "STATE", "OWNER", "LAST USED", "IDLE")
+	say("%-20s %-8s %-8s %-40s %-17s %s", "VM", "STATE", "OS", "OWNER", "LAST USED", "IDLE")
 	if lErr != nil {
 		say("cannot list UTM's VMs: %v", lErr)
 	}
 	for _, e := range entries {
-		owner, last, idle := "(no record)", "", ""
+		// A VM with no record is Windows: every VM made before records said.
+		owner, last, idle, os := "(no record)", "", "", utmvm.GuestWindows
 		switch {
 		case strings.EqualFold(e.Name, utmvm.DefaultVMName):
 			owner = "(the machine's owner; reserved)"
@@ -91,13 +92,16 @@ func reportVMs(say func(string, ...any)) {
 			owner = r.Owner
 			last = r.LastUsed.Local().Format("2 Jan 15:04")
 			idle = r.Idle(now).Round(time.Minute).String()
+			if r.OS != "" {
+				os = r.OS
+			}
 			delete(byName, strings.ToLower(e.Name))
 		}
-		say("%-20s %-8s %-40s %-17s %s", e.Name, e.Status, owner, last, idle)
+		say("%-20s %-8s %-8s %-40s %-17s %s", e.Name, e.Status, os, owner, last, idle)
 	}
 	if lErr == nil {
 		for _, r := range byName {
-			say("%-20s %-8s %-40s %-17s %s", r.Name, "gone", r.Owner,
+			say("%-20s %-8s %-8s %-40s %-17s %s", r.Name, "gone", r.OS, r.Owner,
 				r.LastUsed.Local().Format("2 Jan 15:04"), "record left over; vm-reap forgets it")
 		}
 	}

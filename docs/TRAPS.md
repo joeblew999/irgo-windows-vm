@@ -55,6 +55,11 @@ are [on its page](WORKER.md#traps).
 | Windows' own firewall rule for OpenSSH Server | the guest's network is filed as Public, and connections to port 22 were dropped until the rule was set for every profile (by hand, 2 Oct 2026, build 26100.4349) | `vm-ssh.ps1` adds its own rule for every profile, from the local subnet, and turns Windows' off |
 | an administrator's SSH key in `~\.ssh\authorized_keys` | sshd does not read it: for an administrator the keys are in `C:\ProgramData\ssh\administrators_authorized_keys`, and that file is ignored unless only Administrators and SYSTEM can write it | write that file and restrict it with `icacls`, as `vm-ssh.ps1` does |
 | `Add-WindowsCapability` for `OpenSSH.Server` | minutes the first time, with nothing printed | `vm-ssh-create` says so before it starts and allows 20 minutes |
+| a cloud-init seed on a **USB** CD | cloud-init never runs: no account, no network configuration at all, two minutes in `systemd-networkd-wait-online`, then a login prompt with the hostname `ubuntu` that nobody can use. From the host it is a VM that started and never answers (twice, 2 Oct 2026; the cause was not isolated) | attach the seed as a **VirtIO** CD, where it is `/dev/vdb` |
+| Ubuntu's cloud image and port 22 | `ssh.socket` is enabled and listening from the first boot, on every address | the seed turns it off, and `vm-create` checks nothing listens |
+| `utmctl ip-address` on a Linux VM's first boot | fails at once with `OSStatus error -2700`, then hangs, until cloud-init has installed `qemu-guest-agent`; the same as a VM that will never answer | wait with a deadline; `vm-create` gives a first boot ten minutes |
+| the Mac's screen locked | `vm-screen` and every boot photograph show an empty window, or fail with `could not create image from window`; nothing says the lock is why | unlock the Mac to see a VM. A locked Mac still boots a Linux VM, which needs nothing typed |
+| a Go file named `*_linux.go` | compiled only for `GOOS=linux`, so on a Mac everything in it is `undefined`, with no word about the file name | name it otherwise (`linux_vm.go`) |
 
 ## Driving a window on Windows, and the hosted runner
 

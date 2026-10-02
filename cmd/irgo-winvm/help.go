@@ -53,6 +53,15 @@ A VM in seconds, once one has been installed the slow way:
                        licence forbids sharing it, and every clone needs its
                        own licence
 
+A Linux VM beside the Windows ones, for a machine to SSH into:
+
+     vm-create -os linux -vm <name> -install
+                    Ubuntu Server 24.04 ARM64 from Ubuntu's cloud image (%s,
+                    downloaded once), answering in about a minute: an
+                    account dev with sudo and no password, SSH off until
+                    vm-ssh-create. app-create and the commands under it are
+                    for Windows VMs only
+
 A shell in the VM instead of one program:
 
      vm-ssh-create  turn on the OpenSSH server in the VM, allow your public
@@ -87,6 +96,6 @@ which they build and record into:
      glaze-status print that record, and whether it still holds
 
 Every command takes -h for its flags. More: %s
-`, utmvm.ISODownloadSize(), utmvm.RepoURL, utmvm.SiteURL)
+`, utmvm.ISODownloadSize(), utmvm.LinuxImageDownloadSize(), utmvm.RepoURL, utmvm.SiteURL)
 	return nil
 }

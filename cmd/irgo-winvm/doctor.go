@@ -322,7 +322,9 @@ func day(t time.Time) string { return t.Format("2 Jan 2006") }
 var notYet = map[string]string{
 	"Go toolchain":        "optional", // for building your .exe, and glaze-check
 	"UTM guest tools ISO": "not yet",  // vm-create downloads it
-	"the VM itself":       "not yet",  // UTM makes it on first use
+	// vm-create -os linux downloads it; a Mac with only Windows VMs never does
+	"Ubuntu 24.04 ARM64 cloud image": "optional",
+	"the VM itself":                  "not yet", // UTM makes it on first use
 }
 
 func externalRow(e utmvm.External) doctorRow {

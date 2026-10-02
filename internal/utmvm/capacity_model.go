@@ -28,6 +28,13 @@ const vmMemoryMiB = 8192
 // -windows and vm-check (docs/RESULTS.md, "VM capacity").
 const cloneMemoryMiB = 4096
 
+// linuxMemoryMiB is what a Linux VM is made with. A server image with no
+// desktop: 275 MiB in use after its first boot (docs/RESULTS.md, "A Linux
+// guest by hand"). On a 16 GiB Mac one fits beside irgo-win11 and a Windows
+// clone both stopped or either running, and beside both running it does not
+// (16 - 8 - 4 - 2 = 2 left, want 4).
+const linuxMemoryMiB = 2048
+
 // hostMemoryReserveBytes is the memory left for macOS and the owner's own
 // work after every VM has its configured memory. 4 GiB: the system alone sits
 // around 3 GiB, and on 1 Oct 2026 a 16 GiB Mac with one 8 GiB VM running was
@@ -59,6 +66,13 @@ const cloneReserveBytes = 4 << 30
 // covers vm-create pulling the golden image when there is none here: 8.4 GB
 // of chunks, then the bundle rebuilt (19 GB of data, measured 1 Oct 2026).
 const installReserveBytes = 30 << 30
+
+// linuxReserveBytes is what a Linux VM made from the cloud image needs free:
+// the image as a raw disk holds 2.5 GiB before its first boot and 4.3 GiB
+// after one and three more boots (measured 2 Oct 2026), and it is then
+// allowed to grow like any VM. Twice cloneReserveBytes covers both. The
+// download itself, 0.6 GB once, is inside hostDiskReserveBytes's margin.
+const linuxReserveBytes = 2 * cloneReserveBytes
 
 // Quota is how much one caller (an owner in vms/) may hold. Zero means no
 // limit.

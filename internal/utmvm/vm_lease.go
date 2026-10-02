@@ -324,10 +324,16 @@ func carryOut(d ReapDecision, say func(string, ...any)) error {
 // this one's memory as taken.
 //
 // overcommit skips the memory half of the check (CapacityPlan.Overcommit).
+// osName is the system a VM that does not exist yet will hold (GuestWindows
+// or GuestLinux): it decides what the VM needs, and goes in its record.
 //
 // finish must be called when vm-create is done, whether it worked or not: it
 // clears the creator, and drops the record if no VM came of it.
-func BeginCreate(name string, c Caller, noGolden, overcommit bool, say func(string, ...any)) (finish func(), err error) {
+func BeginCreate(name string, c Caller, osName string, noGolden, overcommit bool, say func(string, ...any)) (finish func(), err error) {
+	g, err := guestNamed(osName)
+	if err != nil {
+		return nil, err
+	}
 	release, err := acquireWithin(10*time.Second, CapacityLock)
 	if err != nil {
 		return nil, err
@@ -346,7 +352,11 @@ func BeginCreate(name string, c Caller, noGolden, overcommit bool, say func(stri
 	}
 
 	plan := CapacityPlan{VM: name, Exists: exists, Overcommit: overcommit, Owner: c.ID}
-	if !exists {
+	switch {
+	case exists:
+	case g.name == GuestLinux:
+		plan.Disk = diskForLinux
+	default:
 		plan.Disk = diskForInstall
 		if !noGolden {
 			if _, ok, gErr := goldenEntry(); gErr != nil {
@@ -364,7 +374,7 @@ func BeginCreate(name string, c Caller, noGolden, overcommit bool, say func(stri
 		return func() {}, TouchVM(name)
 	}
 	now := time.Now().UTC()
-	r := VMRecord{Name: name, Owner: c.ID, OwnerSource: c.Source, Created: now, LastUsed: now, CreatingPID: os.Getpid()}
+	r := VMRecord{Name: name, Owner: c.ID, OwnerSource: c.Source, Created: now, LastUsed: now, CreatingPID: os.Getpid(), OS: g.name}
 	if err := writeRecord(r); err != nil {
 		return nil, err
 	}

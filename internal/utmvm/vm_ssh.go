@@ -3,7 +3,6 @@ package utmvm
 import (
 	"bufio"
 	"bytes"
-	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -17,12 +16,9 @@ import (
 
 // SSH into a guest: the OpenSSH server turned on, one public key allowed in.
 
-// vmSSHScript does all of it in the guest, as SYSTEM, and with -Remove undoes
-// it. A script pushed and run through the agent, like vm-repair's, because
-// that is the one way anything here runs in the guest and is checked.
-//
-//go:embed assets/vm-ssh.ps1
-var vmSSHScript string
+// Everything in the guest is one script, which the guest's description names
+// (guestOS.sshScript): pushed and run through the agent, like vm-repair's,
+// because that is the one way anything here runs in the guest and is checked.
 
 const (
 	// sshPort is where sshd listens. The script opens the same number.
@@ -35,10 +31,6 @@ const (
 	// sshAnswerWait is how long port 22 is given to answer from the Mac once
 	// the guest says sshd is listening and the firewall rule is in.
 	sshAnswerWait = 30 * time.Second
-
-	// ipconfigHeader starts ipconfig's output, which follows the script's in
-	// the one batch both run in.
-	ipconfigHeader = "Windows IP Configuration"
 )
 
 // ErrSSHKey is a -key that cannot be used: unreadable, not one public key, or
@@ -122,23 +114,27 @@ func parseSSHPublicKey(data []byte) (SSHKey, error) {
 
 // VMSSHCreate turns the guest's OpenSSH server on, allows key in for user, and
 // returns the address at which port 22 answered from this Mac with an SSH
-// banner. Everything in the guest is assets/vm-ssh.ps1, as SYSTEM; it says
-// what it changed and what was already so, one line each through say.
+// banner. Everything in the guest is its system's ssh script (guest.go); it
+// says what it changed and what was already so, one line each through say.
 //
-// The address is the guest's own account of itself (ipconfig, in the same
-// batch), not the cached one pushes use: a stale address here would name
-// another VM in the line the caller is told to connect to.
+// The address is the guest's own account of itself (its address command, in
+// the same batch), not the cached one pushes use: a stale address here would
+// name another VM in the line the caller is told to connect to.
 func VMSSHCreate(vmRef, user string, key SSHKey, timeout time.Duration, say func(string, ...any)) (string, error) {
-	script := guestPublic + `\irgo-vm-ssh.ps1`
-	if err := pushScript(vmRef, script, vmSSHScript); err != nil {
+	g, err := guestOf(vmRef)
+	if err != nil {
+		return "", err
+	}
+	script := g.publicPath(g.sshFile)
+	if err := pushScript(vmRef, script, g.sshScript); err != nil {
 		return "", fmt.Errorf("pushing the ssh script: %w", err)
 	}
-	keyGuest := guestPublic + `\irgo-vm-ssh-key.pub`
-	if err := pushScript(vmRef, keyGuest, key.Line()+"\r\n"); err != nil {
+	keyGuest := g.publicPath("irgo-vm-ssh-key.pub")
+	if err := pushScript(vmRef, keyGuest, key.Line()+g.eol); err != nil {
 		return "", fmt.Errorf("pushing the public key: %w", err)
 	}
-	say("running it in the guest as SYSTEM; the first time it installs OpenSSH Server from Windows Update, which takes minutes")
-	ips, err := runSSHScript(vmRef, []string{"-User", user, "-KeyFile", keyGuest}, timeout, say)
+	say("running it in the guest as %s; %s", g.sshAs, g.sshFirstRun)
+	ips, err := runSSHScript(vmRef, g, []string{"-User", user, "-KeyFile", keyGuest}, timeout, say)
 	if err != nil {
 		return "", err
 	}
@@ -163,11 +159,14 @@ func VMSSHDelete(vmRef string, say func(string, ...any)) error {
 	if !Named(vmRef).AgentReady() {
 		return fmt.Errorf("%w: %s, so SSH cannot be turned off in it; start it and run this again", ErrNoAgent, vmRef)
 	}
-	script := guestPublic + `\irgo-vm-ssh.ps1`
-	if err := pushScript(vmRef, script, vmSSHScript); err != nil {
+	g, err := guestOf(vmRef)
+	if err != nil {
+		return err
+	}
+	if err := pushScript(vmRef, g.publicPath(g.sshFile), g.sshScript); err != nil {
 		return fmt.Errorf("pushing the ssh script: %w", err)
 	}
-	ips, err := runSSHScript(vmRef, []string{"-Remove"}, 5*time.Minute, say)
+	ips, err := runSSHScript(vmRef, g, []string{"-Remove"}, 5*time.Minute, say)
 	if err != nil {
 		return err
 	}
@@ -181,15 +180,15 @@ func VMSSHDelete(vmRef string, say func(string, ...any)) error {
 	return nil
 }
 
-// runSSHScript runs the pushed script with args, then ipconfig, in one batch,
-// says the script's lines, and returns the guest's IPv4 addresses.
-func runSSHScript(vmRef string, args []string, timeout time.Duration, say func(string, ...any)) ([]string, error) {
-	ps := []string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", guestPublic + `\irgo-vm-ssh.ps1`}
-	res, err := appExecSteps(vmRef, [][]string{append(ps, args...), {"ipconfig"}}, timeout, say)
+// runSSHScript runs the pushed script with args, then the guest's address
+// command, in one batch, says the script's lines, and returns the guest's
+// IPv4 addresses.
+func runSSHScript(vmRef string, g guestOS, args []string, timeout time.Duration, say func(string, ...any)) ([]string, error) {
+	res, err := appExecSteps(vmRef, [][]string{g.sshRun(g.publicPath(g.sshFile), args), g.addrCmd}, timeout, say)
 	if err != nil {
 		return nil, err
 	}
-	lines, ips := splitSSHOutput(res.Stdout)
+	lines, ips := splitSSHOutput(g, res.Stdout)
 	for _, l := range lines {
 		say("%s", l)
 	}
@@ -197,21 +196,21 @@ func runSSHScript(vmRef string, args []string, timeout time.Duration, say func(s
 		return nil, fmt.Errorf("the ssh script exited %d in the guest", res.ExitCode)
 	}
 	if len(ips) == 0 {
-		return nil, errors.New("the ssh script succeeded, and the guest's ipconfig reported no IPv4 address")
+		return nil, fmt.Errorf("the ssh script succeeded, and the guest's %s reported no IPv4 address", g.addrCmd[0])
 	}
 	return ips, nil
 }
 
-// splitSSHOutput separates what the script printed from the ipconfig output
-// that follows it, and reads the addresses out of the latter.
-func splitSSHOutput(stdout string) (lines, ips []string) {
-	script, ipconfig, _ := strings.Cut(stdout, ipconfigHeader)
+// splitSSHOutput separates what the script printed from the address command's
+// output that follows it, and reads the addresses out of the latter.
+func splitSSHOutput(g guestOS, stdout string) (lines, ips []string) {
+	script, addrs, _ := strings.Cut(stdout, g.addrHeader)
 	for _, l := range strings.Split(script, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			lines = append(lines, l)
 		}
 	}
-	return lines, ipconfigIPv4(ipconfig)
+	return lines, g.addrs(addrs)
 }
 
 // waitForSSH tries each address in turn until one answers with an SSH banner

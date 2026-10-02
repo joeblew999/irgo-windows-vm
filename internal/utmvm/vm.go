@@ -618,13 +618,17 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 	if vm.AgentReady() {
 		return nil
 	}
+	g, err := guestOf(vmRef)
+	if err != nil {
+		return err
+	}
 	if !vm.IsRunning() {
 		// Resuming a suspended VM restores RAM and never reaches the firmware,
 		// so this is both the fast path and the one needing no keystrokes.
 		if err := vm.StartWithDisplay(say); err != nil {
 			return err
 		}
-		say("waiting up to %s for Windows to answer", timeout)
+		say("waiting up to %s for %s to answer", timeout, g.label)
 
 		// Photographed as it goes, not once at each end.
 		//
@@ -656,8 +660,8 @@ func EnsureReady(vmRef, bundlePath string, timeout time.Duration, log func(strin
 		// minutes before failing. The screenshot above says which it is, and
 		// re-running is cheap.
 		return fmt.Errorf("%s started but has not answered in %s.\n"+
-			"  It is probably Windows Update; look at the screenshot above.\n"+
-			"  Re-run vm-create when it settles, or use vm-screen to watch", vmRef, timeout)
+			"  %s; look at the screenshot above.\n"+
+			"  Re-run vm-create when it settles, or use vm-screen to watch", vmRef, timeout, g.quiet)
 	}
 	// Already running and not answering: DO NOT TYPE.
 	//

@@ -13,24 +13,18 @@ import (
 	"time"
 )
 
-// guestTemp is where pushed binaries and captured output live in the guest.
-// C:\Windows\Temp rather than the user profile: it exists on every install and
-// does not depend on which account the agent runs as.
-const guestTemp = `C:\Windows\Temp`
-
-// guestPublic is where anything destined for the INTERACTIVE session lives.
-//
-// C:\Windows\Temp is fine for the agent, which runs as SYSTEM, but a scheduled
-// task running as the logged-in user cannot execute from there: the task
-// completes with "Last AppResult: 1" and no further explanation. C:\Users\Public
-// is readable, writable and executable by any interactive user. Verified by
-// running the same batch from both locations — Public produced output, Temp
-// did not.
-const guestPublic = `C:\Users\Public`
+// Where pushed binaries and captured output live in a Windows guest, and where
+// anything destined for the interactive session does: windowsGuest (guest.go)
+// says which and why. Named here because the app stage is Windows only, and
+// most of what it writes is a path under one of the two.
+var (
+	guestTemp   = windowsGuest.tempDir
+	guestPublic = windowsGuest.publicDir
+)
 
 // GuestPublicPath is name inside guestPublic: where a program run with -gui
 // can leave files for the host to Pull.
-func GuestPublicPath(name string) string { return guestPublic + `\` + name }
+func GuestPublicPath(name string) string { return windowsGuest.publicPath(name) }
 
 // Two prefixes for the files this package leaves in the guest, and they must
 // never overlap.
@@ -290,17 +284,22 @@ func appExecSteps(vmRef string, cmds [][]string, timeout time.Duration, say func
 		timeout = 10 * time.Minute
 	}
 
+	g, err := guestOf(vmRef)
+	if err != nil {
+		return res, err
+	}
+
 	// execPrefix, not scratchPrefix: these three are live for the duration of
 	// the call, and app-delete sweeps scratchPrefix with a glob.
 	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
-	batFile := guestTemp + `\` + execPrefix + stamp + `.bat`
-	outFile := guestTemp + `\` + execPrefix + `out-` + stamp + `.txt`
-	rcFile := guestTemp + `\` + execPrefix + `rc-` + stamp + `.txt`
+	batFile := g.tempPath(execPrefix + stamp + g.scriptExt)
+	outFile := g.tempPath(execPrefix + `out-` + stamp + `.txt`)
+	rcFile := g.tempPath(execPrefix + `rc-` + stamp + `.txt`)
 
-	if err := pushScript(vmRef, batFile, batchSteps(cmds, outFile, rcFile)); err != nil {
+	if err := pushScript(vmRef, batFile, g.script(cmds, outFile, rcFile)); err != nil {
 		return res, err
 	}
-	if _, err := Named(vmRef).Exec("cmd.exe", "/c", batFile); err != nil {
+	if _, err := Named(vmRef).Exec(g.runScript(batFile)...); err != nil {
 		return res, err
 	}
 
@@ -327,7 +326,7 @@ func appExecSteps(vmRef string, cmds [][]string, timeout time.Duration, say func
 	}
 	res.ExitCode = n
 
-	_, _ = Named(vmRef).Exec("cmd.exe", "/c", "del /q "+batFile+" "+outFile+" "+rcFile)
+	_, _ = Named(vmRef).Exec(g.remove(batFile, outFile, rcFile)...)
 	return res, nil
 }
 

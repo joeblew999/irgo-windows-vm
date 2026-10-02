@@ -173,14 +173,14 @@ func TestSplitSSHOutput(t *testing.T) {
 	out := "account: ok (dev, an administrator)\r\n" +
 		"   IPv4 Address. . . . . . . . . . . : 10.9.9.9\r\n" +
 		"ssh: already on, nothing changed\r\n" + ipconfigOut
-	lines, ips := splitSSHOutput(out)
+	lines, ips := splitSSHOutput(windowsGuest, out)
 	if len(lines) != 3 || lines[2] != "ssh: already on, nothing changed" {
 		t.Errorf("lines = %q", lines)
 	}
 	if want := []string{"192.168.64.40"}; !reflect.DeepEqual(ips, want) {
 		t.Errorf("ips = %v, want %v", ips, want)
 	}
-	if lines, ips := splitSSHOutput("account: there is no local account x\r\n"); len(lines) != 1 || len(ips) != 0 {
+	if lines, ips := splitSSHOutput(windowsGuest, "account: there is no local account x\r\n"); len(lines) != 1 || len(ips) != 0 {
 		t.Errorf("a script that failed before ipconfig: %q, %v", lines, ips)
 	}
 }

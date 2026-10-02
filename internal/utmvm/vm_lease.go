@@ -32,6 +32,10 @@ type VMRecord struct {
 	Created     time.Time `json:"created"`
 	LastUsed    time.Time `json:"last_used"`
 
+	// OS is the system inside the VM, a guestOS name (guest.go). Empty is
+	// Windows: every record written before the field existed.
+	OS string `json:"os,omitempty"`
+
 	// CreatingPID is the vm-create that is making this VM, while it is. The
 	// capacity check counts the memory of a VM still being made (see
 	// BeginCreate), and a dead pid is a create that was killed.

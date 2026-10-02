@@ -16,6 +16,7 @@ run per platform.
 | date | result |
 |---|---|
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
+| 2 Oct 2026 | [a Linux guest by hand, before any code: Ubuntu's cloud image boots untyped, cloud-init reads the seed on a VirtIO CD and not on a USB one, the guest agent answers 34 s after the first start](#a-linux-guest-by-hand-before-the-code--measured-2-oct-2026) |
 | 2 Oct 2026 | [SSH into a clone: `vm-ssh-create` took 9 min 46 s the first time and 16 s on a repeat; a key login worked; `vm-ssh-delete` closed the port](#ssh-into-a-clone--measured-2-oct-2026) |
 | 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; a 4 GiB clone beside irgo-win11 passed glaze-check and vm-check; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
 | 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
@@ -110,6 +111,57 @@ Not measured: `recoverUTM` and `utmApp.restart` against a UTM in this state
 lock is tested with real `flock`, against a fake UTM); `vm-create` from UTM
 closed, which was the original failure (on `claude-rig-test`, an existing
 clone, it stops at "no media" before any start); any UTM but 4.7.5.
+## A Linux guest by hand, before the code — measured 2 Oct 2026
+
+The five questions the Linux plan (`.plans/2026-10-02_1950_linux-vms.md`)
+says must be answered before code is written around them. M2 Pro, 16 GiB, UTM
+4.7.5, a 4 GiB Windows clone running beside each VM. Three disposable VMs
+(`linux-dev-m1`, `-m2`, `-m3`), one at a time, each deleted after. Nothing here
+used the tool except `vm-screen`: the image was converted and the seed built by
+a scratch Go program with the same libraries and options the tool has, the
+bundle was written by hand from `config.plist.tmpl`, UTM imported it through
+`utm-import.applescript`, and the guest was reached with `utmctl` alone.
+
+The VM: `noble-server-cloudimg-arm64.img` of **20260926** (620,224,512 bytes,
+SHA-256 `1d6bffe6…cefc55`, checked against Ubuntu's `SHA256SUMS`), converted
+from qcow2 to a raw sparse file and extended to 64 GiB, as a **VirtIO** disk;
+a seed CD of 57,344 bytes, label `cidata`, holding `user-data` and
+`meta-data`; `virtio-ramfb`, no TPM, clock in UTC, 2048 MiB, 4 CPUs. UTM
+imported that configuration without complaint.
+
+| # | question | answer |
+|---|---|---|
+| M1 | Does UTM's firmware boot the cloud image's disk on a fresh VM with nothing typed? | **Yes.** First boot: `BdsDxe: starting Boot0002 "UEFI Misc Device 2"`, the VirtIO disk, through the image's fallback loader. The image then registers its own entry, and every later boot is `Boot0005 "Ubuntu"`, `\EFI\ubuntu\shimaa64.efi`. No UEFI shell was seen in seven boots of three VMs; `startup.nsh` and `bootAssist` are not needed |
+| M2 | Does cloud-init read a seed CD made by go-diskfs? | **Yes on a VirtIO CD, no on a USB one.** The same image bytes both times, written as `isoBuildImage` writes them (ISO9660, Joliet and Rock Ridge on, trimmed to the volume size), label `cidata`. As a **USB** CD (what the Windows CDs are, and UTM's own default), cloud-init never ran: no line from it on the console, hostname left as `ubuntu`, no network configuration at all, `systemd-networkd-wait-online` failing after its two minutes, then a login prompt nobody can use. Twice, on two VMs. As a **VirtIO** CD it is `/dev/vdb`: `Datasource DataSourceNoCloud [seed=/dev/vdb]`, hostname and the `dev` account as asked. Why USB fails was not isolated. The likely reason: cloud-init decides whether to run at all from a systemd generator, 0.8 s into the first boot, and a USB disc may not be there that early. The plan asked about Joliet without Rock Ridge; `isoBuildImage` already writes both, so that was not the question |
+| M3 | Do `utmctl ip-address`, `exec`, `file push` and `file pull` work against Linux's `qemu-guest-agent`? | **Yes, all four.** `file push` of a 1 KiB script 0.25 s, `exec --cmd /bin/sh <script>` 0.16 s, `file pull` 0.19 s, `ip-address` 0.14 s. `exec` returned nothing and exited 0, as on Windows, so the script wrote its output and exit code to files that were pulled. It runs as root. The package is not in the image: cloud-init installed it (`packages: [qemu-guest-agent]`) |
+| M4 | Time from start to an answering agent | **First boot 33.7 s** (cloud-init finished at 29.3 s of uptime: account, `apt-get update`, the agent installed and started, root partition grown to 63 GiB). **Later cold boots 24.1 s and 24.4 s.** Polled every second; the start request itself returns in 2 to 3 s. Until the agent is installed `utmctl ip-address` first fails at once with `OSStatus error -2700`, then hangs, as it does for Windows |
+| M10 | Does a `sudo reboot` inside the guest come back with the agent answering, untyped? | **Yes, in 10.0 s** from the request, checked by the guest's own `uptime -s`. A shutdown from inside (`shutdown -h now`) leaves UTM reporting `stopped` in 4 to 6 s |
+
+Also seen, and not what the plan assumed:
+
+- **SSH is on in the image.** `ssh.socket` is enabled and active after the
+  first boot, port 22 is listening on every address, and cloud-init generated
+  host keys. Nobody can log in (`PasswordAuthentication no` is in the image's
+  `60-cloudimg-settings.conf`, `dev` has a locked password and no key), but
+  the port answers. The plan had it "stopped and disabled". So `vm-create`
+  has to turn it off for `vm-ssh-delete` to mean the same thing on both
+  systems.
+- **The netplan file cloud-init writes matches the first boot's MAC**
+  (`match: macaddress: "52:54:00:83:8d:0a"`, `set-name: enp0s1`). That is the
+  plan's M6, for the phase that clones.
+- **Disk.** The converted image holds 2.5 GiB on APFS before its first boot
+  (qcow2 virtual size 3.5 GiB, converted in 3.4 to 3.7 s) and 4.3 GiB after a
+  first boot, a reboot and two more boots. The guest reports 2.0 GiB used of
+  61 GiB.
+- **Memory.** 275 MiB used of 1952 MiB at rest.
+- **Not seen: the screen.** The Mac's screen was locked for the whole
+  session. `vm-screen` wrote a picture of the VM's window each time, and the
+  window was empty in every one, a Linux VM at its login prompt included, and
+  macOS would not capture the window of the Windows clone beside it at all. So
+  whether `virtio-ramfb` shows the Linux console in UTM's window is **not
+  measured**. What the guest was doing was read from a serial port added to
+  the hand-made VMs for this (`interface: tcp`), which is how the USB failure
+  above was found.
 
 ## SSH into a clone — measured 2 Oct 2026
 

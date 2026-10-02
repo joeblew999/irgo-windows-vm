@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 2 Oct 2026 | [SSH into a clone: `vm-ssh-create` took 9 min 46 s the first time and 16 s on a repeat; a key login worked; `vm-ssh-delete` closed the port](#ssh-into-a-clone--measured-2-oct-2026) |
 | 1 Oct 2026 | [VM capacity: a clone wrote 0.28 GiB of its own in 1.5 h of work; a 4 GiB clone beside irgo-win11 passed glaze-check and vm-check; the first prune freed 103 MB](#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026) |
 | 1 Oct 2026 | [several callers on one Mac: an agent refused the owner's VM, a second clone refused for memory, a busy clone kept and an idle one reaped](#several-callers-on-one-mac--measured-1-oct-2026) |
 | 1 Oct 2026 | [the drive tests on GitHub's Windows ARM64 runner: what took the foreground, and three green runs in a row](#the-drive-tests-on-githubs-windows-arm64-runner--measured-1-oct-2026) |
@@ -32,6 +33,26 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## SSH into a clone — measured 2 Oct 2026
+
+A fresh clone of the golden image (Windows 11 ARM64 26100.4349, 4 GiB), with
+another 4 GiB clone running beside it. The binary was built from the branch
+that added the commands; the key was the Mac's own `~/.ssh/id_ed25519.pub`.
+
+| step | command | what happened |
+|---|---|---|
+| the clone | `vm-create -vm vm-ssh-test` | cloned, booted and answering in 28.5 s |
+| first run | `vm-ssh-create -vm vm-ssh-test` | 9 min 46 s, nearly all of it Windows installing the OpenSSH Server capability. 5 changes: capability installed, sshd started and set automatic (it was Manual, Stopped), our firewall rule opened (TCP 22, local subnet, every profile), Windows' own rule turned off (it was for profile Private), key authorized. Port 22 answered `SSH-2.0-OpenSSH_for_Windows_9.5`; exit 0 |
+| login | `ssh dev@192.168.64.57 "whoami & ver"` with `BatchMode=yes` | `win11arm\dev`, 10.0.26100.4349: the key was accepted with no password |
+| repeat | `vm-ssh-create -vm vm-ssh-test` | 15.9 s, "already on, nothing changed"; exit 0 |
+| undo | `vm-ssh-delete -vm vm-ssh-test` | 19.9 s: sshd stopped and disabled, the rule and every key removed, port 22 no longer answers (checked from the Mac with `nc` as well); exit 0 |
+| undo again | `vm-ssh-delete -vm vm-ssh-test` | 16.7 s, exit 0. It reports "removed" again rather than saying it was already off |
+| clean up | `vm-delete -vm vm-ssh-test -force` | 14.9 GB reclaimed; `irgo-win11`, `irgo-golden` and the other clone untouched |
+
+Not measured: the first run on a guest that already has the capability (a
+golden image sealed with it would skip the ten minutes), a guest account that
+is not an administrator, and an x64 guest.
 
 ## VM capacity: what a clone really costs — measured 1 Oct 2026
 

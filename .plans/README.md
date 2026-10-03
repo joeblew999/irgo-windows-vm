@@ -16,6 +16,7 @@ Every workstream has a plan here — running, queued, or waiting on the owner. F
 | 5 | [`2026-09-30_1745_glaze-1b-upstream.md`](2026-09-30_1745_glaze-1b-upstream.md) — glaze §1b fix on a branch; Windows run, then file | owner + VM | waiting: Windows run, owner's "send" |
 | 6 | [`2026-09-30_1800_upstream-reports.md`](2026-09-30_1800_upstream-reports.md) — nine drafted upstream reports | owner | waiting: "send them" |
 | 7 | [`2026-10-02_1950_linux-vms.md`](2026-10-02_1950_linux-vms.md) — Linux VMs in the same tool, for claude-rig: cloud image, one guest seam, phases | owner, then agent | waiting: owner's decisions (the distribution, before phase 1) |
+| 9 | [`2026-10-01_1440_device-state-and-awake.md`](2026-10-01_1440_device-state-and-awake.md) — the Mac awake, its state reported to fleet-api, VMs kept running: `keeper` built (`feat/keeper`); the lid-closed mode left | owner, then agent | lid: waiting on the owner's hands (M1 to M8) |
 | 8 | [`2026-10-03_1200_docs-site-charter.md`](2026-10-03_1200_docs-site-charter.md) — charter's GitHub Pages site in place of docsite: what depends on docsite, and the steps | owner | waiting: owner's decision |
 
 Earlier work is in Done: [`done/`](done/) — 1 Oct: golden image, release v0.5.0, shared Mac, ledger, VM conformance, native + drive, remote driving, capacity, docs, Worker API; before that: upstream workflow restored (`upstream:*`), glaze#34 reported,

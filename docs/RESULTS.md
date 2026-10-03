@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 3 Oct 2026 | [the Linux golden image: sealed in 44 s (85 s with the shutdown, the clone and the verifying boot), 3.9 GiB; `vm-create -os linux` clones it and answers in 18 s, 30 s in all; two clones differ in MAC, address, machine-id and host keys](#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026) |
 | 2 Oct 2026 | [`vm-create` on a Linux VM that has SSH on passes its check (3.6 s), where the first-boot check exits 1; a Windows clone: `vm-ssh-create` 6 min 56 s, repeat 23 s, the undo twice](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026) |
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
 | 2 Oct 2026 | [a Linux VM that claude-rig rigs over SSH: `vm-create -os linux` 1 min 42 s with the download, `vm-ssh-create` 2.7 s, the rig's second run changed nothing; a Windows clone behaved as before](#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
@@ -37,6 +38,75 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## The Linux golden image, and clones in seconds — measured 3 Oct 2026
+
+**Result:** `vm-golden-create` seals a Linux VM into `irgo-golden-linux`, and
+`vm-create -os linux -vm <name>` then clones it: cloned in 2 s, answering 18 s
+after the start, named and checked, **30 s in all**, with no network needed
+and no `-install`. Two clones had different MACs, addresses, machine-ids and
+SSH host keys. They were measured **one after the other**, not side by side:
+the capacity guard refused the second while the first ran (below).
+
+M2 Pro, 16 GiB, macOS 27.0.1, UTM 4.7.5 open throughout, the screen locked.
+`claude-rig-test` (a 4 GiB Windows clone) and `claude-rig-linux` (2 GiB) of
+another caller's ran beside every step. The binary was built from the branch;
+every VM was made with `IRGO_WINVM_OWNER=golden-dev`: `golden-dev-l1` (the
+source), `golden-dev-a1`, `golden-dev-a2`, `golden-dev-w0`, and the tool's own
+`irgo-golden-linux-verify`; each was deleted, and `utmctl list` afterwards
+showed only the four VMs there before. `irgo-golden-linux` was then deleted
+too (`vm-golden-delete -os linux -force`), to give the disk back.
+
+| step | command | what happened |
+|---|---|---|
+| the source | `vm-create -os linux -vm golden-dev-l1 -install -golden=false` | 63 s, exit 0, the image already downloaded: bundle 5.7 s, answering 49.6 s after the start, the check 1.8 s |
+| seal, first try | `vm-golden-create -vm golden-dev-l1` | exit 1 at the trim step: `fstrim -av` reached `/boot/efi` (vfat) and got `FITRIM ioctl failed: Input/output error`, after trimming `/` and `/boot`. The script now trims the ext4 filesystems only |
+| seal, second try | the same | exit 1 at the clone: `expected one VirtIO system disk on golden-dev-l1, found 2`. The seed CD is VirtIO too, and UTM reports it, like the disk, as `removable false`; its scripting has no disk-or-CD property. The clone script now keeps the first drive on the system disk's interface, which is where every bundle this tool writes puts it |
+| **seal** | the same | **85 s, exit 0.** Boot 33 s (the source had been shut down); the seal's four steps 9.5 s: `facts` 1 s, `clean` 6 s, `trim` 2 s (`/` 59.1 GiB and `/boot` 824 MiB trimmed), `facts` 1 s; "sealed in 44 s" in the manifest is the boot and the steps. Shut down from inside in 11.6 s, cloned as `irgo-golden-linux` in 1.9 s, its verification clone answering 18 s after its start, named and checked in 3.5 s, deleted |
+| what the seal left | its last `facts` | `machine-id:` (empty), `host-keys: 0`, `authorized-keys: 0`, `cloud-init: off`, `netplan: 01-irgo-winvm.yaml` (cloud-init's `50-cloud-init.yaml` removed), 1.97 GB used in the guest |
+| **image size** | `doctor` | **3.9 GiB allocated** (4,192,612,352 bytes) of 64 GiB. With the source deleted all of it is its own |
+| clone 1 | `vm-create -os linux -vm golden-dev-a1` | **29.7 s**, exit 0, no `-install`: the guard counted 4.0 GiB of disk and 2.0 GiB of memory, cloned in 2.0 s, **answered 18 s** after the start, `hostname golden-dev-a1`, the check `cloud-init: off (a clone of the golden image, whose seal turned it off)`, account ok, `ssh: ok (off …)` |
+| clone 2, beside it | `vm-create -os linux -vm golden-dev-a2` | **exit 7**, refused for disk: 17.6 GiB free, and it wants 4.0 GiB for the clone, 4.0 GiB still promised to `golden-dev-a1` and 10.0 GiB for macOS. Memory would have passed (6.0 GiB left of the 4 wanted). So the two were measured one after the other |
+| SSH on | `vm-ssh-create -vm golden-dev-a1` | **3.2 s**, 4 changes, the first `host keys: generated now (ssh-keygen -A)`: the image has none. Port 22 answered `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19` |
+| a session | over SSH: `apt-get update`, then `apt-get install build-essential git jq` | 15 s, exit 0 |
+| a reboot inside | `sudo systemctl reboot` | logged in again 9 s later: hostname and machine-id kept |
+| again | `vm-create -vm golden-dev-a1` | 3.8 s, the same check, exit 0 |
+| undo, delete | `vm-ssh-delete`, `vm-delete -force` | the port closed; the delete printed "4.3 GB reclaimed", which counts the blocks it shared with the image: `df` showed 18 GiB free before and after |
+| clone 2 | `vm-create -os linux -vm golden-dev-a2`, with a1 gone | 28.7 s, exit 0: cloned 2.0 s, answered 18 s; `vm-ssh-create` 3.2 s |
+| a Windows clone | `vm-create -vm golden-dev-w0` | 35.1 s, exit 0: cloned 1.8 s, answered 27 s. The clone script changed for both systems, and Windows still clones |
+| delete the image | `vm-golden-delete -os linux`, then with `-force`, twice | exit 5 naming the image and its 3.9 GB; 2.3 s, the VM and `golden-linux.json` removed, `golden.json` untouched; again, "nothing to delete", exit 0 |
+
+**The two clones, side by side on paper** (read in each guest over SSH):
+
+| | `golden-dev-a1` | `golden-dev-a2` |
+|---|---|---|
+| MAC | `52:54:00:a4:40:d2` | `52:54:00:e9:ad:19` |
+| address | 192.168.64.67 | 192.168.64.68 |
+| DHCP client id | the MAC | the MAC |
+| machine-id | `4542746057a1470ab520edf24a5fdd9f` | `84f48bb1e98c49339ba91da8e1e106b0` |
+| ED25519 host key | `SHA256:aJ8UC754u7vo7tmXqjRG2hrXIyCK/q53OJemDTWBuXQ` | `SHA256:gGKwMDcgj0t+nJDdAKdkUtq18zOQg2BnH00j6I+QKtg` |
+| ECDSA, RSA | `b0+XH6cX…`, `wXy5VQjn…` | `9d0PBU6B…`, `Xd8V+Y5A…` |
+
+**The plan's questions:**
+
+| # | question | answer |
+|---|---|---|
+| M5 | Does UTM's `duplicate` clone a VirtIO raw disk as it clones NVMe, and do clones get different addresses? | **Yes.** 2.0 s, a new UUID, 0.0 GiB of its own after the boot, and .67 and .68. The machine-id is the VM's UUID: with `/etc/machine-id` empty, systemd takes the one QEMU gives as the machine's SMBIOS UUID (a1's id is its UUID `45427460-57A1-…` without the hyphens), so each clone has its own. The seal's netplan also sets `dhcp-identifier: mac`, so the lease follows the MAC `cloneVM` sets |
+| M6 | Does the network come up on a clone with a new MAC? | **Yes**, with the seal's `/etc/netplan/01-irgo-winvm.yaml` matching any `en*` interface by name. cloud-init's own file matched the first boot's MAC; a clone booted with that file was not tried |
+| M7 | Does a guest `fstrim` punch holes in the raw file on the host? | **Yes.** The first `fstrim` the VM ever had (59 GiB of `/` trimmed) took `disk.img` from 4.59 GB to 4.19 GB allocated; the next, a few minutes later, freed 6 MB |
+| M9 | What a Linux clone writes of its own over a session | **0.0 GiB** after its boot and `vm-ssh-create`; **0.4 GiB** after `apt-get update` and installing `build-essential`, `git` and `jq`, and still 0.4 after a reboot. A clone is counted at the 4 GiB clone reserve (`diskForLinuxClone`), not the 8 GiB a VM made from the cloud image is |
+
+Not run:
+
+- **Two clones running at once.** The guard said no on this Mac's disk; the
+  plan's "both run at once" is not shown. With the other caller's two VMs
+  stopped, or 0.4 GiB more free, it would have said yes.
+- **A clone booted with cloud-init's MAC-matched netplan file**, the failure
+  the seal's own file exists to prevent (M6's other half).
+- **A Windows seal** with the shared code as it is now (the steps, the shutdown
+  and the clone are each one body for both systems). That is the next change,
+  which re-makes the Windows image.
+- `vm-screen` on any of these: the Mac was locked.
 
 ## `vm-create` on a Linux VM that has SSH on, and the Windows clone again — measured 2 Oct 2026
 

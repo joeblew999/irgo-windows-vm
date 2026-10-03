@@ -59,6 +59,8 @@ are [on its page](WORKER.md#traps).
 | Ubuntu's cloud image and port 22 | `ssh.socket` is enabled and listening from the first boot, on every address | the seed turns it off, and `vm-create` checks nothing listens |
 | `utmctl ip-address` on a Linux VM's first boot | fails at once with `OSStatus error -2700`, then hangs, until cloud-init has installed `qemu-guest-agent`; the same as a VM that will never answer | wait with a deadline; `vm-create` gives a first boot ten minutes |
 | the Mac's screen locked | `vm-screen` and every boot photograph show an empty window, or fail with `could not create image from window`; nothing says the lock is why | unlock the Mac to see a VM. A locked Mac still boots a Linux VM, which needs nothing typed |
+| `fstrim -a` in a Linux VM | `/boot/efi` (vfat, on the VirtIO disk) fails with `FITRIM ioctl failed: Input/output error` and the command exits 1, after trimming the rest (3 Oct 2026) | trim the ext4 filesystems by name, as `vm-golden-seal.sh` does |
+| telling a VM's disk from its CD in UTM's AppleScript | there is no such property, and `removable` is `false` for both: a Linux VM's seed CD and its disk are each a VirtIO drive that is not removable (3 Oct 2026) | keep the first drive on the system disk's interface; every bundle this tool writes lists the disk first (`utm-clone.applescript`) |
 | a Go file named `*_linux.go` | compiled only for `GOOS=linux`, so on a Mac everything in it is `undefined`, with no word about the file name | name it otherwise (`linux_vm.go`) |
 
 ## Driving a window on Windows, and the hosted runner

@@ -60,9 +60,10 @@ contract for an agent from another repository:
 When your work drives a machine over SSH rather than running one `.exe`
 (installers, provisioning, a remote shell), turn SSH on in a VM you made. For
 a Linux machine, make the VM with
-`irgo-winvm vm-create -os linux -vm <name> -install` first: Ubuntu Server
-24.04, about a minute, a job over MCP like any `-install`
-([A Linux VM](USING.md#a-linux-vm)). SSH is the only way to run anything in
+`irgo-winvm vm-create -os linux -vm <name>` first: Ubuntu Server 24.04, a
+clone of the Linux golden image in about 30 seconds when the Mac has one, and
+otherwise, with `-install`, about a minute from Ubuntu's cloud image, a job
+over MCP like any `-install` ([A Linux VM](USING.md#a-linux-vm)). SSH is the only way to run anything in
 it: `app-create` is for Windows VMs.
 
 ```sh

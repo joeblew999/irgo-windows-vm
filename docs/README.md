@@ -46,8 +46,8 @@ Start with [Getting started](getting-started.md).
 | The tool | `cmd/irgo-winvm/`, installed as `irgo-winvm` | The one binary: every command, its MCP server, and the client for a remote Mac ([Commands](https://joeblew999.github.io/irgo-windows-vm/reference.html)) |
 | The three steps | `iso-create`, `vm-create`, `app-create`, each with an undo | The Windows installer, a VM with Windows on it, your `.exe` running in it ([The three steps](guides/using.md#the-three-steps)) |
 | The VM | `irgo-win11` in UTM, unless `-vm` names another | The Windows 11 ARM64 machine the commands use ([The VM and the dev account](guides/using.md#the-vm-and-the-dev-account)) |
-| A Linux VM | `vm-create -os linux -vm <name>` | Ubuntu Server 24.04 ARM64 from Ubuntu's cloud image, reached over SSH ([A Linux VM](guides/using.md#a-linux-vm)) |
-| The golden image | `irgo-golden` in UTM | A sealed Windows VM that a new VM is cloned from in about 23 seconds ([The golden image](guides/using.md#the-golden-image)) |
+| A Linux VM | `vm-create -os linux -vm <name>` | Ubuntu Server 24.04 ARM64, a clone of the Linux golden image or made from Ubuntu's cloud image, reached over SSH ([A Linux VM](guides/using.md#a-linux-vm)) |
+| The golden image | `irgo-golden` (Windows), `irgo-golden-linux` (Linux) in UTM | A sealed VM of each system that a new VM is cloned from instead of installed: about 23 seconds for Windows, about 30 for Linux ([The golden image](guides/using.md#the-golden-image)) |
 | The private cache | an R2 bucket of yours | The golden image, chunked, for another Mac to pull ([The private R2 cache](guides/using.md#the-private-r2-cache)) |
 | The runtime data | `~/Library/Application Support/irgo-winvm/` | Media, logs, screenshots, jobs, locks and VM records ([Runtime data](concepts/architecture.md#runtime-data)) |
 | A job | `status` | Long work that outlives the terminal or agent that started it ([Jobs](concepts/architecture.md#jobs)) |

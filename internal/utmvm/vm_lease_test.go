@@ -44,6 +44,7 @@ func TestDecideReap(t *testing.T) {
 		{"the golden image's verification clone", VMRecord{Name: windowsGuest.goldenVerify(), Created: old.Created}, exists, ReapKeep},
 		{"the Linux golden image", VMRecord{Name: "IRGO-GOLDEN-LINUX", Created: old.Created}, exists, ReapKeep},
 		{"the Linux golden image's verification clone", VMRecord{Name: linuxGuest.goldenVerify(), Created: old.Created}, exists, ReapKeep},
+		{"expired, but marked keep-running", VMRecord{Name: "z4", Created: old.Created, KeepRunning: true}, exists, ReapKeep},
 		{"a name that only starts like a golden image", VMRecord{Name: "irgo-golden-linux2", Created: old.Created}, exists, ReapDelete},
 	}
 	for _, c := range cases {

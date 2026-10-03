@@ -125,6 +125,8 @@ func (l Lock) String() string {
 		return "the check for room for another VM (held for under a second)"
 	case l == UTMLaunchLock:
 		return "the opening or restart of UTM"
+	case l == KeeperLock:
+		return "the keeper (one runs per Mac)"
 	case strings.HasPrefix(string(l), stageLockPrefix):
 		return "the staged binaries of " + strings.TrimSuffix(strings.TrimPrefix(string(l), stageLockPrefix), ".lock")
 	case strings.HasPrefix(string(l), vmLockPrefix):

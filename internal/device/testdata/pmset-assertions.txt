@@ -1,0 +1,28 @@
+2026-10-03 11:23:32 +0700 
+Assertion status system-wide:
+   BackgroundTask                 0
+   ApplePushServiceTask           0
+   UserIsActive                   1
+   PreventUserIdleDisplaySleep    0
+   SoftwareUpdateTask             0
+   PreventSystemSleep             1
+   PreventSystemSleepSecurityIndicator 0
+   ExternalMedia                  0
+   PreventUserIdleSystemSleep     1
+   NetworkClientActive            0
+Listed by owning process:
+   pid 1097(caffeinate): [0x0003a64600019ce5] 00:02:32 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
+	Details: caffeinate asserting for 300 secs
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+	Timeout will fire in 147 secs Action=TimeoutActionRelease
+   pid 635(WindowServer): [0x0003a2b400099c73] 00:17:45 UserIsActive named: "com.apple.iohideventsystem.queue.tickle serviceID:0 service:(null) product:(null) eventType:29"  
+	Timeout will fire in 734 secs Action=TimeoutActionRelease
+   pid 614(caffeinate): [0x0003a63600019ce2] 00:02:48 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
+	Details: caffeinate asserting on behalf of 'claude' (pid 611)
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+   pid 614(caffeinate): [0x0003a63600079ce3] 00:02:48 PreventSystemSleep named: "caffeinate command-line tool"  
+	Details: caffeinate asserting on behalf of 'claude' (pid 611)
+	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
+   pid 579(powerd): [0x0003a2b400019c74] 00:17:47 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"  
+Kernel Assertions: 0x100=MAGICWAKE
+   id=556  level=255 0x100=MAGICWAKE creat=  mod= description=en0 owner=IOSkywalkNetworkBSDClient

@@ -1,0 +1,2 @@
+      "AppleClamshellCausesSleep" = No
+      "AppleClamshellState" = No

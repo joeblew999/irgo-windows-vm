@@ -703,6 +703,70 @@ its pull (`vm-golden-*`), the VM records, jobs (20 finished are kept) or the
 ledger spool (4 MiB). On 1 Oct 2026 its first run removed 32 screenshots from
 August, 103 MB by APFS's count and by `du`.
 
+## The keeper: VMs that stay up
+
+A Mac with nobody at it sleeps, and every VM stops with it: a running VM does
+not keep the Mac awake ([the trap](../reference/traps.md#host-utm-and-the-iso)).
+UTM can also stop, and take every VM with it. The keeper is one long-running
+command that minds both, and tells [fleet-api](https://github.com/joeblew999/fleet-api)
+how the Mac is.
+
+| command | what it does | undo |
+|---|---|---|
+| `vm-keep-create -vm <name>` | marks the VM keep-running, in its record | `vm-keep-delete -vm <name>` |
+| `keeper-create` | runs `keeper` under pitchfork, at boot too, and keeps fleet-api's write token | `keeper-delete` |
+| `keeper` | the loop itself; `keeper -once` reads and reports once and changes nothing | Ctrl-C, or `pitchfork stop irgo-winvm-keeper` |
+
+Every 15 s the keeper:
+
+1. **Keeps the Mac awake while a VM runs on AC power**, with a
+   `caffeinate -i -s -w <its pid>` child that dies with it, checked in
+   `pmset -g assertions`; it lets go when no VM runs, or on battery. When UTM's
+   VMs cannot be listed it holds anyway, on AC, since it cannot tell. Closing
+   the lid still sleeps the Mac: that needs root and has not been measured.
+2. **Starts a marked VM that UTM lists stopped**, opening UTM first if it is
+   closed and a marked VM needs it, by the two-second rule
+   ([When UTM is not running](#when-utm-is-not-running)). The first try is at
+   once, then 30 s, doubling to 30 min; a VM that stops again within five
+   minutes of a start counts as a failed try. A VM a command holds the lock of
+   is left for the next pass. It never stops, deletes or restarts a VM that is
+   not marked, never quits UTM, and never opens UTM when nothing marked needs
+   it. A UTM that does not answer the start is reported, not restarted
+   ([When UTM does not answer](#when-utm-does-not-answer) is for commands you
+   run).
+3. **Reports to fleet-api** (`FLEET_API_URL`, by default
+   `https://fleet-api.gedw99.workers.dev`): this Mac's host, memory, disks,
+   power, battery, lid, sleep and keeper, and its VMs with their state, owner,
+   mark and how often the keeper started each. At start, on a change (at most
+   every 30 s), every 5 min otherwise (`next_s` 300), and `stop` on the way
+   out. A report that cannot be sent is spooled and sent later, in order; one
+   fleet-api refuses is dropped. Owners lose any `user@host`, so a person's
+   login never leaves the Mac.
+
+Set it up once, with the write token in the environment (the owner's Mac has
+it in fnox, from fleet-api's checkout):
+
+```sh
+irgo-winvm vm-keep-create -vm claude-rig-test
+FLEET_API_WRITE_TOKEN=... irgo-winvm keeper-create
+pitchfork logs irgo-winvm-keeper
+```
+
+- **The first time, macOS asks whether pitchfork may control UTM.app.** Answer
+  Allow. Until then every request the keeper sends UTM is refused (it says so,
+  and holds the Mac awake meanwhile); if the prompt was missed, turn pitchfork
+  on under UTM in System Settings > Privacy & Security > Automation.
+- **To stop a marked VM for good, clear the mark first** (`vm-keep-delete`),
+  or the keeper starts it again within 15 s. The same goes for sealing a marked
+  VM into a golden image. `vm-reap` never removes a marked VM.
+- **A version of this tool from before the mark** (v0.7.0 and older) drops it
+  when it writes the VM's record, which any command on that VM does. Mark it
+  again after such a command, or use one version.
+- **One keeper per Mac**: a second is refused (exit 6). The token is kept in
+  `fleet/write-token`, readable by you alone, and its value is never printed.
+  Without one the keeper still keeps VMs and the Mac awake, and says reporting
+  is off.
+
 ## Where it keeps things
 
 Everything the tool writes goes under

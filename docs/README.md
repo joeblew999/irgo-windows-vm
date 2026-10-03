@@ -54,6 +54,7 @@ Start with [Getting started](getting-started.md).
 | The MCP server | `irgo-winvm mcp` | The same commands as tools for an agent ([For agents](guides/agents.md)) |
 | The Worker | `worker/`, at `https://irgo-windows-vm.gedw99.workers.dev` | The Cloudflare Worker: the remote job queue, the ledger, live glaze status, the cache's front door ([The Cloudflare Worker](worker.md)) |
 | A remote job | `remote-submit` on any OS; `serve` on the Mac | A binary from another machine, run on a fresh clone of the golden image ([Remote jobs](concepts/architecture.md#remote-jobs)) |
+| The keeper | `keeper`, under pitchfork (`keeper-create`) | Keeps the Mac awake while a VM runs, starts again the VMs marked keep-running, and reports the Mac and its VMs to fleet-api ([The keeper](guides/using.md#the-keeper-vms-that-stay-up)) |
 | The glaze suite | `examples/conformance` | The tests that say whether glaze and native work, on the Mac and on Windows ([Testing](guides/testing.md)) |
 | The VM suite | `examples/vmconformance` | The tests that say whether a VM has what this project relies on ([The VM conformance suite](guides/testing.md#the-vm-conformance-suite)) |
 | The docs site | `docsite/` (the generator), `site/` (this site's config and hooks) | <https://joeblew999.github.io/irgo-windows-vm/>, built from these pages ([The docs site](contributing.md#the-docs-site)) |
@@ -79,7 +80,7 @@ Never edit these: change the source and run the command.
 | Section | Pages |
 |---|---|
 | Start | [Getting started](getting-started.md) |
-| [Guides](guides.md) | [Using it](guides/using.md) (the commands, exit codes, costs, Linux VMs, the golden image, the private cache, sharing a Mac), [For agents](guides/agents.md) (MCP, HTTP, another machine, filing issues), [Testing](guides/testing.md) (does glaze work, driving an app, the cycle tests) |
+| [Guides](guides.md) | [Using it](guides/using.md) (the commands, exit codes, costs, Linux VMs, the golden image, the private cache, sharing a Mac, the keeper), [For agents](guides/agents.md) (MCP, HTTP, another machine, filing issues), [Testing](guides/testing.md) (does glaze work, driving an app, the cycle tests) |
 | [Concepts](concepts.md) | [Architecture](concepts/architecture.md), [Threat model](concepts/threat-model.md) |
 | [Reference](reference.md) | [Commands](https://joeblew999.github.io/irgo-windows-vm/reference.html), [MCP](https://joeblew999.github.io/irgo-windows-vm/mcp.html), [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html), [Known traps](reference/traps.md), [Upstream bugs](reference/upstream.md), [Glaze status](GLAZE-STATUS.md), [VM status](VM-STATUS.md) |
 | [This repository](contributing.md) | [Rules](rules.md), [Findings](findings.md), [Roadmap](roadmap.md), [The Cloudflare Worker](worker.md), [Writing docs](writing.md) |

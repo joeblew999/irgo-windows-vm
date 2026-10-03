@@ -1,7 +1,8 @@
 // Package keeper is the loop `irgo-winvm keeper` runs on a Mac, under
 // pitchfork: each pass it keeps the Mac awake while a VM runs, starts again a
-// VM marked keep-running that has stopped, and reports the Mac and its VMs to
-// fleet-api (docs/concepts/architecture.md, "The keeper").
+// VM marked keep-running that has stopped, and writes the VMs down for
+// claude-rig, whose report to fleet-api carries them
+// (docs/concepts/architecture.md, "The keeper"). It sends nothing itself.
 //
 // It reaches UTM only through the UTM interface the CLI supplies, which has
 // no way to quit UTM or to stop, delete or restart a VM: the keeper runs
@@ -12,16 +13,17 @@ package keeper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	fleet "github.com/joeblew999/fleet-api/sdk/go"
-
-	"github.com/joeblew999/irgo-windows-vm/internal/device"
 )
 
 // VM is one row of UTM's list.
@@ -65,30 +67,25 @@ type Awake interface {
 	Holder() string
 }
 
-// Config is a keeper's parts. Zero durations take the defaults.
+// Config is a keeper's parts. A zero Every takes the default.
 type Config struct {
 	UTM   UTM
 	Awake Awake
-	// Read reads the machine (device.Read with the data directory).
-	Read func() device.Snapshot
-	// Reports sends reports to fleet-api; nil is reporting off.
-	Reports *Reporter
-	// ID is this machine's id; Version the tool's.
-	ID, Version string
+	// Power reads the power source (device.Power): the Mac is held awake on
+	// AC power only.
+	Power func() *fleet.DevicePower
+	// Write keeps the VMs for claude-rig's report (WriteVMs, to its file);
+	// nil writes nothing.
+	Write func(VMsFile) error
 
-	Every       time.Duration // between passes: 15 s
-	ReportEvery time.Duration // between reports when nothing changes, the report's next_s: 5 min
-	Now         func() time.Time
-	Say         func(string, ...any)
+	Every time.Duration // between passes: 15 s
+	Now   func() time.Time
+	Say   func(string, ...any)
 }
 
 // Defaults.
 const (
-	DefaultEvery       = 15 * time.Second
-	DefaultReportEvery = 5 * time.Minute
-	// changeGap is the least time between two reports sent for a change, so
-	// a flapping state sends one report a half-minute, not one a pass.
-	changeGap = 30 * time.Second
+	DefaultEvery = 15 * time.Second
 	// Restart backoff: the first start of a stopped VM is at once, then 30 s,
 	// doubling to at most 30 min between tries. A start counts as having
 	// worked once the VM has run for stableAfter; one that stops sooner
@@ -104,10 +101,6 @@ type Keeper struct {
 	cfg   Config
 	vms   map[string]*vmState // by lower-case name
 	saidT map[string]string   // the last thing said on each topic, so a pass repeats nothing
-
-	sentAny  bool
-	lastSent time.Time
-	lastFP   string
 }
 
 // vmState is what the keeper remembers of a keep-running VM between passes.
@@ -123,9 +116,6 @@ func New(cfg Config) *Keeper {
 	if cfg.Every == 0 {
 		cfg.Every = DefaultEvery
 	}
-	if cfg.ReportEvery == 0 {
-		cfg.ReportEvery = DefaultReportEvery
-	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -136,51 +126,42 @@ func New(cfg Config) *Keeper {
 }
 
 // Run passes every cfg.Every until ctx ends, then stops: lets the Mac sleep
-// again and sends a stop report.
+// again and writes that the keeper stopped.
 func (k *Keeper) Run(ctx context.Context) {
 	t := time.NewTicker(k.cfg.Every)
 	defer t.Stop()
 	for {
-		// A pass runs to its end: a stop signal mid-send would cancel the
-		// report and leave it to the next run.
-		k.Pass(context.WithoutCancel(ctx))
+		k.Pass()
 		select {
 		case <-ctx.Done():
-			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			k.Stop(stopCtx)
-			cancel()
+			k.Stop()
 			return
 		case <-t.C:
 		}
 	}
 }
 
-// Pass is one turn of the loop: the VMs, the hold, the report. It never
-// fails; what goes wrong is said, and tried again on a later pass.
-func (k *Keeper) Pass(ctx context.Context) {
+// Pass is one turn of the loop: the VMs, the hold, the VMs written down. It
+// never fails; what goes wrong is said, and tried again on a later pass.
+func (k *Keeper) Pass() {
 	now := k.cfg.Now()
-	snap := k.cfg.Read()
+	power := k.cfg.Power()
 	vms := k.keep(now, true)
-	k.hold(snap.Power, vms)
-	k.report(ctx, now, snap, vms)
+	k.hold(power, vms)
+	k.write(VMsFile{TS: now.UnixMilli(), VMs: vms.Section})
 }
 
-// Once reads the Mac and its VMs and reports them once, with reason once,
-// changing nothing: it opens no UTM, starts no VM and holds nothing
+// Once reads the VMs and returns what the keeper would write, changing
+// nothing: it opens no UTM, starts no VM, holds nothing and writes nothing
 // (`keeper -once`).
-func (k *Keeper) Once(ctx context.Context) *fleet.DeviceReport {
+func (k *Keeper) Once() VMsFile {
 	now := k.cfg.Now()
-	snap := k.cfg.Read()
-	vms := k.keep(now, false)
-	r := k.build(now, snap, vms, fleet.DeviceReportReasonOnce, 0)
-	r.Keeper = &fleet.DeviceKeeper{Status: fleet.DeviceKeeperStatusUnknown, Why: fleet.String("read by keeper -once, which holds nothing; the running keeper reports its own")}
-	k.cfg.Reports.Send(ctx, r, k.cfg.Say)
-	return r
+	return VMsFile{TS: now.UnixMilli(), VMs: k.keep(now, false).Section}
 }
 
-// Stop lets the Mac sleep again and sends a stop report, which says the
-// keeper is going quiet on purpose.
-func (k *Keeper) Stop(ctx context.Context) {
+// Stop lets the Mac sleep again and writes that the keeper stopped, so the
+// report says the VMs are not known rather than showing the last list.
+func (k *Keeper) Stop() {
 	if k.cfg.Awake.Held() {
 		if err := k.cfg.Awake.Release(); err != nil {
 			k.cfg.Say("letting the Mac sleep again: %v", err)
@@ -189,9 +170,55 @@ func (k *Keeper) Stop(ctx context.Context) {
 		}
 	}
 	now := k.cfg.Now()
-	r := k.build(now, k.cfg.Read(), k.lastVMs(), fleet.DeviceReportReasonStop, 0)
-	r.Keeper = &fleet.DeviceKeeper{Status: fleet.DeviceKeeperStatusOk, Running: fleet.Bool(false), Idle: fleet.Bool(false), Lid: fleet.Bool(false)}
-	k.cfg.Reports.Last(ctx, r, k.cfg.Say)
+	k.write(VMsFile{TS: now.UnixMilli(), VMs: unknownVMs("the VM keeper stopped at " + now.Format("2006-01-02 15:04"))})
+}
+
+// VMsFile is what the keeper writes for claude-rig's report: when it read
+// the VMs (Unix milliseconds), and the report's vms section, in fleet-api's
+// shape (its Go SDK's type).
+type VMsFile struct {
+	TS  int64            `json:"ts"`
+	VMs *fleet.DeviceVMs `json:"vms"`
+}
+
+// WriteVMs writes f to path through a temporary file beside it and a
+// rename, so a reader never sees half of it, and makes the folder if it is
+// missing.
+func WriteVMs(path string, f VMsFile) error {
+	b, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	_, wErr := tmp.Write(b)
+	cErr := tmp.Close()
+	if err := errors.Join(wErr, cErr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// write writes f, saying a failure once until it changes.
+func (k *Keeper) write(f VMsFile) {
+	if k.cfg.Write == nil {
+		return
+	}
+	if err := k.cfg.Write(f); err != nil {
+		k.say("write", "writing the VMs down for claude-rig's report: %v; trying again next pass", err)
+		return
+	}
+	k.say("write", "")
 }
 
 // say says msg on topic unless the last thing said on it was msg, so a state
@@ -208,9 +235,9 @@ func (k *Keeper) say(topic, format string, a ...any) {
 }
 
 // vmView is the VMs as the keeper last saw them, for the hold and the
-// report.
+// file.
 type vmView struct {
-	Section VMSection
+	Section *fleet.DeviceVMs
 	List    []VM
 }
 
@@ -234,7 +261,7 @@ func (k *Keeper) keep(now time.Time, act bool) vmView {
 	}
 	if !u.Installed() {
 		k.say("utm", "UTM is not installed; there are no VMs to keep")
-		return k.view(VMSection{Status: "none"}, nil, recs)
+		return k.view(&fleet.DeviceVMs{Status: fleet.DeviceVMsStatusNone}, nil, recs)
 	}
 	up, err := u.Running()
 	if err != nil {
@@ -359,7 +386,7 @@ func (k *Keeper) hold(power *fleet.DevicePower, vms vmView) {
 			running = append(running, v.Name)
 		}
 	}
-	unknown := vms.Section.Status == "unknown"
+	unknown := vms.Section.Status == fleet.DeviceVMsStatusUnknown
 	if unknown {
 		running = []string{"whatever UTM runs (its VMs cannot be listed)"}
 	}
@@ -393,57 +420,25 @@ func (k *Keeper) hold(power *fleet.DevicePower, vms vmView) {
 	}
 }
 
-// lastVMs is the VM section without asking UTM anything: for the stop
-// report, sent as the keeper goes.
-func (k *Keeper) lastVMs() vmView {
-	return vmView{Section: unknownVMs("not read: the keeper is stopping")}
-}
-
-// VMSection is the report's vms: the VMs on this Mac and whose they are, in
-// the shape of fleet-api's DeviceVMs (joeblew999/fleet-api#3). Until that is
-// in the SDK it goes as a field the Worker stores as posted.
-type VMSection struct {
-	Status  string `json:"status"` // ok, none (no UTM), unknown (why)
-	Why     string `json:"why,omitempty"`
-	Manager string `json:"manager,omitempty"` // utm, when ok
-	// ManagerRunning is whether UTM is running, when ok. Every VM is stopped
-	// when it is not, and the keeper does not open it to ask.
-	ManagerRunning *bool    `json:"manager_running,omitempty"`
-	List           []VMInfo `json:"list,omitempty"`
-}
-
 // utmUp is whether the section says UTM is running.
-func (s VMSection) utmUp() bool { return s.ManagerRunning != nil && *s.ManagerRunning }
+func utmUp(s *fleet.DeviceVMs) bool { return s.ManagerRunning != nil && *s.ManagerRunning }
 
 // okVMs is an ok section: UTM, running or not.
-func okVMs(running bool) VMSection {
-	return VMSection{Status: "ok", Manager: "utm", ManagerRunning: &running}
-}
-
-// VMInfo is one VM.
-type VMInfo struct {
-	Name        string `json:"name"`
-	State       string `json:"state"`        // utmctl's: started, stopped, paused...
-	OS          string `json:"os,omitempty"` // windows, linux; absent with no record
-	Owner       string `json:"owner,omitempty"`
-	KeepRunning bool   `json:"keep_running,omitempty"`
-	// KeeperStarts is how many times this keeper has started it since it
-	// began: a VM that keeps stopping shows here, though each start is
-	// quick enough that no report sees it stopped.
-	KeeperStarts int `json:"keeper_starts,omitempty"`
+func okVMs(running bool) *fleet.DeviceVMs {
+	return &fleet.DeviceVMs{Status: fleet.DeviceVMsStatusOk, Manager: fleet.String("utm"), ManagerRunning: fleet.Bool(running)}
 }
 
 // maxVMs bounds the list, as fleet-api bounds every list.
 const maxVMs = 32
 
-func unknownVMs(why string) VMSection {
-	return VMSection{Status: "unknown", Why: clip(why)}
+func unknownVMs(why string) *fleet.DeviceVMs {
+	return &fleet.DeviceVMs{Status: fleet.DeviceVMsStatusUnknown, Why: fleet.String(clip(why))}
 }
 
 // view joins UTM's list with the records. With UTM closed the list is the
 // records, each stopped.
-func (k *Keeper) view(s VMSection, list []VM, recs []Record) vmView {
-	if s.Status != "ok" {
+func (k *Keeper) view(s *fleet.DeviceVMs, list []VM, recs []Record) vmView {
+	if s.Status != fleet.DeviceVMsStatusOk {
 		return vmView{Section: s, List: list}
 	}
 	byName := map[string]Record{}
@@ -455,17 +450,29 @@ func (k *Keeper) view(s VMSection, list []VM, recs []Record) vmView {
 			return
 		}
 		r := byName[strings.ToLower(name)]
-		os := r.OS
-		if os == "" && r.Name != "" {
-			os = "windows" // a record with no os is Windows: every one made before the field
+		vm := &fleet.DeviceVM{Name: clip(name), State: state}
+		system := r.OS
+		if system == "" && r.Name != "" {
+			system = "windows" // a record with no os is Windows: every one made before the field
 		}
-		starts := 0
-		if st := k.vms[strings.ToLower(name)]; st != nil {
-			starts = st.starts
+		if system != "" {
+			vm.Os = fleet.DeviceVMOs(system).Ptr()
 		}
-		s.List = append(s.List, VMInfo{Name: clip(name), State: state, OS: os, Owner: PublicOwner(r.Owner), KeepRunning: r.KeepRunning, KeeperStarts: starts})
+		if owner := PublicOwner(r.Owner); owner != "" {
+			vm.Owner = fleet.String(owner)
+		}
+		if r.KeepRunning {
+			vm.KeepRunning = fleet.Bool(true)
+		}
+		// How many times this keeper has started it since it began: a VM
+		// that keeps stopping shows here, though each start is quick enough
+		// that no report sees it stopped.
+		if st := k.vms[strings.ToLower(name)]; st != nil && st.starts > 0 {
+			vm.KeeperStarts = fleet.Int(st.starts)
+		}
+		s.List = append(s.List, vm)
 	}
-	if s.utmUp() {
+	if utmUp(s) {
 		for _, v := range list {
 			add(v.Name, v.Status)
 		}
@@ -488,89 +495,9 @@ func PublicOwner(owner string) string {
 // personAt is "name@host:" or "name@host".
 var personAt = regexp.MustCompile(`[^\s/@:]+@[^\s/:]+:?`)
 
-// report sends a report when one is due: the first (start), one for a change
-// at most every changeGap, and one every ReportEvery (interval). Between
-// them it resends what is spooled.
-func (k *Keeper) report(ctx context.Context, now time.Time, snap device.Snapshot, vms vmView) {
-	if k.cfg.Reports == nil {
-		return
-	}
-	r := k.build(now, snap, vms, "", int64(k.cfg.ReportEvery/time.Second))
-	fp := fingerprint(r, vms.Section)
-	var reason fleet.DeviceReportReason
-	switch {
-	case !k.sentAny:
-		reason = fleet.DeviceReportReasonStart
-	case fp != k.lastFP && now.Sub(k.lastSent) >= changeGap:
-		reason = fleet.DeviceReportReasonChange
-	case now.Sub(k.lastSent) >= k.cfg.ReportEvery:
-		reason = fleet.DeviceReportReasonInterval
-	default:
-		k.cfg.Reports.Flush(ctx, k.cfg.Say)
-		return
-	}
-	r.Reason = reason
-	k.sentAny, k.lastSent, k.lastFP = true, now, fp
-	k.cfg.Reports.Send(ctx, r, k.cfg.Say)
-}
-
-// build is the report for this moment.
-func (k *Keeper) build(now time.Time, snap device.Snapshot, vms vmView, reason fleet.DeviceReportReason, nextS int64) *fleet.DeviceReport {
-	held := k.cfg.Awake.Held()
-	r := &fleet.DeviceReport{
-		Schema: 1, ID: k.cfg.ID, Ts: now.UnixMilli(), Reason: reason, NextS: nextS,
-		Tool:    &fleet.DeviceTool{Name: fleet.String("irgo-winvm"), Version: k.cfg.Version, Command: "keeper"},
-		Host:    snap.Host,
-		CPU:     snap.CPU,
-		Memory:  snap.Memory,
-		Disks:   snap.Disks,
-		Power:   snap.Power,
-		Battery: snap.Battery,
-		Lid:     snap.Lid,
-		Sleep:   snap.Sleep,
-		// lid: false, always. Keeping the Mac up with the lid closed needs
-		// root (pmset disablesleep) and has not been measured here.
-		Keeper:          &fleet.DeviceKeeper{Status: fleet.DeviceKeeperStatusOk, Running: fleet.Bool(true), Idle: fleet.Bool(held), Lid: fleet.Bool(false)},
-		ExtraProperties: map[string]any{"vms": vms.Section},
-	}
-	return r
-}
-
-// fingerprint is what, changed, is worth a report of its own: the power
-// source, the battery's state, the lid, what closing it does, the keeper's
-// hold, and each VM's state. Not memory, load or charge, which change every
-// pass.
-func fingerprint(r *fleet.DeviceReport, vms VMSection) string {
-	var b strings.Builder
-	if r.Power != nil && r.Power.Source != nil {
-		fmt.Fprintf(&b, "power=%s;", *r.Power.Source)
-	}
-	if r.Battery != nil && r.Battery.State != nil {
-		fmt.Fprintf(&b, "battery=%s;", *r.Battery.State)
-	}
-	if r.Lid != nil && r.Lid.Closed != nil {
-		fmt.Fprintf(&b, "lid=%v;", *r.Lid.Closed)
-	}
-	if r.Sleep != nil && r.Sleep.LidAction != nil {
-		fmt.Fprintf(&b, "lid_action=%s;", *r.Sleep.LidAction)
-	}
-	if r.Keeper != nil && r.Keeper.Idle != nil {
-		fmt.Fprintf(&b, "held=%v;", *r.Keeper.Idle)
-	}
-	fmt.Fprintf(&b, "vms=%s/%v;", vms.Status, vms.utmUp())
-	for _, v := range vms.List {
-		fmt.Fprintf(&b, "%s=%s/%v/%d;", v.Name, v.State, v.KeepRunning, v.KeeperStarts)
-	}
-	return b.String()
-}
-
 func clip(s string) string {
 	if len(s) > 200 {
 		return s[:197] + "..."
 	}
 	return s
 }
-
-// ErrRefused is a report fleet-api refused for what it says (400, 413,
-// 422): sending it again cannot work, so it is not kept.
-var ErrRefused = errors.New("fleet-api refused the report")

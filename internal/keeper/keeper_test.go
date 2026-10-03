@@ -1,23 +1,17 @@
 package keeper
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	fleet "github.com/joeblew999/fleet-api/sdk/go"
-
-	"github.com/joeblew999/irgo-windows-vm/internal/device"
 )
 
 // fakeUTM is UTM as a table. Every call is logged, so a test can say what
@@ -108,12 +102,14 @@ func newClock() *clock               { return &clock{t: time.Date(2026, 10, 3, 1
 func stopped(name string) VM         { return VM{Name: name, Status: "stopped"} }
 func started(name string) VM         { return VM{Name: name, Status: "started", Running: true} }
 func kept(name string) Record        { return Record{Name: name, Owner: "claude-rig", KeepRunning: true} }
-func snapshot(src fleet.DevicePowerSource) device.Snapshot {
-	return device.Snapshot{Power: &fleet.DevicePower{Status: fleet.DevicePowerStatusOk, Source: src.Ptr()}}
+func power(src fleet.DevicePowerSource) func() *fleet.DevicePower {
+	return func() *fleet.DevicePower {
+		return &fleet.DevicePower{Status: fleet.DevicePowerStatusOk, Source: src.Ptr()}
+	}
 }
 
 func newKeeper(u *fakeUTM, a *fakeAwake, c *clock, src fleet.DevicePowerSource) *Keeper {
-	return New(Config{UTM: u, Awake: a, Now: c.now, Read: func() device.Snapshot { return snapshot(src) }, ID: "0123456789abcdef"})
+	return New(Config{UTM: u, Awake: a, Now: c.now, Power: power(src)})
 }
 
 // TestStartsOnlyMarkedStoppedVMs: of three VMs, only the one marked and
@@ -126,7 +122,7 @@ func TestStartsOnlyMarkedStoppedVMs(t *testing.T) {
 	u := &fakeUTM{installed: true, up: true, stays: true,
 		vms:  []VM{stopped("keep-me"), stopped("other"), started("kept-up")},
 		recs: []Record{kept("keep-me"), {Name: "other", Owner: "x"}, kept("kept-up")}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass()
 	if got := u.starts(); !slices.Equal(got, []string{"keep-me"}) {
 		t.Fatalf("started %v, want only keep-me", got)
 	}
@@ -140,13 +136,13 @@ func TestStartsOnlyMarkedStoppedVMs(t *testing.T) {
 // the first half opens UTM.
 func TestUTMClosedIsOpenedOnlyForAMarkedVM(t *testing.T) {
 	u := &fakeUTM{installed: true, up: false, vms: []VM{stopped("a")}, recs: []Record{{Name: "a"}}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass()
 	if !slices.Equal(u.calls, []string{"running"}) {
 		t.Fatalf("with nothing marked the keeper asked %v; want only whether UTM runs", u.calls)
 	}
 
 	u = &fakeUTM{installed: true, up: false, stays: true, vms: []VM{stopped("a")}, recs: []Record{kept("a")}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass()
 	if len(u.calls) < 3 || u.calls[0] != "running" || u.calls[1] != "open" || u.calls[2] != "list" {
 		t.Fatalf("calls %v: want running, open, list before anything else", u.calls)
 	}
@@ -162,12 +158,12 @@ func TestUTMClosedIsOpenedOnlyForAMarkedVM(t *testing.T) {
 // halves fail.
 func TestOnceChangesNothing(t *testing.T) {
 	u := &fakeUTM{installed: true, up: true, vms: []VM{stopped("a")}, recs: []Record{kept("a")}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Once(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Once()
 	if len(u.starts()) > 0 {
 		t.Fatalf("-once started %v", u.starts())
 	}
 	u = &fakeUTM{installed: true, up: false, recs: []Record{kept("a")}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Once(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Once()
 	if slices.Contains(u.calls, "open") {
 		t.Fatalf("-once opened UTM: %v", u.calls)
 	}
@@ -187,7 +183,7 @@ func TestBackoff(t *testing.T) {
 	begin := c.now()
 	for range 30 { // 7.5 minutes of passes
 		before := len(u.starts())
-		k.Pass(context.Background())
+		k.Pass()
 		if len(u.starts()) > before {
 			at = append(at, c.now().Sub(begin))
 		}
@@ -212,10 +208,10 @@ func TestCrashOnBootBacksOff(t *testing.T) {
 	c := newClock()
 	k := newKeeper(u, &fakeAwake{}, c, fleet.DevicePowerSourceAc)
 	for c.now().Before(time.Date(2026, 10, 3, 12, 5, 0, 0, time.UTC)) {
-		k.Pass(context.Background())
+		k.Pass()
 		c.add(15 * time.Second)
 		if u.vms[0].Running { // seen running for one pass, then it stops
-			k.Pass(context.Background())
+			k.Pass()
 			c.add(15 * time.Second)
 			u.vms[0] = stopped("a")
 		}
@@ -230,7 +226,7 @@ func TestCrashOnBootBacksOff(t *testing.T) {
 // Negative control, run by hand: ignore Lock's error and it is started.
 func TestBusyVMIsNotStarted(t *testing.T) {
 	u := &fakeUTM{installed: true, up: true, vms: []VM{stopped("a")}, recs: []Record{kept("a")}, busy: map[string]bool{"a": true}}
-	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass(context.Background())
+	newKeeper(u, &fakeAwake{}, newClock(), fleet.DevicePowerSourceAc).Pass()
 	if len(u.starts()) > 0 {
 		t.Fatalf("started %v under a command's lock", u.starts())
 	}
@@ -255,7 +251,7 @@ func TestHoldsAwakeOnlyWhileAVMRunsOnAC(t *testing.T) {
 	for _, c := range cases {
 		u := &fakeUTM{installed: true, up: true, vms: c.vms}
 		a := &fakeAwake{}
-		newKeeper(u, a, newClock(), c.src).Pass(context.Background())
+		newKeeper(u, a, newClock(), c.src).Pass()
 		if a.held != c.want {
 			t.Errorf("%s: held %v, want %v", c.name, a.held, c.want)
 		}
@@ -263,18 +259,18 @@ func TestHoldsAwakeOnlyWhileAVMRunsOnAC(t *testing.T) {
 	// Power that cannot be told holds nothing.
 	u := &fakeUTM{installed: true, up: true, vms: []VM{started("a")}}
 	a := &fakeAwake{}
-	k := New(Config{UTM: u, Awake: a, Now: newClock().now, Read: func() device.Snapshot {
-		return device.Snapshot{Power: &fleet.DevicePower{Status: fleet.DevicePowerStatusUnknown, Why: fleet.String("x")}}
+	k := New(Config{UTM: u, Awake: a, Now: newClock().now, Power: func() *fleet.DevicePower {
+		return &fleet.DevicePower{Status: fleet.DevicePowerStatusUnknown, Why: fleet.String("x")}
 	}})
-	k.Pass(context.Background())
+	k.Pass()
 	if a.held {
 		t.Error("held with the power source unknown")
 	}
 	// VMs that cannot be listed may be running: on AC that holds.
 	u = &fakeUTM{installed: true, up: true, vms: []VM{started("a")}}
 	a = &fakeAwake{}
-	k = New(Config{UTM: listFails{u}, Awake: a, Now: newClock().now, Read: func() device.Snapshot { return snapshot(fleet.DevicePowerSourceAc) }})
-	k.Pass(context.Background())
+	k = New(Config{UTM: listFails{u}, Awake: a, Now: newClock().now, Power: power(fleet.DevicePowerSourceAc)})
+	k.Pass()
 	if !a.held {
 		t.Error("let the Mac sleep while UTM's VMs could not be listed")
 	}
@@ -282,173 +278,122 @@ func TestHoldsAwakeOnlyWhileAVMRunsOnAC(t *testing.T) {
 	u = &fakeUTM{installed: true, up: true, vms: []VM{started("a")}}
 	a = &fakeAwake{}
 	k = newKeeper(u, a, newClock(), fleet.DevicePowerSourceAc)
-	k.Pass(context.Background())
+	k.Pass()
 	u.vms = []VM{stopped("a")}
-	k.Pass(context.Background())
+	k.Pass()
 	if a.held {
 		t.Error("still held after the only VM stopped")
 	}
 	u.vms = []VM{started("a")}
-	k.Pass(context.Background())
-	k.Stop(context.Background())
+	k.Pass()
+	k.Stop()
 	if a.held {
 		t.Error("still held after Stop")
 	}
 }
 
-// fleetFake is fleet-api's report route: it records each body, or answers
-// with a status.
-type fleetFake struct {
-	mu     sync.Mutex
-	status int
-	bodies []map[string]any
-}
-
-func (f *fleetFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	b, _ := io.ReadAll(r.Body)
-	if f.status != 0 {
-		w.Header().Set("content-type", "application/problem+json")
-		w.WriteHeader(f.status)
-		_, _ = w.Write([]byte(`{"title":"no"}`))
-		return
-	}
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	if !strings.HasSuffix(r.URL.Path, "/"+m["id"].(string)+"/reports") || r.Header.Get("Authorization") != "Bearer tok" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	f.bodies = append(f.bodies, m)
-	w.Header().Set("content-type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(`{"id":"0123456789abcdef","received":1,"duplicate":false,"conditions":[]}`))
-}
-
-func (f *fleetFake) reasons() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []string
-	for _, b := range f.bodies {
-		out = append(out, b["reason"].(string))
-	}
-	return out
-}
-
-// TestReports: start first; nothing between; change when a VM changes, no
-// sooner than 30 s after the last; interval after five quiet minutes; stop
-// at the end. Each carries next_s and the VMs.
+// TestWritesTheVMs: every pass writes the VMs, as UTM and the records say,
+// with when; a person's login never reaches it; a VM the keeper started
+// again shows it; Stop writes that the keeper stopped; a write that fails is
+// said once and the loop goes on.
 //
-// Negative control, run by hand: drop the VMs from fingerprint and the
-// change report is not sent.
-func TestReports(t *testing.T) {
-	ff := &fleetFake{}
-	srv := httptest.NewServer(ff)
-	defer srv.Close()
-	u := &fakeUTM{installed: true, up: true, vms: []VM{started("a")}, recs: []Record{{Name: "a", Owner: "apple@mac:repo"}}}
+// Negative control, run by hand: drop the write from Pass and the first
+// check fails; return owner unchanged in view and the owner check fails.
+func TestWritesTheVMs(t *testing.T) {
+	var got []VMsFile
+	var failing error
+	write := func(f VMsFile) error {
+		if failing != nil {
+			return failing
+		}
+		got = append(got, f)
+		return nil
+	}
+	var said []string
+	u := &fakeUTM{installed: true, up: true, vms: []VM{started("a")}, recs: []Record{{Name: "a", Owner: "apple@mac:repo", OS: "linux"}}}
 	c := newClock()
-	// On battery, so nothing is held and only the VM's state changes.
-	k := New(Config{UTM: u, Awake: &fakeAwake{}, Now: c.now, ID: "0123456789abcdef",
-		Read:    func() device.Snapshot { return snapshot(fleet.DevicePowerSourceBattery) },
-		Reports: &Reporter{Post: NewPost(srv.URL, "tok"), Dir: t.TempDir(), Now: c.now}})
-	ctx := context.Background()
-	k.Pass(ctx) // start
-	c.add(15 * time.Second)
-	k.Pass(ctx) // nothing
-	u.vms = []VM{stopped("a")}
-	k.Pass(ctx) // a change, but 15 s after the last: held back
-	c.add(15 * time.Second)
-	k.Pass(ctx) // change
-	for range 21 {
-		c.add(15 * time.Second)
-		k.Pass(ctx)
-	} // 5 min 15 s later: one interval
-	// A marked VM that stops and is started again within one pass is never
-	// seen stopped; its keeper_starts is the change.
+	k := New(Config{UTM: u, Awake: &fakeAwake{}, Now: c.now, Power: power(fleet.DevicePowerSourceBattery), Write: write,
+		Say: func(f string, a ...any) { said = append(said, fmt.Sprintf(f, a...)) }})
+	k.Pass()
+	if len(got) != 1 || got[0].TS != c.now().UnixMilli() {
+		t.Fatalf("after one pass wrote %v, want one file at %v", got, c.now().UnixMilli())
+	}
+	vms := got[0].VMs
+	if vms.Status != fleet.DeviceVMsStatusOk || !utmUp(vms) || len(vms.List) != 1 {
+		t.Fatalf("vms %+v, want ok, UTM up, one VM", vms)
+	}
+	a := vms.List[0]
+	if a.Name != "a" || a.State != "started" || a.Owner == nil || *a.Owner != "repo" || a.Os == nil || *a.Os != fleet.DeviceVMOsLinux {
+		t.Fatalf("a: %+v, want started, linux, owner repo (the person's login and machine removed)", a)
+	}
+
+	// A marked VM found stopped is started, and the next file says so.
 	u.recs = append(u.recs, kept("b"))
 	u.vms = append(u.vms, stopped("b"))
 	u.stays = true
-	c.add(time.Minute)
-	k.Pass(ctx)
-	k.Stop(ctx)
-	want := []string{"start", "change", "interval", "change", "stop"}
-	if got := ff.reasons(); !slices.Equal(got, want) {
-		t.Fatalf("reasons %v, want %v", got, want)
+	c.add(15 * time.Second)
+	k.Pass()
+	b := got[len(got)-1].VMs.List[1]
+	if b.State != "started" || b.KeeperStarts == nil || *b.KeeperStarts != 1 || b.KeepRunning == nil || !*b.KeepRunning {
+		t.Fatalf("b after the keeper started it: %+v, want started, keep_running, keeper_starts 1", b)
 	}
-	first := ff.bodies[0]
-	if first["next_s"].(float64) != 300 {
-		t.Errorf("next_s %v, want 300", first["next_s"])
+
+	// A write that fails is said once, and the loop goes on.
+	failing = errors.New("disk full")
+	for range 3 {
+		c.add(15 * time.Second)
+		k.Pass()
 	}
-	vms, _ := first["vms"].(map[string]any)
-	list, _ := vms["list"].([]any)
-	if len(list) != 1 || list[0].(map[string]any)["owner"] != "repo" {
-		t.Errorf("vms %v: want a, owner repo (the person's login and machine removed)", vms)
+	n := 0
+	for _, s := range said {
+		if strings.Contains(s, "writing the VMs down") {
+			n++
+		}
 	}
-	if ff.bodies[4]["next_s"].(float64) != 0 {
-		t.Errorf("stop report promises next_s %v", ff.bodies[4]["next_s"])
+	if n != 1 {
+		t.Fatalf("a failing write was said %d times, want once", n)
 	}
-	restarted := ff.bodies[3]["vms"].(map[string]any)["list"].([]any)[1].(map[string]any)
-	if restarted["state"] != "started" || restarted["keeper_starts"] != float64(1) {
-		t.Errorf("b after the keeper started it: %v, want started, keeper_starts 1", restarted)
+	failing = nil
+
+	k.Stop()
+	last := got[len(got)-1].VMs
+	if last.Status != fleet.DeviceVMsStatusUnknown || last.Why == nil || !strings.Contains(*last.Why, "stopped") || last.List != nil {
+		t.Fatalf("after Stop: %+v, want unknown, the keeper stopped", last)
 	}
 }
 
-// TestUnsentReportsAreSpooledAndResentInOrder: with fleet-api failing, the
-// loop goes on and reports stay in the spool; once it answers they go,
-// oldest first, VMs and all. A report it refuses (422) is dropped.
+// TestWriteVMsFile: the file is {ts, vms} in fleet-api's JSON (snake_case,
+// absent fields left out), written whole, and rewritten in place.
 //
-// Negative control, run by hand: remove the spooled file when a send fails
-// (flush's default case) and the spool is empty after the outage.
-func TestUnsentReportsAreSpooledAndResentInOrder(t *testing.T) {
-	ff := &fleetFake{status: http.StatusServiceUnavailable}
-	srv := httptest.NewServer(ff)
-	defer srv.Close()
-	c := newClock()
-	dir := t.TempDir()
-	rep := &Reporter{Post: NewPost(srv.URL, "tok"), Dir: dir, Now: c.now}
-	u := &fakeUTM{installed: true, up: true, vms: []VM{started("a")}}
-	k := New(Config{UTM: u, Awake: &fakeAwake{}, Now: c.now, ID: "0123456789abcdef", ReportEvery: time.Minute,
-		Read: func() device.Snapshot { return snapshot(fleet.DevicePowerSourceAc) }, Reports: rep})
-	ctx := context.Background()
-	for range 12 { // 3 minutes: a start and two intervals, none delivered
-		k.Pass(ctx)
-		c.add(15 * time.Second)
-	}
-	if n, _ := rep.spooled(); len(n) != 3 {
-		t.Fatalf("spool holds %v, want 3 reports", n)
-	}
-	ff.mu.Lock()
-	ff.status = 0
-	ff.mu.Unlock()
-	c.add(time.Minute)
-	k.Pass(ctx) // the backoff has passed: an interval report, and the three before it
-	got := ff.reasons()
-	if !slices.Equal(got, []string{"start", "interval", "interval", "interval"}) {
-		t.Fatalf("sent %v after the outage, want start then the intervals, in order", got)
-	}
-	for i := 1; i < len(ff.bodies); i++ {
-		if ff.bodies[i]["ts"].(float64) <= ff.bodies[i-1]["ts"].(float64) {
-			t.Fatalf("sent out of order: %v then %v", ff.bodies[i-1]["ts"], ff.bodies[i]["ts"])
-		}
-		if ff.bodies[i]["vms"] == nil {
-			t.Fatal("a resent report lost its vms")
-		}
-	}
-	if n, _ := rep.spooled(); len(n) != 0 {
-		t.Fatalf("spool still holds %v", n)
-	}
-
-	ff.mu.Lock()
-	ff.status = http.StatusUnprocessableEntity
-	ff.mu.Unlock()
-	c.add(2 * time.Minute)
-	k.Pass(ctx)
-	if n, _ := rep.spooled(); len(n) != 0 {
-		t.Fatalf("a refused report was kept: %v", n)
-	}
-	if _, err := os.Stat(filepath.Join(dir)); err != nil {
+// Negative control, run by hand: write to path directly instead of through
+// the temporary file and no temporary file is left to check; marshal a
+// struct with Go's field names and the key check fails.
+func TestWriteVMsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude-rig", "vms.json")
+	f := VMsFile{TS: 1790842406355, VMs: okVMs(false)}
+	f.VMs.List = []*fleet.DeviceVM{{Name: "a", State: "stopped", KeepRunning: fleet.Bool(true)}}
+	if err := WriteVMs(path, f); err != nil {
 		t.Fatal(err)
+	}
+	if err := WriteVMs(path, f); err != nil {
+		t.Fatal("rewriting:", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"ts":1790842406355,"vms":{"list":[{"keep_running":true,"name":"a","state":"stopped"}],"manager":"utm","manager_running":false,"status":"ok"}}`
+	var gotJSON, wantJSON any
+	_ = json.Unmarshal(b, &gotJSON)
+	_ = json.Unmarshal([]byte(want), &wantJSON)
+	gotB, _ := json.Marshal(gotJSON)
+	wantB, _ := json.Marshal(wantJSON)
+	if string(gotB) != string(wantB) {
+		t.Fatalf("file:\n%s\nwant:\n%s", b, want)
+	}
+	left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*"))
+	if len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
 	}
 }
 

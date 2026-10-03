@@ -601,8 +601,10 @@ the guest, as SYSTEM, one step at a time with the disk's allocation printed
 after each):
 
 1. boot the source VM and wait for its agent;
-2. BitLocker off (and `PreventDeviceEncryption` set), hibernation off,
-   `DISM /StartComponentCleanup /ResetBase`, TRIM;
+2. BitLocker off (and `PreventDeviceEncryption` set), hibernation off, the
+   OpenSSH Server capability installed with `sshd` disabled and never started
+   (no host keys, no keys, both firewall rules off; a source that had SSH on
+   loses those here), `DISM /StartComponentCleanup /ResetBase`, TRIM;
 3. shut Windows down from inside and wait for UTM to report it stopped;
 4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
    (the install, answer-file and guest-tools CDs are dropped);

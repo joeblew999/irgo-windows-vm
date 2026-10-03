@@ -323,9 +323,12 @@ irgo-winvm vm-ssh-delete -vm z1
   and start `ssh.socket`. There is no firewall on the image, and none is
   added. The server is already in the image, so the first run is seconds.
 - **Cheap to repeat.** Each step prints `ok` when it was already so, and the
-  run ends `ssh: already on, nothing changed`. On Windows the first run is
-  the slow one: the capability comes from Windows Update and takes minutes,
-  which is what `-timeout` (20 minutes) is for.
+  run ends `ssh: already on, nothing changed`. On a clone of a golden image
+  sealed by this version the capability is already there (installed, `sshd`
+  disabled and never started), so the first run is seconds too and `sshd`
+  makes the clone's own host keys. On a Windows VM without it, the first run
+  installs it from Windows Update, which takes minutes: that is what
+  `-timeout` (20 minutes) is for.
 - **The last line is the command, alone on its line**, so it can be copied or
   captured. It is printed only after an SSH server answered at that address
   from the Mac. The address is the guest's own (`ipconfig`, or `ip addr` on
@@ -372,6 +375,12 @@ golden image that has booted is no longer the one its manifest describes).
 Whether there is memory and disk for another VM is `vm-create`'s question,
 asked before any of this ([Is there room?](#is-there-room)). `doctor` reports
 the golden image from its `golden.json`.
+
+The seal installs the OpenSSH Server capability and leaves `sshd` disabled
+and never started, so [`vm-ssh-create`](#ssh-into-a-vm) on a clone takes
+seconds instead of the minutes Windows Update takes to install it, and each
+clone makes its own host keys. An image sealed before this has no OpenSSH
+Server; `vm-check` on a clone (`TestOpenSSHServer`) says which you have.
 
 How sealing and cloning work, and why, is in
 [Architecture](ARCHITECTURE.md#the-golden-image-sealing-and-cloning).

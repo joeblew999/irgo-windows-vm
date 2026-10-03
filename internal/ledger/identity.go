@@ -72,6 +72,11 @@ func (id *identity) machine() string {
 	return id.id
 }
 
+// MachineID is this machine's id as the ledger knows it, kept in
+// dir/machine-id (dir is the ledger's directory, <runtime>/ledger). The device
+// report to fleet-api uses the same id, so a machine is one machine in both.
+func MachineID(dir string) string { return newIdentity(dir).machine() }
+
 func isMachineID(s string) bool {
 	if len(s) != 16 {
 		return false

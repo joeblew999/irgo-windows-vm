@@ -198,7 +198,11 @@ whoever holds the key is root in that VM.
   connection trusts whatever answers at that address.
 - **A golden image sealed with SSH on.** Its clones would all carry the same
   host keys and the same authorized keys. Seal a VM that never had
-  `vm-ssh-create` run on it.
+  `vm-ssh-create` run on it. The Linux seal removes the host keys, every
+  `authorized_keys` and `vm-ssh-create`'s configuration, and empties the
+  machine-id, so a Linux clone has keys of its own once `vm-ssh-create` makes
+  them (two clones' fingerprints differed, 3 Oct 2026); the Windows seal does
+  not yet.
 - **A Linux VM trusts Ubuntu's archive on its first boot.** The guest agent is
   installed from it by `apt`, with `apt`'s own signature checks and nothing
   more; the cloud image itself is checked against a pinned SHA-256.

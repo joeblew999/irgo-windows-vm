@@ -198,9 +198,13 @@ when that has finished and been checked.
   there, so none of them has an `-os` flag. On a VM that exists, an `-os` that
   disagrees is exit 2. A VM made before this, or with no record, is Windows.
 - **`-vm` is required**: `irgo-win11` is the Windows VM and there is no default
-  Linux one. `-install` is required to make it: without it the command says
-  what it would do and stops. There is no Linux golden image yet, so every
-  Linux VM is made from the cloud image; `-golden` changes nothing.
+  Linux one. With a [Linux golden image](#the-golden-image) on the Mac,
+  `vm-create -os linux -vm <name>` clones it: about 30 s, no network needed,
+  no `-install`. Without one, `-install` makes the VM from the cloud image;
+  without `-install` the command says what it would do and stops.
+  `-golden=false -install` makes it from the cloud image even when there is
+  an image to clone, which is how the VM a Linux golden image is sealed from
+  is made.
 - **The image is pinned**: the release of 26 Sep 2026, checked against its
   SHA-256 when it is downloaded and again each time it is used. Not Ubuntu's
   `current`, which changes daily, for the same reason the VM's shape is fixed.
@@ -218,11 +222,12 @@ when that has finished and been checked.
 - **Ubuntu's unattended upgrades are left on**, as a real machine has them.
   They can hold `apt`'s lock for a while after a boot.
 - **What does not work on it yet**: `app-create`, `app-delete`, `vm-repair`,
-  `vm-check`, `vm-golden-create` and `glaze-check -windows` refuse a Linux VM
-  with exit 2. Run things in it over SSH. `vm-screen`, `vm-delete`, `status`
-  and `capacity` treat it like any VM.
+  `vm-check` and `glaze-check -windows` refuse a Linux VM with exit 2. Run
+  things in it over SSH. `vm-screen`, `vm-delete`, `vm-golden-create`,
+  `status` and `capacity` treat it like any VM.
 - **The hostname** is the VM's name, in lower case with anything but letters
-  and digits turned into hyphens.
+  and digits turned into hyphens, on a clone of the golden image as on a VM
+  made from the cloud image.
 
 A VM that starts and never answers is, on a first boot, either still
 installing the agent or one whose first boot did not find its seed
@@ -350,22 +355,43 @@ it has been run against a guest, is in
 
 ## The golden image
 
-A golden image is an installed Windows, sealed once, that every new VM is
-cloned from instead of installed. It turns "a VM of my own" from about 45
-minutes into a clone and a boot, and it lets several developers or agents on
-one Mac each have a VM without stopping anybody else's.
+A golden image is an installed system, sealed once, that every new VM of
+that system is cloned from instead of installed. It turns "a Windows VM of my
+own" from about 45 minutes into a clone and a boot, and it lets several
+developers or agents on one Mac each have a VM without stopping anybody
+else's. There is one per system: `irgo-golden` for Windows and
+`irgo-golden-linux` for Linux, each with its own manifest.
 
 | command | what it does | undo |
 |---|---|---|
-| **`vm-golden-create -vm <disposable>`** | seals that VM and registers the result as `irgo-golden` | `vm-golden-delete` |
-| **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone | `vm-delete` |
+| **`vm-golden-create -vm <disposable>`** | seals that VM and registers the result as the golden image of its system | `vm-golden-delete -os <its system>` |
+| **`vm-create -vm <name>`** | with a golden image: clones it as `<name>` and boots the clone; `-os linux` for the Linux one | `vm-delete` |
 
-The first VM is still installed the slow way, under a throwaway name:
-`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`.
-`-golden=false` installs even when there is a golden image.
+The first VM is still made the slow way, under a throwaway name:
+`vm-create -vm g1 -install -golden=false`, then `vm-golden-create -vm g1`;
+for Linux, `vm-create -os linux -vm l1 -install -golden=false`, then
+`vm-golden-create -vm l1`. `-golden=false` installs even when there is a
+golden image. `vm-golden-delete` takes `-os` (default `windows`) to say which
+image it removes.
 
-`vm-golden-create` refuses `irgo-win11` without `-force`, and refuses when it
-cannot find out which VM it was given. The source is left sealed and stopped,
+**What sealing a Linux VM does**, as root, in the guest: turns SSH off and
+removes the host keys, every `authorized_keys` and `vm-ssh-create`'s
+configuration; replaces cloud-init's network file, which matched the first
+boot's MAC, with one that takes DHCP on any `en*` interface, identified by its
+MAC; removes cloud-init's state and turns it off, because a clone has no seed
+CD; empties the package cache and the journal; empties `/etc/machine-id`, so
+each clone makes its own (it is the VM's UUID); and trims the disk. So each
+clone has its own MAC, address, machine-id and, once `vm-ssh-create` makes
+them, its own SSH host keys. `vm-create` then gives the clone its name and
+checks it as it checks a VM it has just made. The image is 3.9 GiB, a clone
+answers in about 18 s, and nothing is downloaded
+([measured](RESULTS.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
+There is no private cache of a Linux image: making one is a minute and a
+half.
+
+`vm-golden-create` refuses `irgo-win11` without `-force`, refuses a golden
+image as its source, and refuses when it cannot find out which VM it was
+given or which system is in it. The source is left sealed and stopped,
 an ordinary VM that `vm-delete` removes. A clone is refused while the golden
 image is running (it must stay stopped: UTM will not clone a running VM, and a
 golden image that has booted is no longer the one its manifest describes).
@@ -551,7 +577,8 @@ records.
 
 **`vm-reap`** removes clones nobody is using (`internal/utmvm/vm_lease.go`).
 A VM goes only when all of these hold: it has a record; it is not
-`irgo-win11`, `irgo-golden` or the golden image's verification clone (decided
+`irgo-win11`, a golden image (`irgo-golden`, `irgo-golden-linux`) or a golden
+image's verification clone (decided
 without even taking their locks, so the owner's commands are never refused for
 it); its creator is not alive; its lock is free (taken without waiting and held
 through the delete, so nothing can start using it in between); UTM lists it; and
@@ -601,7 +628,11 @@ refuse with exit 7, the numbers, and the running VMs by name.
   which keeps macOS, whose swap lives on that volume, out of its low-space
   warnings. A new clone needs `cloneReserveBytes`, **4 GiB**; an install, or a
   pull of the golden image when there is none here, `installReserveBytes`,
-  **30 GiB**; a Linux VM from the cloud image `linuxReserveBytes`, **8 GiB**. Every VM is allowed to grow to its reserve: one that has written
+  **30 GiB**; a Linux VM from the cloud image `linuxReserveBytes`, **8 GiB**;
+  a clone of the Linux golden image a clone's 4 GiB, at a Linux VM's 2 GiB of
+  memory (one wrote 0.4 GiB of its own through a package install and a reboot,
+  [measured](RESULTS.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
+  Every VM is allowed to grow to its reserve: one that has written
   1 GiB of its own is still promised 3, and that space counts as taken. A clone
   measured on 1 Oct 2026 wrote 0.28 GiB of its own through a boot, a
   `glaze-check -windows`, twenty `app-create`s and 90 idle minutes
@@ -614,7 +645,7 @@ refuse with exit 7, the numbers, and the running VMs by name.
   8 GiB and can each grow by 4 more. `IRGO_WINVM_QUOTA_VMS` and
   `IRGO_WINVM_QUOTA_GIB` change it for everyone on the machine (0 is no limit,
   anything else that does not parse refuses). VMs without a record
-  (`irgo-win11`, the golden image) belong to nobody's quota.
+  (`irgo-win11`, the golden images) belong to nobody's quota.
 
 Before it asks, `vm-create` runs `prune -force`: only what is already past its
 bounds goes (see below). When the answer is no and `IRGO_WINVM_AUTO_REAP` is set

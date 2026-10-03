@@ -47,8 +47,10 @@ installer) and no app stage after it yet: it is reached over SSH
 guest agent, locks, records and capacity guard as a Windows VM, and differs
 only in [the guest description](#the-guest-description) and in
 `internal/utmvm/linux_vm.go`, which fetches and converts the image and builds
-the seed. Not built: a Linux golden image and clones, `app-create` for a Linux
-binary, `vm-check` on Linux, and remote jobs; the plan and its phases are
+the seed. It has its own golden image, `irgo-golden-linux`, made and cloned
+by the same code as Windows' ([below](#the-golden-image-sealing-and-cloning)).
+Not built: `app-create` for a Linux binary, `vm-check` on Linux, a private
+cache of the Linux image, and remote jobs; the plan and its phases are
 `.plans/2026-10-02_1950_linux-vms.md`.
 
 The tool itself runs on macOS only. The `linux` builds in CI exist so that it
@@ -70,18 +72,22 @@ description of the VM it is given and keeps one body:
 | the guest's own addresses | `ipconfig` | `ip -4 -o addr show scope global`, after a header line |
 | the script that turns SSH on | `vm-ssh.ps1`, as SYSTEM | `vm-ssh.sh`, as root |
 | the machine: system disk, display, TPM, clock, memory | NVMe, `virtio-ramfb-gl`, TPM, local time, 8 GiB | VirtIO, `virtio-ramfb`, no TPM, UTC, 2 GiB |
+| the golden image, its manifest, a clone's memory | `irgo-golden`, `golden.json`, 4 GiB | `irgo-golden-linux`, `golden-linux.json`, 2 GiB |
+| the seal, and the shutdown from inside after it | `vm-golden-seal.ps1` as SYSTEM; `shutdown /s /t 5` | `vm-golden-seal.sh` as root; `systemd-run --on-active=5 systemctl poweroff` |
 
 `appExecSteps`, `VMSSHCreate`, `VMSSHDelete`, `EnsureReady` and the plist
-(`Config.Plist`, one template) read it. The app stage's own code (`-gui`,
-`vm-repair`, the share, the seal) names `windowsGuest` directly, because it is
-Windows only; a command declared `WindowsGuest` in `command.All` is refused on
+(`Config.Plist`, one template) read it, and so does the golden image's code
+(`GoldenCreate`, `CloneFromGolden`), whose one Windows-only step, `vm-repair`
+before the seal, it names. The app stage's own code (`-gui`, `vm-repair`, the
+share) names `windowsGuest` directly, because it is Windows only; a command declared `WindowsGuest` in `command.All` is refused on
 a Linux VM in `runTool`, before it takes a lock.
 
 **Which system a VM holds is in its record** (`vms/<name>.json`, the `os`
 field), written by `vm-create` and read by `guestOf`. Three answers: the
 record says; there is no record or no field, which is Windows (every VM made
 before the field); or the record cannot be read, which is cannot tell and
-refuses (`ErrGuestOS`).
+refuses (`ErrGuestOS`). A golden image and its verification clone have no
+record: their names say which system they hold (`goldenGuest`).
 
 ## Repository layout
 
@@ -135,7 +141,7 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   shots/    a screenshot per stage of every run
   jobs/     long-running work, so a 45-minute install survives a disconnect
   vm/       the UTM guest tools ISO, and staging/ for bundles until UTM imports them
-  golden.json            what is known about the golden image
+  golden.json            what is known about the golden image; golden-linux.json, the Linux one
   vms/      who made each VM and when it was last used, one record per VM
   mutation*.lock         the mutation locks: one machine-wide, one per VM, one per
                          caller's part of bin/, and the capacity check's
@@ -347,12 +353,15 @@ so `du` counts the image once per clone; the private size is what deleting it
 frees (a clone at 0.28 GiB private freed 0.29 GiB of `df`). APFS does not say
 *which* file a clone shares with (the clone id differs between the golden image
 and UTM's clone of it), so shared blocks are counted once as the most any file
-shares, which is right while there is one golden image. Off macOS `apfsUsage`
+shares, which is right while one golden image has clones; with clones of both
+systems' images it counts only the larger share. Off macOS `apfsUsage`
 errors, and a VM that cannot be measured makes the guard's answer cannot tell.
 
 **What a VM holds** is its private bytes or its reserve (`cloneReserveBytes`,
-4 GiB), whichever is more; the golden image holds only its private bytes, since
-it stays stopped. **Promised** is held minus private: free space that must stay
+4 GiB), whichever is more; a golden image holds only its private bytes, since
+it stays stopped. A new clone of the Linux image needs the same 4 GiB at 2 GiB
+of memory (`diskForLinuxClone`); a Linux VM made from the cloud image needs
+8 GiB (`linuxReserveBytes`). **Promised** is held minus private: free space that must stay
 free for VMs already here. The guard's disk test is
 
     free >= new VM's reserve + Σ promised (every listed VM, and 4 GiB for each VM
@@ -594,32 +603,51 @@ command is as cheap to repeat as for Windows.
 ## The golden image: sealing and cloning
 
 What the golden image is for, and its commands, are in
-[Using it](USING.md#the-golden-image).
+[Using it](USING.md#the-golden-image). There is one for each system, and one
+body of code for both: the source VM's record says its system, and
+[the guest description](#the-guest-description) supplies the image's name,
+manifest, seal script and steps, shutdown and clone memory.
 
-**Sealing** (`internal/utmvm/vm_golden.go`, and `assets/vm-golden-seal.ps1` in
-the guest, as SYSTEM, one step at a time with the disk's allocation printed
-after each):
+**Sealing** (`internal/utmvm/vm_golden.go`, and the seal script in the guest,
+one step at a time with the disk's allocation printed after each):
 
 1. boot the source VM and wait for its agent;
-2. BitLocker off (and `PreventDeviceEncryption` set), hibernation off,
-   `DISM /StartComponentCleanup /ResetBase`, TRIM;
-3. shut Windows down from inside and wait for UTM to report it stopped;
-4. clone it through UTM as `irgo-golden`, keeping only the NVMe system disk
-   (the install, answer-file and guest-tools CDs are dropped);
-5. clone the golden image once more, boot that clone until its agent answers,
-   run [the VM conformance suite](TESTING.md#the-vm-conformance-suite) on it
-   (`-check`, on by default; outside a checkout it records that it could not),
-   and delete it, so an image that does not boot is never reported made. An
-   image whose clone fails the suite is unregistered again so nothing clones
-   it (`verifyGolden`); the clone is left to look at, and the sealed source
+2. seal it. Windows (`assets/vm-golden-seal.ps1`, as SYSTEM, after
+   `vm-repair`): BitLocker off (and `PreventDeviceEncryption` set),
+   hibernation off, `DISM /StartComponentCleanup /ResetBase`, TRIM. Linux
+   (`assets/vm-golden-seal.sh`, as root): SSH off with its host keys, keys and
+   configuration removed; a netplan file of its own matching any `en*`
+   interface by name, with DHCP identified by MAC, in place of cloud-init's,
+   which matched the first boot's MAC; cloud-init cleaned and turned off,
+   since a clone has no seed; apt's cache and the journal emptied;
+   `/etc/machine-id` emptied; `fstrim` on the ext4 filesystems;
+3. shut the guest down from inside and wait for UTM to report it stopped;
+4. clone it through UTM as the image, keeping only the system disk: the first
+   drive on the system's disk interface, which is where every bundle this tool
+   writes puts it (`assets/utm-clone.applescript`). The Windows install,
+   answer-file and guest-tools CDs, and the Linux seed CD, are dropped;
+5. clone the image once more, boot that clone until its agent answers (a
+   Linux clone is then named and checked, below), run
+   [the VM conformance suite](TESTING.md#the-vm-conformance-suite) on it
+   (`-check`, on by default; outside a checkout it records that it could not,
+   and on Linux that the suite has no Linux checks yet), and delete it, so an
+   image that does not boot is never reported made. An image whose clone
+   fails the suite is unregistered again so nothing clones it
+   (`verifyGolden`); the clone is left to look at, and the sealed source
    stays, so making the image again is a clone of seconds;
-6. write `golden.json`: source, Windows build, WebView2 version, allocated and
-   apparent size, seal and boot times, the suite's verdict (`vm_check`), tool
-   version. `doctor` reports it.
+6. write the manifest (`golden.json`, `golden-linux.json`): source, system
+   (the Windows build and WebView2 version, or the distribution and kernel),
+   allocated and apparent size, seal and boot times, the suite's verdict
+   (`vm_check`), tool version. `doctor` reports both.
 
 **Cloning** (`CloneFromGolden`) takes the machine lock for the clone itself,
 seconds, so it cannot race `vm-golden-delete`, and runs the boot under the new
-VM's lock only.
+VM's lock only. **A Linux clone** has cloud-init off, so nothing in it would
+change its hostname: once its agent answers, `linuxCloned` sets it to the VM's
+name with `hostnamectl` and runs `vm-linux-check.sh` as for a VM just made
+(account, sudo, SSH off; it reports cloud-init as off). Its machine-id is made
+by systemd at its first boot from the VM's UUID, which UTM's clone always
+changes, and its SSH host keys by `vm-ssh-create`.
 
 Why it is built this way:
 

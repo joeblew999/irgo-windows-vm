@@ -54,7 +54,7 @@ Start with [Getting started](getting-started.md).
 | The MCP server | `irgo-winvm mcp` | The same commands as tools for an agent ([For agents](guides/agents.md)) |
 | The Worker | `worker/`, at `https://irgo-windows-vm.gedw99.workers.dev` | The Cloudflare Worker: the remote job queue, the ledger, live glaze status, the cache's front door ([The Cloudflare Worker](worker.md)) |
 | A remote job | `remote-submit` on any OS; `serve` on the Mac | A binary from another machine, run on a fresh clone of the golden image ([Remote jobs](concepts/architecture.md#remote-jobs)) |
-| The keeper | `keeper`, under pitchfork (`keeper-create`) | Keeps the Mac awake while a VM runs, starts again the VMs marked keep-running, and reports the Mac and its VMs to fleet-api ([The keeper](guides/using.md#the-keeper-vms-that-stay-up)) |
+| The keeper | `keeper`, under pitchfork (`keeper-create`) | Keeps the Mac awake while a VM runs, starts again the VMs marked keep-running, and writes the VMs down for claude-rig, whose report to fleet-api carries them ([The keeper](guides/using.md#the-keeper-vms-that-stay-up)) |
 | The glaze suite | `examples/conformance` | The tests that say whether glaze and native work, on the Mac and on Windows ([Testing](guides/testing.md)) |
 | The VM suite | `examples/vmconformance` | The tests that say whether a VM has what this project relies on ([The VM conformance suite](guides/testing.md#the-vm-conformance-suite)) |
 | The docs site | `docsite/` (the generator), `site/` (this site's config and hooks) | <https://joeblew999.github.io/irgo-windows-vm/>, built from these pages ([The docs site](contributing.md#the-docs-site)) |

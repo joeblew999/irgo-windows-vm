@@ -156,9 +156,11 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
                 manifest.json once finished, .parts/ while it is not
   ledger/   events not yet sent to the ledger, and this machine's random id
-  fleet/    the keeper's: fleet-api's write token (keeper-create, 0600) and
-            spool/, the device reports not sent yet
 ```
+
+One file outside it: the keeper writes the VMs to claude-rig's
+`~/.config/claude-rig/vms.json` (`RIG_CONFIG_HOME`, if set), for claude-rig's
+report ([The keeper](#the-keeper)).
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
 chosen as documentation are committed under `docs/screens/`, separate from
@@ -175,8 +177,8 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports only `wire` and `internal/workerclient`, so `utmvm` can call it |
 | `wire` | the Worker's API declared once ([the route table](../worker.md#the-route-table)): routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
 | `internal/workerclient` | the one client of the Worker, built from `wire`'s table |
-| `internal/device` | reads the machine into the sections of a fleet-api device report: host, CPU, memory and disks by gopsutil on every OS; power, battery, lid and sleep from `pmset` and `ioreg` on macOS, unknown elsewhere. Knows nothing of UTM ([The keeper](#the-keeper)) |
-| `internal/keeper` | the loop `keeper` runs, behind a `UTM` interface the CLI supplies that cannot quit UTM or stop a VM; the hold on sleep (`Caffeinate`); the reports to fleet-api through its Go SDK, spooled ([The keeper](#the-keeper)) |
+| `internal/device` | what the keeper decides on: the power source (`pmset -g batt` on macOS, unknown elsewhere) and whether a process holds the Mac awake (`pmset -g assertions`). Knows nothing of UTM ([The keeper](#the-keeper)) |
+| `internal/keeper` | the loop `keeper` runs, behind a `UTM` interface the CLI supplies that cannot quit UTM or stop a VM; the hold on sleep (`Caffeinate`); the VMs written down for claude-rig's report, in fleet-api's shape ([The keeper](#the-keeper)) |
 | `internal/remote` | the client of the Worker's job queue, and the loop `serve` runs, behind an `Executor` the CLI supplies; knows nothing of UTM, so it builds and is tested on every OS ([Remote jobs](#remote-jobs)) |
 | `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
 | `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`, `capacity.go`, `keeper.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
@@ -362,33 +364,32 @@ What it does for its user is in [Using it](../guides/using.md#the-keeper-vms-tha
 4. **The hold**: `Caffeinate`, `caffeinate -i -s -w <pid>`, checked in
    `pmset -g assertions` by pid both ways; held while a listed VM runs (not
    stopped, not paused, `utmvm.VMRunning`) or the list failed, on AC power.
-5. **The report**: `device.Read` and the VMs into fleet-api's
-   `DeviceReport` (schema 1), sent by its Go SDK
-   (`github.com/joeblew999/fleet-api/sdk/go`) with the write token, one
-   attempt with a 10 s limit. Every report is written to `fleet/spool/` first
-   and the spool is sent oldest first; a failure stops the round and nothing
-   is tried for a minute; 400, 413 and 422 drop the report. The id is the
-   ledger's machine id (`ledger.MachineID`), so the Mac is one machine in both.
-   The VMs go as `vms`, in the shape of the section
-   [fleet-api#3](https://github.com/joeblew999/fleet-api/pull/3) adds; until
-   the SDK has it, as a field the Worker stores as posted.
+5. **The VMs, written down**: `keeper.WriteVMs` writes `{ts, vms}` to
+   claude-rig's `vms.json` every pass, through a temporary file and a rename:
+   `vms` is the report's section in fleet-api's shape, its Go SDK's
+   `DeviceVMs` (`github.com/joeblew999/fleet-api/sdk/go`). claude-rig, the one
+   program that reports this Mac to fleet-api, carries it while it is under
+   2 minutes old, so the Mac is one device there, with claude-rig's id. On the
+   way out the keeper writes `unknown`, "the VM keeper stopped". The keeper
+   sends nothing itself.
 
 Nothing in `UTM` quits UTM, or stops, deletes or restarts a VM, so the
-keeper cannot, whatever it decides. It is tested against fakes of UTM, the
-hold and fleet-api (`internal/keeper/keeper_test.go`), and `pmset`'s and
-`ioreg`'s output from this Mac (`internal/device/testdata/`).
+keeper cannot, whatever it decides. It is tested against fakes of UTM and
+the hold, with the file it writes (`internal/keeper/keeper_test.go`), and
+`pmset`'s output from this Mac (`internal/device/testdata/`).
 
 **`keeper-create`** writes `[daemons.irgo-winvm-keeper]` into pitchfork's
 machine-wide `~/.config/pitchfork/config.toml` (claude-rig's session is there
 too, and is never touched: the section is found by its header and ends at the
 next), checks pitchfork lists it, runs `pitchfork boot enable` if boot start is
 off, and starts it. pitchfork restarts it if it exits non-zero (`retry = true`);
-a stop is exit 0. `keeper-delete` stops it and removes the section and the
-token; `pitchfork boot` stays as it was.
+a stop is exit 0. `keeper-delete` stops it and removes the section;
+`pitchfork boot` stays as it was. Both remove `fleet/`, the write token and
+spool a keeper that reported itself left behind.
 
 Not built: keeping a Linux or Windows host awake, the lid-closed mode
 (`pmset disablesleep`, root, measured first: `.plans/2026-10-01_1440_device-state-and-awake.md`),
-and moving `capacity`'s and `doctor`'s host readings onto `internal/device`.
+and Linux and Windows hosts' power source.
 
 ## The capacity model
 

@@ -21,6 +21,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 3 Oct 2026 | [the keeper writes the VMs for claude-rig's report: the file in 0.5 s with the 4 VMs, carried to fleet-api under the Mac's one id; `unknown` with the reason under pitchfork (-1743); "the VM keeper stopped" on Ctrl-C](#the-keeper-writes-the-vms-for-claude-rigs-report--measured-3-oct-2026) |
 | 3 Oct 2026 | [the keeper: the Mac held awake 0.5 s after it started, let go on Ctrl-C; reports in fleet-api; `claude-rig-linux` stopped by hand and started again 15 s later. Under pitchfork, `utmctl` is refused (-1743) until pitchfork is allowed to control UTM](#the-keeper--measured-3-oct-2026) |
 | 3 Oct 2026 | [the Linux golden image: sealed in 44 s (85 s with the shutdown, the clone and the verifying boot), 3.9 GiB; `vm-create -os linux` clones it and answers in 18 s, 30 s in all; two clones differ in MAC, address, machine-id and host keys](#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026) |
 | 2 Oct 2026 | [`vm-create` on a Linux VM that has SSH on passes its check (3.6 s), where the first-boot check exits 1; a Windows clone: `vm-ssh-create` 6 min 56 s, repeat 23 s, the undo twice](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026) |
@@ -45,6 +46,25 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## The keeper writes the VMs for claude-rig's report — measured 3 Oct 2026
+
+On the owner's Mac, a build of the branch that took reporting out of the
+keeper, with the two VMs marked keep-running started.
+
+- **Under pitchfork**, put in place of the installed binary and restarted:
+  the first pass wrote `~/.config/claude-rig/vms.json` with `vms` `unknown`
+  and the -1743 reason: pitchfork is still not allowed to control UTM
+  ([below](#the-keeper--measured-3-oct-2026)).
+- **From a terminal** (`irgo-winvm keeper`, pitchfork's stopped meanwhile):
+  0.5 s after it started the file held `ok`, UTM running, and the 4 VMs,
+  `claude-rig-test` and `claude-rig-linux` started and marked. claude-rig's
+  `report`, from its branch, posted it: `GET /api/devices/3d30e4bf0117d5f5`
+  showed `vms` ok with the 4 VMs beside `rig`, power, battery, lid and sleep.
+  On Ctrl-C the file said `unknown`, "the VM keeper stopped at 2026-10-03
+  13:13".
+- The installed binary was put back and pitchfork started it again; it still
+  posts as `227c4260c884ddfa` until this build is installed.
 
 ## The keeper — measured 3 Oct 2026
 

@@ -246,7 +246,7 @@ func (k *Keeper) keep(now time.Time, act bool) vmView {
 			if act {
 				k.say("utm", "UTM is not running, and no VM is marked keep-running: leaving it closed")
 			}
-			return k.view(VMSection{Status: "ok", AppRunning: false}, nil, recs)
+			return k.view(okVMs(false), nil, recs)
 		}
 		k.cfg.Say("UTM is not running, and %d VMs must keep running (%s): opening it", len(keep), strings.Join(keep, ", "))
 		if err := u.Open(); err != nil {
@@ -265,7 +265,7 @@ func (k *Keeper) keep(now time.Time, act bool) vmView {
 			list = again
 		}
 	}
-	return k.view(VMSection{Status: "ok", AppRunning: true}, list, recs)
+	return k.view(okVMs(true), list, recs)
 }
 
 // startStopped starts each marked VM UTM lists stopped whose backoff has
@@ -399,16 +399,25 @@ func (k *Keeper) lastVMs() vmView {
 	return vmView{Section: unknownVMs("not read: the keeper is stopping")}
 }
 
-// VMSection is the report's vms: the VMs on this Mac and whose they are.
-// fleet-api's schema 1 has no section for VMs; the report carries it as a
-// field the Worker stores as posted (every object allows unknown fields).
+// VMSection is the report's vms: the VMs on this Mac and whose they are, in
+// the shape of fleet-api's DeviceVMs (joeblew999/fleet-api#3). Until that is
+// in the SDK it goes as a field the Worker stores as posted.
 type VMSection struct {
-	Status string `json:"status"` // ok, none (no UTM), unknown (why)
-	Why    string `json:"why,omitempty"`
-	// AppRunning is whether UTM is running. Every VM is stopped when it is
-	// not, and the keeper does not open it to ask.
-	AppRunning bool     `json:"app_running"`
-	List       []VMInfo `json:"list,omitempty"`
+	Status  string `json:"status"` // ok, none (no UTM), unknown (why)
+	Why     string `json:"why,omitempty"`
+	Manager string `json:"manager,omitempty"` // utm, when ok
+	// ManagerRunning is whether UTM is running, when ok. Every VM is stopped
+	// when it is not, and the keeper does not open it to ask.
+	ManagerRunning *bool    `json:"manager_running,omitempty"`
+	List           []VMInfo `json:"list,omitempty"`
+}
+
+// utmUp is whether the section says UTM is running.
+func (s VMSection) utmUp() bool { return s.ManagerRunning != nil && *s.ManagerRunning }
+
+// okVMs is an ok section: UTM, running or not.
+func okVMs(running bool) VMSection {
+	return VMSection{Status: "ok", Manager: "utm", ManagerRunning: &running}
 }
 
 // VMInfo is one VM.
@@ -456,7 +465,7 @@ func (k *Keeper) view(s VMSection, list []VM, recs []Record) vmView {
 		}
 		s.List = append(s.List, VMInfo{Name: clip(name), State: state, OS: os, Owner: PublicOwner(r.Owner), KeepRunning: r.KeepRunning, KeeperStarts: starts})
 	}
-	if s.AppRunning {
+	if s.utmUp() {
 		for _, v := range list {
 			add(v.Name, v.Status)
 		}
@@ -548,7 +557,7 @@ func fingerprint(r *fleet.DeviceReport, vms VMSection) string {
 	if r.Keeper != nil && r.Keeper.Idle != nil {
 		fmt.Fprintf(&b, "held=%v;", *r.Keeper.Idle)
 	}
-	fmt.Fprintf(&b, "vms=%s/%v;", vms.Status, vms.AppRunning)
+	fmt.Fprintf(&b, "vms=%s/%v;", vms.Status, vms.utmUp())
 	for _, v := range vms.List {
 		fmt.Fprintf(&b, "%s=%s/%v/%d;", v.Name, v.State, v.KeepRunning, v.KeeperStarts)
 	}

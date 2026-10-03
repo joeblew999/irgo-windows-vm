@@ -13,7 +13,7 @@ import (
 )
 
 // The pull-and-import vm-create does on a machine with no golden image is
-// proven live against the real bucket and UTM (RESULTS.md). These run it with
+// proven live against the real bucket and UTM (docs/findings.md). These run it with
 // fakes for UTM, the bucket and the lock, for the decisions it makes on the way.
 
 // fakeImport records what pullGolden asked of the outside world.

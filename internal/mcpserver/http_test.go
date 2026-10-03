@@ -2,7 +2,7 @@ package mcpserver
 
 // The HTTP transport, and the guard in front of it.
 //
-// This is remote code execution by design — see docs/THREAT-MODEL.md — so the
+// This is remote code execution by design — see docs/concepts/threat-model.md — so the
 // refusals matter more than the happy path, and there are more of them here.
 
 import (

@@ -1,3 +1,9 @@
+---
+title: Known traps
+nav_order: 1
+parent: Reference
+---
+
 # Known traps
 
 Each of these fails silently or misleadingly. UTM rejects a bad config with one
@@ -5,9 +11,9 @@ generic *"cannot import this VM"* that names no field; a wrong boot command
 produces a prompt nobody sees; a truncated ISO produces a VM that will not boot.
 
 One line each. The `utmctl` rows are **defects in UTM**, written up with
-severity, reproduction and status in [UPSTREAM.md](UPSTREAM.md#utm); keep the
+severity, reproduction and status in [Upstream bugs](upstream.md#utm); keep the
 detail there and only the reminder here. The Worker's TinyGo and tooling traps
-are [on its page](WORKER.md#traps).
+are [on its page](../worker.md#traps).
 
 ## Host, UTM and the ISO
 
@@ -28,7 +34,7 @@ are [on its page](WORKER.md#traps).
 | El Torito marked BIOS (`-b`) | correctly sized and named, **does not boot** | UEFI needs `-e` |
 | `start utm-guest-tools-*.exe` | `start` does not expand wildcards; the installer silently never runs | expand the name with `for` first, as `autounattend.xml` does |
 | `utmctl start`, then keystrokes | a headless VM has no display, UTM routes input through it, and the keystrokes vanish | start it through UTM itself so a display opens (`StartWithDisplay`) |
-| a request that has to launch UTM: `osascript` with UTM closed, which is what `vm-create` and `capacity` sent first; also `utmctl` through Homebrew's symlink, closed or in the first 0.3 s after `open` | that request is answered, and **every VM start after it hangs** for as long as that UTM process lives: `utmctl list` and `status` go on answering at once, `start` and `ip-address` fail with `OSStatus error -1712`, and the AppleScript `start` waits two minutes for `AppleEvent timed out. (-1712)`. `utmctl` by its path inside UTM.app did not do it, closed or at 0 s. Why is not known ([measured 2 Oct 2026](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026), [UPSTREAM.md](UPSTREAM.md#utm-stops-answering-start-requests)) | never let a request be what launches UTM, and never poll UTM to see whether it is ready: that poll is a request. Ask macOS whether it is running (`application id "com.utmapp.UTM" is running`), and if not `open -g -a` it and send nothing for 2 s. Every request goes through `utmCommand`, which does that. By hand, open UTM before `utmctl` |
+| a request that has to launch UTM: `osascript` with UTM closed, which is what `vm-create` and `capacity` sent first; also `utmctl` through Homebrew's symlink, closed or in the first 0.3 s after `open` | that request is answered, and **every VM start after it hangs** for as long as that UTM process lives: `utmctl list` and `status` go on answering at once, `start` and `ip-address` fail with `OSStatus error -1712`, and the AppleScript `start` waits two minutes for `AppleEvent timed out. (-1712)`. `utmctl` by its path inside UTM.app did not do it, closed or at 0 s. Why is not known ([measured 2 Oct 2026](../findings.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026), [Upstream bugs](upstream.md#utm-stops-answering-start-requests)) | never let a request be what launches UTM, and never poll UTM to see whether it is ready: that poll is a request. Ask macOS whether it is running (`application id "com.utmapp.UTM" is running`), and if not `open -g -a` it and send nothing for 2 s. Every request goes through `utmCommand`, which does that. By hand, open UTM before `utmctl` |
 | UTM already in that state (something else launched it with a request) | the same hang, on the first start | quit UTM and open it again, which stops every VM it runs: `StartWithDisplay` does it once, only when UTM lists every VM as stopped (`recoverUTM`), and otherwise says which are up |
 | driving a boot on a VM that is already running | it may be a working desktop, not a UEFI shell; keystrokes land in whatever has focus (`docs/screens/vm/running-no-agent.png`: three Bing tabs searching for the EFI path) | never type at a VM this code did not just start; look at `vm-screen` |
 | `utmctl delete` | prints its failure and **exits 0** | check that the bundle is gone afterwards |
@@ -49,7 +55,7 @@ are [on its page](WORKER.md#traps).
 | an APFS clone of an immutable file | the clone is immutable too (`copyfile` copies BSD flags), so UTM cannot delete it later | clear the flag on the clone |
 | a long comment in `autounattend.xml` | Setup ignored the **whole** answer file and stopped at "Select language settings"; the same element under a one-line comment installed (30 Sep 2026; that comment was the only one with `%` in it, the trigger was not isolated). Unit tests pass either way | keep comments in the answer file short; prove any change to it with an install |
 | Windows 11 24H2 left alone | encrypts the disk on its own (Device Encryption), so a copy of it does not compress | `PreventDeviceEncryption` in specialize; decrypt before sealing |
-| `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](ARCHITECTURE.md#how-a-binary-gets-into-the-guest)) |
+| `utmctl file push` | about **0.4 MB/s**; a 50 MB file took 1 min 17 s even zipped | `Push` goes over the guest's SMB share (see [How a binary gets into the guest](../concepts/architecture.md#how-a-binary-gets-into-the-guest)) |
 | the guest connecting to a server on the Mac | hangs: the Mac's firewall is in stealth mode and drops incoming connections | connect from the Mac to the guest instead, never ask for a firewall change |
 | creating an SMB share on Windows 11 24H2 | Windows enables `File and Printer Sharing (Restrictive) (SMB-In)` itself, open to **any** address, and leaves it on after the share is removed | `file-share.ps1` turns it off both ways, and its own rule allows only the local subnet |
 | Windows' own firewall rule for OpenSSH Server | the guest's network is filed as Public, and connections to port 22 were dropped until the rule was set for every profile (by hand, 2 Oct 2026, build 26100.4349) | `vm-ssh.ps1` adds its own rule for every profile, from the local subnet, and turns Windows' off |
@@ -80,7 +86,7 @@ are [on its page](WORKER.md#traps).
 
 | trap | symptom | what to do |
 |---|---|---|
-| each package defines its **own** `ErrUnsupported` | none wrap `errors.ErrUnsupported`, so a check against that alone matches nothing, and a platform behaving as documented reports **FAILED** with a non-zero exit. `glaze.SetAppIcon` is unsupported on Windows by design | check each package's sentinel until the [upstream fix](UPSTREAM.md#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) is released |
+| each package defines its **own** `ErrUnsupported` | none wrap `errors.ErrUnsupported`, so a check against that alone matches nothing, and a platform behaving as documented reports **FAILED** with a non-zero exit. `glaze.SetAppIcon` is unsupported on Windows by design | check each package's sentinel until the [upstream fix](upstream.md#2-native--glaze--errunsupported-sentinels-do-not-wrap-errorserrunsupported) is released |
 | `tray.Run` **blocks**, driving the event loop until `Stop` | waiting on it deadlocks | post it and leave it; `Stop` is safe from any goroutine |
 | the tray started **before** the window | glaze's `New` runs a temporary `[NSApp run]` that ends only when `applicationDidFinishLaunching` fires, once per process. A tray started first consumes it and `glaze.New` blocks forever, with no window and nothing printed | create the window first |
 | `menu.Set` with no `Options.Window` | returns an error naming it, on Windows, where the HWND is required | pass the window |
@@ -93,5 +99,5 @@ are [on its page](WORKER.md#traps).
 | a notification toast (OneDrive's "Turn On Windows Backup") | an uncloaked `CoreWindow` of `ShellExperienceHost` titled "New notification". Stopping that host brings it straight back | stop the sending app and clear its notification history (`ToastNotificationManager.History.Clear`) |
 | `$null` passed to a `string` parameter of a .NET method from PowerShell | PowerShell passes `""`, so `FindWindow('Shell_TrayWnd', $null)` asks for an empty title and `FindWindowEx(0, h, $null, $null)` finds nothing | call from C# (`Add-Type`) or pass `[NullString]::Value` |
 | the Mac's Command key | UTM forwards it as the Windows key, so Cmd-Tab on the Mac opens Start in the guest, over screenshots and `-gui` windows | `Scancode Map` remaps both Windows keys (answer file, `vm-repair`); a reboot applies it |
-| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([UPSTREAM.md §5](UPSTREAM.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` before anything slow on the main goroutine |
-| an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([UPSTREAM.md §1b](UPSTREAM.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |
+| `glaze.New` called after other work on the main goroutine, on macOS | SIGTRAP inside `[NSApp run]` in about 1 run in 7: the goroutine had moved off the main OS thread, and glaze pins the thread in `New`, not in an `init` ([Upstream bugs §5](upstream.md#5-glaze--new-crashes-if-the-main-goroutine-has-moved-thread)) | call `glaze.New` before anything slow on the main goroutine |
+| an absolute `app://` URL for a sub-resource on Windows | glaze emulates the scheme with a virtual host, so the document loads from `https://app.localhost/` and an absolute `app://` URL names a scheme WebView2 does not know. No error, no console message, no stylesheet | reference assets relatively ([Upstream bugs §1b](upstream.md#1b-glaze--absolute-app-urls-silently-do-not-load-on-windows)) |

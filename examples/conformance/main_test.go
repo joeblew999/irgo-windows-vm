@@ -147,7 +147,7 @@ func onUI(t *testing.T, w glaze.WebView, f func()) {
 
 // Unsupported, and where that is the documented answer.
 //
-// STANDING IN FOR AN UPSTREAM FIX — docs/UPSTREAM.md §2. Every package defines
+// STANDING IN FOR AN UPSTREAM FIX — docs/reference/upstream.md §2. Every package defines
 // its own ErrUnsupported instead of wrapping errors.ErrUnsupported, so one
 // errors.Is against the standard sentinel matches none of them. The list below
 // collapses to that one check once the wrapping is in a released glaze and

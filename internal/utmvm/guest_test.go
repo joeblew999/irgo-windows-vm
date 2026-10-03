@@ -71,7 +71,7 @@ func TestGuestOfReadsTheRecord(t *testing.T) {
 // What runs in a Windows guest is what ran before these values moved into the
 // description: the same paths, the same argv for a script, a delete and the
 // ssh script, the same address command. A change here is a change of
-// behaviour in every guest, and is proven on one (docs/RESULTS.md).
+// behaviour in every guest, and is proven on one (docs/findings.md).
 //
 // Negative control, run by hand 2 Oct 2026: `del /q /f` for `del /q` in
 // windowsGuest.remove fails it.

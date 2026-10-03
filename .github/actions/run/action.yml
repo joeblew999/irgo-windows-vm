@@ -12,7 +12,8 @@
 #       gui: true
 #       token: ${{ secrets.IRGO_REMOTE_TOKEN }}
 #
-# The whole example: https://joeblew999.github.io/irgo-windows-vm/agents.html#from-another-machine-linux-windows-github
+# The whole example: .github/actions/run/example.yml, explained in
+# https://joeblew999.github.io/irgo-windows-vm/agents.html#from-another-machine-linux-windows-github
 name: irgo-windows-vm run
 description: Run a Windows ARM64 binary or go test -c binary on a fresh Windows 11 VM on a Mac, and pass or fail on its exit code.
 branding:

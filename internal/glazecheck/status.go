@@ -35,7 +35,7 @@ type Result struct {
 	// or t.Skip message. Empty on a pass.
 	Detail string
 
-	// Known is the docs/UPSTREAM.md reference when this test is a known
+	// Known is the docs/reference/upstream.md reference when this test is a known
 	// upstream failure on this target (KnownUpstream), whatever its outcome.
 	Known string
 

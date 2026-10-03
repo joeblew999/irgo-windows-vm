@@ -83,7 +83,7 @@ shows exactly what a client is told.
 
 ## Install
 
-Install the binary first ([the ways to install it](index.html#install)); the
+Install the binary first ([the ways to install it](getting-started.html#install)); the
 release is all you need, with no checkout, Go toolchain or mise. Then check it:
 
 ` + "```" + `sh

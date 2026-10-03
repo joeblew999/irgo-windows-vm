@@ -108,7 +108,7 @@ func TestARunningUTMIsAskedAtOnce(t *testing.T) {
 // that must not exist while UTM is being left alone.
 //
 // Proven against a fake. Against a real UTM it is measured, with the binary
-// from before as the control: docs/RESULTS.md.
+// from before as the control: docs/findings.md.
 //
 // Negative controls, run by hand: drop `a.sleep(a.settle)` from
 // openAndSettle and the order check fails; release the lock before

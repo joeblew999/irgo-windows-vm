@@ -1,20 +1,25 @@
+---
+title: Getting started
+nav_order: 2
+---
+
 # Getting started
 
 From nothing to your own Go program running on Windows 11 ARM64, on a Mac. The
 first VM takes about 45 minutes of unattended work; every run after that takes
 seconds.
 
-What each command does in detail is in [Using it](USING.md); driving it from an
-AI agent is in [For agents](FOR-AGENTS.md).
+What each command does in detail is in [Using it](guides/using.md); driving it from an
+AI agent is in [For agents](guides/agents.md).
 
 ## What you need
 
 - **A Mac with Apple Silicon.** Windows 11 ARM64 is the guest all of this is
   for: it is the platform whose behaviour cannot be checked by reading code on
   a Mac. A Linux VM to SSH into can be made beside it
-  ([scope](ARCHITECTURE.md#scope-windows-and-linux-to-ssh-into)).
+  ([scope](concepts/architecture.md#scope-windows-and-linux-to-ssh-into)).
 - **About 33 GB of disk** once Windows is installed
-  ([what it costs](USING.md#what-it-costs)).
+  ([what it costs](guides/using.md#what-it-costs)).
 - **UTM**, the hypervisor. `vm-create` installs it from its signed `.dmg` if it
   is missing: the newest release GitHub does not mark as a pre-release, never a
   beta (`latestStableUTMDMG`). UTM 5.0.x are betas; see
@@ -64,7 +69,7 @@ built by hand.
 **On Linux or Windows** the same binary is the client for a Mac elsewhere:
 `go install github.com/joeblew999/irgo-windows-vm/cmd/irgo-winvm@latest`, then
 `irgo-winvm remote-submit app.exe` with the Mac owner's URL and a token
-([how](FOR-AGENTS.md#from-another-machine-linux-windows-github)). The commands
+([how](guides/agents.md#from-another-machine-linux-windows-github)). The commands
 that drive UTM refuse there and say so.
 
 ## Your first VM
@@ -80,13 +85,18 @@ irgo-winvm vm-create -install   # a Windows VM, installed unattended
 - **The install takes about 45 minutes** and needs nobody at the keyboard. You
   never open the VM's window. `irgo-winvm vm-screen` saves a picture of the
   screen if you want to look.
-- **With a [golden image](USING.md#the-golden-image)** a new VM is a clone that
+- **With a [golden image](guides/using.md#the-golden-image)** a new VM is a clone that
   answers in about 23 seconds instead, and with your own
-  [private cache](USING.md#the-private-r2-cache) `vm-create -install` pulls the
+  [private cache](guides/using.md#the-private-r2-cache) `vm-create -install` pulls the
   image in minutes rather than installing.
 - **Every command is safe to repeat.** If the work is already done, it says so
   and stops, and every command that changes something has an undo
   (`iso-delete`, `vm-delete`, `app-delete`).
+
+The tool photographs each stage itself. When `vm-create` is done, the VM's
+screen is Windows ready to run your program:
+
+![Windows ready to run your program](screens/vm/ready.png)
 
 ## Your first program
 
@@ -102,17 +112,17 @@ irgo-winvm app-create -gui app.exe     # the same, for a program that opens a wi
 `app-create` takes seconds. It exits with your program's result: **0** when
 your program succeeded and **1** when it failed, with its real exit code in the
 message. Every other code is the tool telling you something; they are listed in
-[What it exits with](USING.md#what-it-exits-with).
+[What it exits with](guides/using.md#what-it-exits-with).
 
 A program with a window needs `-gui`
-([why](USING.md#why--gui-exists)).
+([why](guides/using.md#why--gui-exists)).
 
 ## Next
 
 | to | read |
 |---|---|
 | look up a command or flag | [Commands](https://joeblew999.github.io/irgo-windows-vm/reference.html), captured from the binary |
-| keep VMs cheap, share a Mac, fix an old VM | [Using it](USING.md) |
-| let an AI agent do all of this | [For agents](FOR-AGENTS.md) |
-| check whether glaze works on Windows | [Testing](TESTING.md) |
-| change the tool itself | [Contributing](CONTRIBUTING.md) |
+| keep VMs cheap, share a Mac, fix an old VM | [Using it](guides/using.md) |
+| let an AI agent do all of this | [For agents](guides/agents.md) |
+| check whether glaze works on Windows | [Testing](guides/testing.md) |
+| change the tool itself | [This repository](contributing.md) |

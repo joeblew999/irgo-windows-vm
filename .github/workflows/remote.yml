@@ -3,7 +3,7 @@
 # program and send it to the Mac running `irgo-winvm serve`, which runs it on
 # a fresh clone and deletes it. It needs the Mac serving, so it never runs on
 # its own: by hand (workflow_dispatch), or on a push to a scratch/remote-*
-# branch. docs/FOR-AGENTS.md has the example for another repository.
+# branch. The example for another repository is .github/actions/run/example.yml.
 name: remote
 
 on:

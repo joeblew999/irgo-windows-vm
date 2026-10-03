@@ -1,3 +1,9 @@
+---
+title: Upstream bugs
+nav_order: 2
+parent: Reference
+---
+
 # Upstream bugs
 
 Defects this project has found in the open-source projects it depends on:
@@ -187,7 +193,7 @@ out := schemeVHost(u.Scheme) + u.Path     // app://home/index.html -> https://ap
 The document therefore loads from `https://app.localhost/`, and an absolute
 `app://home/app.js` inside it names a scheme WebView2 has never heard of.
 
-**Reproduction.** Windows 11 ARM64, `examples/verify` loading the same asset
+**Reproduction.** Windows 11 ARM64, the probe examples/verify (since removed) loading the same asset
 twice, once absolutely and once relatively (the output below is that program's;
 it is now `TestAppScheme` in `examples/conformance`, where
 `TestAppScheme/absolute_subresources` fails on Windows and is listed in
@@ -359,7 +365,7 @@ regression. The likely trigger — inferred, not proven — is an update interru
 by a shutdown, which end users can hit after a power cut.
 
 **Reproduction** (in the VM, as SYSTEM): point the registration at a folder that
-does not exist, then run `examples/verify` (now `TestAppScheme` in
+does not exist, then run the probe examples/verify (since removed; now `TestAppScheme` in
 `examples/conformance`) against released glaze.
 
 ```
@@ -379,7 +385,7 @@ lint is clean for darwin and windows (`upstream:lint`). Full diagnosis:
 `.plans/done/2026-09-30_1250_glaze-webview2-stale-registration.md`.
 
 **In this repository.** `irgo-winvm vm-repair -reboot` repairs the registration
-on an affected VM (see [Using it](USING.md#when--gui-stops-working-on-an-old-vm)).
+on an affected VM (see [Using it](../guides/using.md#when--gui-stops-working-on-an-old-vm)).
 
 **Status.** `FILED` as [glaze#34](https://github.com/crgimenes/glaze/issues/34)
 on 30 Sep 2026. No reply or objection by 1 Oct 2026, when the fix was opened
@@ -464,7 +470,7 @@ nothing; 5.x records `hasFailed`, and only `snapshot create` checks it.
 
 **In this repository.** After `delete`, the tool checks whether the bundle still
 exists rather than trusting the status. This defect is also why this tool's own
-[exit codes](USING.md#what-it-exits-with) exist and are documented: they
+[exit codes](../guides/using.md#what-it-exits-with) exist and are documented: they
 are the only reliable signal a caller gets.
 
 **UTM 5.** Not fixed in v5.0.6: `hasFailed` is read only at `UTMCtl.swift:853`
@@ -561,7 +567,7 @@ fields, and `Platform/UTMData.swift` discards the decoding error:
 
 **Reproduction.** Six distinct config mistakes were found by bisection because
 of it, each costing an import cycle to identify. They are listed in
-[Known traps](TRAPS.md).
+[Known traps](traps.md).
 
 **UTM 5.** Not fixed in v5.0.6: the same `try?` (lines 690, 724, 747; 677,
 711, 734 in 4.7.5).
@@ -642,7 +648,7 @@ the later start too (2 of 2). The same `utmctl` run by its path inside
 UTM.app did none of this: against a closed UTM (`list` 4 of 4, `start` 2 of
 2) and at 0 s after `open` (4 of 4) the start that followed worked. Every
 count is in
-[RESULTS.md](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026).
+[Findings](../findings.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026).
 
 **Not established.** What in UTM is left undone. The senders that do the harm
 (`osascript`, `utmctl` through a symlink) are outside UTM's bundle and the one

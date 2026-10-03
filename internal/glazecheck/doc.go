@@ -21,7 +21,7 @@
 //
 // Known upstream failures (KnownUpstream) still fail and are still recorded
 // as failures; they only change the verdict from NO to KNOWN BUGS ONLY, so a
-// gate goes red for a new failure and not for one already recorded in docs/UPSTREAM.md.
+// gate goes red for a new failure and not for one already recorded in docs/reference/upstream.md.
 //
 // # Why it is in the shipped binary
 //
@@ -29,7 +29,7 @@
 // user who downloaded irgo-winvm to run their own .exe has neither of. It is
 // here anyway, for three reasons:
 //
-//   - docs/CONVENTIONS.md: logic belongs in the binary, not in mise.toml. The
+//   - docs/rules.md: logic belongs in the binary, not in mise.toml. The
 //     check was two shell scripts in the task file, and recording a verdict
 //     with versions and first-failure lines is not a job for shell.
 //   - An MCP tool is a command — mcpserver generates its tools from

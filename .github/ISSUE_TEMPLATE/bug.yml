@@ -12,7 +12,7 @@ body:
     attributes:
       value: |
         **Is it ours?** A bug in glaze, native or UTM is fixed there, not here. Check
-        [docs/UPSTREAM.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/UPSTREAM.md)
+        [docs/reference/upstream.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/reference/upstream.md)
         first, and use the *Upstream bug triage* form if it is theirs.
 
         **Agents:** forms are web-only. Run `irgo-winvm report -issue bug > body.md`, fill
@@ -76,7 +76,7 @@ body:
     attributes:
       label: Checks
       options:
-        - label: It is not already in docs/UPSTREAM.md or an open issue.
+        - label: It is not already in docs/reference/upstream.md or an open issue.
           required: true
         - label: I read the report and it holds no secret, token or personal path.
           required: true

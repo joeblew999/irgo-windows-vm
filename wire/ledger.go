@@ -7,7 +7,7 @@ import (
 )
 
 // The ledger: who used which VM, on which machine, doing what
-// (docs/WORKER.md, "The ledger"). internal/ledger posts events; the
+// (docs/worker.md, "The ledger"). internal/ledger posts events; the
 // Worker stores them in D1 and answers history and the current view.
 
 // LedgerType is an event's type.
@@ -136,7 +136,7 @@ type LedgerMachine struct {
 
 // LedgerCapacitySnapshot is a capacity event's Detail: one machine's disk,
 // memory and VM counts, as the tool's `capacity` worked them out
-// (docs/USING.md, "Is there room?"). It names nothing, and stays under
+// (docs/guides/using.md, "Is there room?"). It names nothing, and stays under
 // LedgerMaxDetail.
 type LedgerCapacitySnapshot struct {
 	DiskFree      int64  `json:"disk_free"`

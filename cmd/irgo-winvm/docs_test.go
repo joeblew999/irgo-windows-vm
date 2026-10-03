@@ -53,7 +53,7 @@ func repoRoot(t *testing.T) string {
 // reverse.
 //
 // Negative control (by hand, 1 Oct 2026): `irgo-winvm frobnicate` appended to
-// docs/ROADMAP.md passes with its `intent = true` and fails without it.
+// docs/roadmap.md passes with its `intent = true` and fails without it.
 func intentDocs(t *testing.T) map[string]bool {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(repoRoot(t), "site", "docsite.toml"))
@@ -89,29 +89,46 @@ func intentDocs(t *testing.T) map[string]bool {
 	return out
 }
 
-// markdownFiles returns every .md file at the repository root and in docs/,
-// keyed by path from the root, minus intentDocs.
+// markdownFiles returns every .md file at the repository root and anywhere
+// under docs/ (the pages sit in section folders: docs/guides/, ...), keyed by
+// path from the root, minus intentDocs.
 func markdownFiles(t *testing.T) map[string]string {
 	t.Helper()
 	root := repoRoot(t)
 	intent := intentDocs(t)
 	out := map[string]string{}
-	for _, dir := range []string{".", "docs"} {
-		entries, err := os.ReadDir(filepath.Join(root, dir))
+	add := func(name string) {
+		if !strings.HasSuffix(name, ".md") || intent[name] {
+			return
+		}
+		b, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, e := range entries {
-			name := filepath.ToSlash(filepath.Join(dir, e.Name()))
-			if e.IsDir() || !strings.HasSuffix(name, ".md") || intent[name] {
-				continue
-			}
-			b, rErr := os.ReadFile(filepath.Join(root, name))
-			if rErr != nil {
-				t.Fatal(rErr)
-			}
-			out[name] = string(b)
+		out[name] = string(b)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			add(e.Name())
 		}
+	}
+	err = filepath.WalkDir(filepath.Join(root, "docs"), func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		add(filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(out) < 5 {
 		t.Fatalf("found %d markdown files; the docs moved and this test would pass vacuously", len(out))
@@ -120,7 +137,7 @@ func markdownFiles(t *testing.T) map[string]string {
 }
 
 // TestDocsNameOnlyRealCommands: everything the docs tell a reader to run must
-// exist. (RESULTS.md once named two commands the binary never had.)
+// exist. (docs/findings.md, then RESULTS.md, once named two commands the binary never had.)
 //
 // Negative control: renaming `iso-create` to `iso-make` in README.md fails
 // this and names the file.
@@ -160,7 +177,7 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 }
 
 // exitCodeDoc holds the exit-code table.
-const exitCodeDoc = "docs/USING.md"
+const exitCodeDoc = "docs/guides/using.md"
 
 // exitCodeHeading opens the section the table is read from. Only that section
 // is read: another table in the same file has a `| CPUs | **4** |` row, which

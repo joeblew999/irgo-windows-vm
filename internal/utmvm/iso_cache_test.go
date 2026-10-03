@@ -124,7 +124,7 @@ func TestInspectISOUsesTheCache(t *testing.T) {
 // build does and checks the verdict is used — it does NOT prove the build
 // still calls isoStoreVerdict, because that path needs a real 4.2 GB .esd.
 // Deleting that call leaves this test green. It is verified by measurement
-// instead, recorded in docs/RESULTS.md: 77s before, 0.0s after.
+// instead, recorded in docs/findings.md: 77s before, 0.0s after.
 func TestBuiltISOCarriesItsVerdict(t *testing.T) {
 	p := writeISO(t, "pretend this is a mastered ISO")
 

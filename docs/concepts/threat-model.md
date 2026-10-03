@@ -1,3 +1,9 @@
+---
+title: Threat model
+nav_order: 2
+parent: Concepts
+---
+
 # Threat model
 
 Read this before you enable `-http`. It describes what anyone who can reach the
@@ -78,7 +84,7 @@ If you do open one:
 
 ## The remote job queue
 
-[`serve`](FOR-AGENTS.md#from-another-machine-linux-windows-github) is the way
+[`serve`](../guides/agents.md#from-another-machine-linux-windows-github) is the way
 to let other machines use the Mac **without** an inbound listener: the Mac
 connects out to the Worker and asks for work. What it exposes is different
 from `-http`, and narrower.
@@ -128,13 +134,13 @@ from `-http`, and narrower.
 
 ## SSH into a guest
 
-[`vm-ssh-create`](USING.md#ssh-into-a-vm) opens a port in a guest that had
+[`vm-ssh-create`](../guides/using.md#ssh-into-a-vm) opens a port in a guest that had
 none listening there. What that adds, and what it does not:
 
 **What it opens.** TCP 22 in that one VM, by a firewall rule that allows the
 guest's local subnet only, and `sshd` started and set to start at boot. It
 stays open across reboots until `vm-ssh-delete` or the VM's deletion. In a
-[Linux VM](USING.md#a-linux-vm) there is no firewall and none is added: the
+[Linux VM](../guides/using.md#a-linux-vm) there is no firewall and none is added: the
 port is open on every address the guest has.
 
 **Who can reach it.** The VM is on UTM's Shared Network: a private subnet on

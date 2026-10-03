@@ -27,7 +27,7 @@ const (
 	Unfinished = "unfinished" // started, and the binary exited or hung before it ended
 )
 
-// Known is a failure recorded in docs/UPSTREAM.md (not necessarily reported upstream yet), expected on one target until
+// Known is a failure recorded in docs/reference/upstream.md (not necessarily reported upstream yet), expected on one target until
 // the fix is released. For the VM suite it is a VM property known to be
 // missing, with the reason (KnownVM); there a Known with no Target holds on
 // every VM.
@@ -47,9 +47,9 @@ type Known struct {
 }
 
 // KnownUpstream is every known upstream failure. Keep it short and cited:
-// each entry is a bug with a section in docs/UPSTREAM.md.
+// each entry is a bug with a section in docs/reference/upstream.md.
 var KnownUpstream = []Known{
-	{Target: TargetWindows, Test: "TestAppScheme/absolute_subresources", Ref: "docs/UPSTREAM.md §1b"},
+	{Target: TargetWindows, Test: "TestAppScheme/absolute_subresources", Ref: "docs/reference/upstream.md §1b"},
 }
 
 // event is one line of `go tool test2json` output.

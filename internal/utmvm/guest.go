@@ -193,7 +193,7 @@ const linuxAddrHeader = "irgo-winvm: addresses"
 
 // linuxGuest is Ubuntu Server from its cloud image, as vm-create -os linux
 // makes it (linux_vm.go). Measured by hand before any of it was written:
-// docs/RESULTS.md, "A Linux guest by hand".
+// docs/findings.md, "A Linux guest by hand".
 var linuxGuest = guestOS{
 	name:  GuestLinux,
 	label: "Linux",

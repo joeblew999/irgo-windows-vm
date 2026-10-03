@@ -1,0 +1,30 @@
+# An example workflow for another repository: copy it into that repository's
+# .github/workflows/. It builds a test binary on a Linux runner and hands it to
+# this repository's action, which runs it on a fresh Windows 11 ARM64 clone on
+# a Mac running `irgo-winvm serve`, fails the step unless the job exited 0, and
+# uploads the result files as an artifact. Keep the token as a repository
+# secret. Explained in docs/guides/agents.md, "From another machine".
+#
+# Not a workflow of this repository: only .github/workflows/ runs.
+name: windows-arm64
+
+on: [push]
+
+jobs:
+  windows-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with: { go-version-file: go.mod }
+      - run: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go test -c -o suite.test.exe ./mysuite
+      - uses: joeblew999/irgo-windows-vm/.github/actions/run@main
+        with:
+          binary: suite.test.exe
+          test: true
+          gui: true
+          args: |
+            -test.run
+            TestWindow
+            -shots={out}
+          token: ${{ secrets.IRGO_REMOTE_TOKEN }}

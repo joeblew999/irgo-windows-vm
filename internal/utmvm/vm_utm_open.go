@@ -17,7 +17,7 @@ import (
 //
 // A UTM that a request has to launch, or that gets one in the first moments
 // of its launch, can answer it and then never answer a VM start until it is
-// quit and reopened (docs/TRAPS.md). Measured 2 Oct 2026, UTM 4.7.5, with UTM
+// quit and reopened (docs/reference/traps.md). Measured 2 Oct 2026, UTM 4.7.5, with UTM
 // closed: an osascript request left every later start hanging, 4 of 4, and
 // so did `capacity`, whose first request is one, 2 of 2. After `open -g -a`,
 // osascript and utmctl by its path in UTM.app were answered at 0 s with no

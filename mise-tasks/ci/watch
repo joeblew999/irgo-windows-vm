@@ -49,5 +49,5 @@ gh run list --commit "$SHA" --json workflowName,conclusion,url \
   --jq '.[] | "  \(.workflowName): \(.conclusion)  \(.url)"'
 
 # Non-zero on failure. A wait-for-CI that exits 0 when CI failed is a check that
-# cannot fail, which is the one thing docs/CONVENTIONS.md says a check must never be.
+# cannot fail, which is the one thing docs/rules.md says a check must never be.
 exit $failed

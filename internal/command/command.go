@@ -41,7 +41,7 @@ type Command struct {
 	// DetachAlways. With it, an MCP call starts a job and returns a handle
 	// instead of blocking past every client's timeout. A flag rather than a
 	// property of the command, because `iso-create` takes about 40 s
-	// (docs/RESULTS.md) and `-fetch` downloads 4.2 GB first.
+	// (docs/findings.md) and `-fetch` downloads 4.2 GB first.
 	Detach string
 
 	// MacOnly marks a command that drives UTM, which only macOS has. On

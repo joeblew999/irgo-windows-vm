@@ -1,3 +1,9 @@
+---
+title: VM status
+nav_order: 4
+parent: Reference
+---
+
 # VM status
 
 Does each Windows VM have every property this project relies on? The last

@@ -27,7 +27,7 @@ import (
 // scheme with a virtual host, so the document loads from https://app.localhost/
 // and an absolute `app://home/abs.js` inside it names a scheme WebView2 has
 // never heard of. It fails silently — no error, no console message, just a page
-// with no stylesheet and no script. That is docs/UPSTREAM.md §1b, and
+// with no stylesheet and no script. That is docs/reference/upstream.md §1b, and
 // TestAppScheme/absolute_subresources FAILS on Windows until glaze fixes it.
 // It is not skipped: a skip would read as "not applicable", and it is the one
 // thing about this path that is broken.
@@ -204,7 +204,7 @@ func TestAppScheme(t *testing.T) {
 	t.Run("absolute_subresources", func(t *testing.T) {
 		if !r.AbsScript {
 			t.Errorf("app://home/abs.js did not run; the scheme handler was asked for it: %t. The document's origin is %s — "+
-				"on Windows this is glaze bug docs/UPSTREAM.md §1b: the scheme is emulated with a virtual host, so an absolute app:// "+
+				"on Windows this is glaze bug docs/reference/upstream.md §1b: the scheme is emulated with a virtual host, so an absolute app:// "+
 				"URL inside the page names a scheme WebView2 does not know", wasServed("/abs.js"), r.Origin)
 		}
 		if r.AbsCSS != "11px" {

@@ -157,7 +157,7 @@ var All = []Command{
 	// serve runs forever, so it is not an MCP tool; each job's steps are
 	// this binary's own commands and take their own locks.
 	// keeper runs forever, so it is not an MCP tool.
-	{Name: "keeper", Summary: "on the Mac: keep it awake while VMs run, keep marked VMs running, report to fleet-api", MacOnly: true},
+	{Name: "keeper", Summary: "on the Mac: keep it awake while VMs run, keep marked VMs running, write the VMs for claude-rig's report", MacOnly: true},
 	{Name: "serve", Summary: "on the Mac: take remote jobs from the Worker, each on a fresh clone; connects out only", MacOnly: true},
 }
 

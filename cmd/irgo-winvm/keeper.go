@@ -16,33 +16,26 @@ import (
 
 	"github.com/joeblew999/irgo-windows-vm/internal/device"
 	"github.com/joeblew999/irgo-windows-vm/internal/keeper"
-	"github.com/joeblew999/irgo-windows-vm/internal/ledger"
 	"github.com/joeblew999/irgo-windows-vm/internal/utmvm"
 )
 
 // The keeper: the Mac awake while a VM runs, VMs marked keep-running started
-// again when they stop, and the Mac reported to fleet-api. docs/guides/using.md,
-// "The keeper".
+// again when they stop, and the VMs written down for claude-rig's report.
+// docs/guides/using.md, "The keeper".
 
 const keeperAbout = `  Runs until stopped, under pitchfork (keeper-create installs it there).
   Every pass (-every) it keeps the Mac awake while a VM runs on AC power,
   starts again each VM marked keep-running (vm-keep-create) that UTM lists
-  stopped, opening UTM first if one needs it, and reports this Mac and its
-  VMs to fleet-api every -report, or sooner when something changes. It never
+  stopped, opening UTM first if one needs it, and writes the VMs to
+  ~/.config/claude-rig/vms.json (in RIG_CONFIG_HOME, if set) for claude-rig,
+  whose report to fleet-api carries them. It sends nothing itself. It never
   stops, deletes or restarts a VM that is not marked, and never quits UTM.
-  Reports go to FLEET_API_URL (default ` + defaultFleetURL + `) with the write
-  token from FLEET_API_WRITE_TOKEN, else the file keeper-create kept; with
-  neither, reporting is off. -once reads and reports once and changes nothing.
+  -once prints what it would write, and changes nothing.
 `
 
-// defaultFleetURL is the deployed fleet-api.
-const defaultFleetURL = "https://fleet-api.gedw99.workers.dev"
-
-// The environment the keeper reads.
-const (
-	envFleetURL   = "FLEET_API_URL"
-	envFleetToken = "FLEET_API_WRITE_TOKEN"
-)
+// envRigHome is where claude-rig keeps its files; the keeper writes its
+// VMs there.
+const envRigHome = "RIG_CONFIG_HOME"
 
 // keeperDaemon is the keeper's name in pitchfork's config.
 const keeperDaemon = "irgo-winvm-keeper"
@@ -51,51 +44,49 @@ const keeperDaemon = "irgo-winvm-keeper"
 // pitchfork waits for (ready_output).
 const keeperReady = "keeper: watching"
 
-func fleetDir() string       { return filepath.Join(utmvm.Root(), "fleet") }
-func fleetTokenPath() string { return filepath.Join(fleetDir(), "write-token") }
+// vmsPath is the file the keeper writes its VMs to: claude-rig's
+// vms.json, which its report reads.
+func vmsPath() string {
+	if d := strings.TrimSpace(os.Getenv(envRigHome)); d != "" {
+		return filepath.Join(d, "vms.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "claude-rig", "vms.json")
+}
+
+// oldFleetDir is where the keeper kept fleet-api's write token and its
+// report spool when it reported itself; keeper-create and keeper-delete
+// remove it.
+func oldFleetDir() string { return filepath.Join(utmvm.Root(), "fleet") }
 
 func keeperFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("keeper", flag.ContinueOnError)
 	fs.Duration("every", keeper.DefaultEvery, "time between passes")
-	fs.Duration("report", keeper.DefaultReportEvery, "time between reports when nothing changes: the report's next_s")
-	fs.Bool("once", false, "read this Mac and its VMs, print the report and send it once (reason once); open no UTM, start no VM, hold nothing")
-	fs.Bool("send", true, "with -once: send the report as well as printing it")
+	fs.Bool("once", false, "read the VMs and print what the keeper would write; open no UTM, start no VM, hold nothing, write nothing")
 	return fs
 }
 
 func runKeeper(v values, _ []string) error {
 	say := utmvm.Printer("keeper")
-	every, reportEvery := v.Duration("every"), v.Duration("report")
-	if every < time.Second || reportEvery < every || reportEvery > 24*time.Hour {
-		return fmt.Errorf("%w: -every must be 1s or more, and -report at least -every and at most 24h", errUsage)
+	every := v.Duration("every")
+	if every < time.Second || every > time.Minute {
+		return fmt.Errorf("%w: -every must be from 1s to 1m: claude-rig takes the VMs while they are under 2 minutes old", errUsage)
 	}
-	id := ledger.MachineID(filepath.Join(utmvm.Root(), "ledger"))
-	reports, why := fleetReporter()
-	once := v.Bool("once")
-	if once && !v.Bool("send") {
-		reports = nil
-	}
+	path := vmsPath()
 	cfg := keeper.Config{
-		UTM:         macUTM{say: say},
-		Awake:       &keeper.Caffeinate{},
-		Read:        func() device.Snapshot { return device.Read(utmvm.Root()) },
-		Reports:     reports,
-		ID:          id,
-		Version:     version,
-		Every:       every,
-		ReportEvery: reportEvery,
-		Say:         say,
+		UTM:   macUTM{say: say},
+		Awake: &keeper.Caffeinate{},
+		Power: device.Power,
+		Write: func(f keeper.VMsFile) error { return keeper.WriteVMs(path, f) },
+		Every: every,
+		Say:   say,
 	}
-	if once {
-		r := keeper.New(cfg).Once(context.Background())
-		b, err := json.MarshalIndent(r, "", "  ")
+	if v.Bool("once") {
+		b, err := json.MarshalIndent(keeper.New(cfg).Once(), "", "  ")
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(b))
-		if reports == nil && v.Bool("send") {
-			say("not sent: %s", why)
-		}
 		return nil
 	}
 
@@ -104,49 +95,14 @@ func runKeeper(v values, _ []string) error {
 		return fmt.Errorf("%w; one keeper runs per Mac (pitchfork status %s)", err, keeperDaemon)
 	}
 	defer release()
-	say("version %s, machine id %s, data in %s", version, id, utmvm.Home(utmvm.Root()))
-	if reports == nil {
-		say("reporting is off: %s", why)
-	} else {
-		say("reporting to %s every %s, spooled in %s", fleetURL(), reportEvery, utmvm.Home(reports.Dir))
-	}
+	say("version %s, data in %s", version, utmvm.Home(utmvm.Root()))
+	say("writing the VMs every pass to %s, for claude-rig's report", utmvm.Home(path))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	say("%s every %s; stop with pitchfork stop %s, or Ctrl-C", keeperReady, every, keeperDaemon)
 	keeper.New(cfg).Run(ctx)
 	say("stopped")
 	return nil
-}
-
-func fleetURL() string {
-	if u := strings.TrimSpace(os.Getenv(envFleetURL)); u != "" {
-		return u
-	}
-	return defaultFleetURL
-}
-
-// fleetToken is the write token: the environment's, else the file
-// keeper-create kept. Its value is never printed.
-func fleetToken() (token, from string) {
-	if t := strings.TrimSpace(os.Getenv(envFleetToken)); t != "" {
-		return t, envFleetToken
-	}
-	if b, err := os.ReadFile(fleetTokenPath()); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, utmvm.Home(fleetTokenPath())
-		}
-	}
-	return "", ""
-}
-
-// fleetReporter is the reporter to fleet-api, or nil and why reporting is
-// off.
-func fleetReporter() (*keeper.Reporter, string) {
-	token, _ := fleetToken()
-	if token == "" {
-		return nil, fmt.Sprintf("no write token: set %s, or run keeper-create with it set", envFleetToken)
-	}
-	return &keeper.Reporter{Post: keeper.NewPost(fleetURL(), token), Dir: filepath.Join(fleetDir(), "spool")}, ""
 }
 
 // macUTM is the keeper's UTM: utmvm's, with nothing in it that quits UTM or
@@ -264,9 +220,9 @@ func pitchforkConfig() string {
 	return filepath.Join(home, ".config", "pitchfork", "config.toml")
 }
 
-// runKeeperCreate puts the keeper in pitchfork's config, keeps the write
-// token, has pitchfork start at boot, and starts the keeper; each step only
-// if it is not done, so it can run again.
+// runKeeperCreate removes what the keeper kept when it reported itself, puts
+// the keeper in pitchfork's config, has pitchfork start at boot, and starts
+// the keeper; each step only if it is not done, so it can run again.
 func runKeeperCreate(_ values, _ []string) error {
 	say := utmvm.Printer("keeper-create")
 	if _, err := exec.LookPath("pitchfork"); err != nil {
@@ -286,17 +242,13 @@ func runKeeperCreate(_ values, _ []string) error {
 		return fmt.Errorf("%w: the binary's path has a quote in it (%s), which pitchfork's run line cannot hold", errUsage, bin)
 	}
 
-	say("STEP 1/4  the write token for fleet-api")
-	if t := strings.TrimSpace(os.Getenv(envFleetToken)); t != "" {
-		changed, err := writeSecret(fleetTokenPath(), t)
-		if err != nil {
-			return err
-		}
-		say("          from %s, kept in %s (readable by you alone)%s", envFleetToken, utmvm.Home(fleetTokenPath()), map[bool]string{true: "", false: "; unchanged"}[changed])
-	} else if _, from := fleetToken(); from != "" {
-		say("          already kept in %s", from)
+	say("STEP 1/4  what the keeper kept when it reported to fleet-api itself")
+	if removed, err := removeOldFleetDir(); err != nil {
+		return err
+	} else if removed {
+		say("          removed %s: fleet-api's write token and the report spool; claude-rig reports for this Mac", utmvm.Home(oldFleetDir()))
 	} else {
-		say("          none: %s is not set and no token is kept, so the keeper will not report. Run this again with it set", envFleetToken)
+		say("          nothing left")
 	}
 
 	say("STEP 2/4  the daemon in %s", utmvm.Home(pitchforkConfig()))
@@ -336,7 +288,7 @@ func runKeeperCreate(_ values, _ []string) error {
 }
 
 // runKeeperDelete stops the keeper, takes it out of pitchfork's config and
-// removes the kept token. Nothing to remove is success. pitchfork's start at
+// removes what it kept when it reported itself. Nothing to remove is success. pitchfork's start at
 // boot is left on: other daemons use it.
 func runKeeperDelete(_ values, _ []string) error {
 	say := utmvm.Printer("keeper-delete")
@@ -360,12 +312,28 @@ func runKeeperDelete(_ values, _ []string) error {
 	} else {
 		say("no [daemons.%s] in %s", keeperDaemon, utmvm.Home(pitchforkConfig()))
 	}
-	if err := os.Remove(fleetTokenPath()); err == nil {
-		say("removed the kept write token, %s", utmvm.Home(fleetTokenPath()))
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if removed, err := removeOldFleetDir(); err != nil {
 		return err
+	} else if removed {
+		say("removed %s: fleet-api's write token and the report spool the keeper once kept", utmvm.Home(oldFleetDir()))
 	}
 	return nil
+}
+
+// removeOldFleetDir removes the folder the keeper kept fleet-api's write
+// token and its spool in, and checks it is gone. Nothing there is success.
+func removeOldFleetDir() (removed bool, err error) {
+	d := oldFleetDir()
+	if _, err := os.Stat(d); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err := os.RemoveAll(d); err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(d); !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("%s is still there after removing it", d)
+	}
+	return true, nil
 }
 
 // editPitchforkConfig rewrites pitchfork's config through edit, if that
@@ -464,18 +432,6 @@ func pitchforkRunning(name string) bool {
 		}
 	}
 	return false
-}
-
-// writeSecret writes a secret readable by its owner alone, if it differs
-// from what is there.
-func writeSecret(p, value string) (changed bool, err error) {
-	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == value {
-		return false, os.Chmod(p, 0o600)
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return false, err
-	}
-	return true, writeFileAtomic(p, []byte(value+"\n"), 0o600)
 }
 
 // writeFileAtomic writes p through a temporary file beside it and a rename,

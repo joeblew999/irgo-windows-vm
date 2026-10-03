@@ -121,7 +121,8 @@ var windowsGuest = guestOS{
 		return append([]string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path}, args...)
 	},
 	sshAs:       "SYSTEM",
-	sshFirstRun: "the first time it installs OpenSSH Server from Windows Update, which takes minutes",
+	sshFirstRun: "seconds on a clone of a golden image sealed with OpenSSH Server; on a VM without it, " +
+		"the first run installs it from Windows Update, which takes minutes",
 
 	quiet: "It is probably Windows Update",
 

@@ -62,6 +62,7 @@ var sealSteps = []struct {
 	{"facts", "what is there before", 2 * time.Minute},
 	{"decrypt", "turning BitLocker off and waiting for the decryption", 130 * time.Minute},
 	{"hibernate", "turning hibernation off", 2 * time.Minute},
+	{"openssh", "installing OpenSSH Server, left disabled, so vm-ssh-create on a clone takes seconds (minutes, from Windows Update)", 30 * time.Minute},
 	{"cleanup", "cleaning up the component store (DISM /ResetBase), which takes minutes", 90 * time.Minute},
 	{"trim", "TRIM, so freed blocks can become holes on the host", 30 * time.Minute},
 	{"facts", "what is there after", 2 * time.Minute},

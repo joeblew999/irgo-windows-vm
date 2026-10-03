@@ -45,7 +45,8 @@ func TestImportAndEjectScriptsTakeOneArgument(t *testing.T) {
 // TestSealStepsAreTheScripts: a step the Go side runs and the script does not
 // accept fails in the guest, forty minutes into a seal, as a ValidateSet error.
 //
-// Negative control, run by hand: rename "trim" in sealSteps and this fails.
+// Negative controls, run by hand: rename "trim" in sealSteps and this fails;
+// so does moving "openssh" after "cleanup" (3 Oct 2026).
 func TestSealStepsAreTheScripts(t *testing.T) {
 	m := regexp.MustCompile(`ValidateSet\(([^)]*)\)`).FindStringSubmatch(sealScript)
 	if m == nil {
@@ -70,6 +71,10 @@ func TestSealStepsAreTheScripts(t *testing.T) {
 	}
 	if order["decrypt"] > order["trim"] || order["cleanup"] > order["trim"] {
 		t.Error("TRIM must run after decrypt and cleanup, or what they free is not trimmed")
+	}
+	// The component cleanup removes what installing the capability supersedes.
+	if _, ok := order["openssh"]; !ok || order["openssh"] > order["cleanup"] {
+		t.Error("openssh must run, and before cleanup")
 	}
 	if sealSteps[len(sealSteps)-1].step != "facts" {
 		t.Error("the last step must be facts, so the manifest records the sealed state")

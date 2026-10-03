@@ -11,6 +11,11 @@
 #             TPM protector added later would lock a copy out. Through WMI
 #             rather than manage-bde, whose output is localised.
 #  hibernate  hiberfil.sys was 3.43 GB of nothing a copy needs.
+#  openssh    the OpenSSH Server capability, so vm-ssh-create on a clone takes
+#             seconds: installing it there took 7 to 10 minutes of Windows
+#             Update. Installed and never started: sshd makes its host keys
+#             when it first starts, so each clone makes its own. A source that
+#             had SSH on loses its host keys, keys and firewall rule here.
 #  cleanup    WinSxS held 6.50 GB of "Backups and Disabled Features".
 #             /ResetBase means updates already installed can no longer be
 #             uninstalled, which a disposable VM never needs.
@@ -19,7 +24,7 @@
 #             measures around this step.
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('facts', 'decrypt', 'hibernate', 'cleanup', 'trim')]
+  [ValidateSet('facts', 'decrypt', 'hibernate', 'openssh', 'cleanup', 'trim')]
   [string]$Step
 )
 $ErrorActionPreference = 'Stop'
@@ -54,6 +59,9 @@ switch ($Step) {
       'bitlocker: not available'
     }
     "hiberfil: $(Test-Path 'C:\hiberfil.sys')"
+    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($sshd) { "sshd: $($sshd.StartType), $($sshd.Status)" } else { 'sshd: not installed' }
+    "ssh-host-keys: $(@(Get-ChildItem "$env:ProgramData\ssh\ssh_host_*_key" -ErrorAction SilentlyContinue).Count)"
     $c = Get-Volume -DriveLetter C
     "c-used: $($c.Size - $c.SizeRemaining)"
   }
@@ -91,6 +99,32 @@ switch ($Step) {
     if ($LASTEXITCODE -ne 0) { throw "powercfg /h off exited $LASTEXITCODE" }
     if (Test-Path 'C:\hiberfil.sys') { throw 'hiberfil: powercfg said yes and C:\hiberfil.sys is still there' }
     'hiberfil: off, C:\hiberfil.sys gone'
+  }
+
+  'openssh' {
+    if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
+      'openssh: already installed'
+    } else {
+      Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0' | Out-Null
+      if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        throw 'openssh: the capability installed and there is no sshd service'
+      }
+      "openssh: installed in $(Elapsed) s (the Windows capability OpenSSH.Server)"
+    }
+    Stop-Service -Name sshd -Force -ErrorAction SilentlyContinue
+    Set-Service -Name sshd -StartupType Disabled
+    # What vm-ssh-create leaves, on a source that had it: host keys every
+    # clone would share, keys, and the firewall rules (vm-ssh.ps1).
+    Remove-Item -Force -ErrorAction SilentlyContinue "$env:ProgramData\ssh\ssh_host_*", "$env:ProgramData\ssh\administrators_authorized_keys"
+    Get-NetFirewallRule -DisplayName 'irgo-winvm: SSH from the host' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
+    $svc = Get-Service -Name sshd
+    $keys = @(Get-ChildItem "$env:ProgramData\ssh\ssh_host_*" -ErrorAction SilentlyContinue).Count
+    $listen = @(Get-NetTCPConnection -LocalPort 22 -State Listen -ErrorAction SilentlyContinue).Count
+    if ($svc.Status -ne 'Stopped' -or $svc.StartType -ne 'Disabled' -or $keys -ne 0 -or $listen -ne 0) {
+      throw "openssh: sshd is $($svc.StartType), $($svc.Status), $keys host key file(s), $listen listener(s) on 22; want disabled, stopped, none, none"
+    }
+    'openssh: sshd disabled and stopped, no host keys, nothing on port 22, both firewall rules off'
   }
 
   'cleanup' {

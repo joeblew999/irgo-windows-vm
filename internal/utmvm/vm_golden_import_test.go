@@ -80,9 +80,9 @@ func TestPullGoldenPullsImportsAndRecords(t *testing.T) {
 	if len(f.registered) != 1 || f.registered[0] != want {
 		t.Errorf("registered %v, want [%s]", f.registered, want)
 	}
-	m, err := readGoldenManifest()
+	m, err := readGoldenManifest(windowsGuest)
 	if err != nil || m.Windows != "26100.4349" {
-		t.Errorf("golden.json at %s: %+v, %v; want the pulled record", GoldenManifestPath(), m, err)
+		t.Errorf("golden.json at %s: %+v, %v; want the pulled record", windowsGuest.manifestPath(), m, err)
 	}
 }
 
@@ -165,8 +165,8 @@ func TestPullGoldenStopsWhereItShould(t *testing.T) {
 				t.Errorf("imported %v, want %v", imported, c.wantImport)
 			}
 			if c.wantErr != "" {
-				if _, sErr := os.Stat(GoldenManifestPath()); sErr == nil {
-					t.Errorf("a failed import left %s, which doctor would report as a golden image", GoldenManifestPath())
+				if _, sErr := os.Stat(windowsGuest.manifestPath()); sErr == nil {
+					t.Errorf("a failed import left %s, which doctor would report as a golden image", windowsGuest.manifestPath())
 				}
 			}
 			if c.name != "lock busy" && f.locked && !f.released {

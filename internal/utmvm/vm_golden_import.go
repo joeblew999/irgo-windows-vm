@@ -31,7 +31,7 @@ type goldenImporter struct {
 var importer = goldenImporter{
 	lock: func() (func(), error) { return Acquire(MachineLock) },
 	exists: func() (bool, error) {
-		_, ok, err := goldenEntry()
+		_, ok, err := goldenEntry(windowsGuest)
 		return ok, err
 	},
 	pull:     GoldenPull,
@@ -99,15 +99,15 @@ func (g goldenImporter) pullGolden(ctx context.Context, r R2Config, say func(str
 		return err
 	}
 	// The record travels with the image; doctor reads it from here.
-	if res.Golden != "" && res.Golden != GoldenManifestPath() {
+	if res.Golden != "" && res.Golden != windowsGuest.manifestPath() {
 		b, err := os.ReadFile(res.Golden)
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(GoldenManifestPath()), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(windowsGuest.manifestPath()), 0o755); err != nil {
 			return err
 		}
-		if err := writeFileSynced(GoldenManifestPath(), b); err != nil {
+		if err := writeFileSynced(windowsGuest.manifestPath(), b); err != nil {
 			return err
 		}
 	}

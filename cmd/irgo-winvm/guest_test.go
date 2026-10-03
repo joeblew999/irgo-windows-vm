@@ -102,7 +102,7 @@ func TestWindowsOnlyCommandsRefuseALinuxVM(t *testing.T) {
 		}
 		return windowsGuest(c, v)
 	}
-	for _, name := range []string{"app-create", "app-delete", "vm-repair", "vm-check", "vm-golden-create"} {
+	for _, name := range []string{"app-create", "app-delete", "vm-repair", "vm-check"} {
 		err := check(name, "-vm", "l1")
 		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "l1 is a linux VM") {
 			t.Errorf("%s on a Linux VM: %v, want a usage error naming it", name, err)
@@ -123,7 +123,7 @@ func TestWindowsOnlyCommandsRefuseALinuxVM(t *testing.T) {
 	if err := check("glaze-check", "-vm", "l1"); err != nil {
 		t.Errorf("glaze-check on the Mac touches no VM: %v", err)
 	}
-	for _, name := range []string{"vm-ssh-create", "vm-ssh-delete", "vm-delete", "vm-screen", "vm-create"} {
+	for _, name := range []string{"vm-ssh-create", "vm-ssh-delete", "vm-delete", "vm-screen", "vm-create", "vm-golden-create"} {
 		if err := check(name, "-vm", "l1"); err != nil {
 			t.Errorf("%s works on a Linux VM, and was refused: %v", name, err)
 		}

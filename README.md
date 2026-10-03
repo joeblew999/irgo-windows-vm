@@ -9,7 +9,9 @@ runs your program in it, and brings back the output. The install is unattended:
 you don't click anything, and you never open the VM's window.
 
 `irgo-winvm mcp` offers the same commands to an AI agent, so an agent building
-a desktop app on a Mac can test it on real Windows too.
+a desktop app on a Mac can test it on real Windows too. It also makes Ubuntu
+Linux VMs to SSH into (`vm-create -os linux`), which
+[claude-rig](https://github.com/joeblew999/claude-rig) tests on.
 
 ## What it is for
 
@@ -38,7 +40,7 @@ It installs the binary from the
 [latest release](https://github.com/joeblew999/irgo-windows-vm/releases/latest)
 as `~/.local/bin/irgo-winvm`, after checking it against the release's
 `SHA256SUMS`. Homebrew, `go install` and a download by hand are in
-[Getting started](docs/GETTING-STARTED.md#install).
+[Getting started](docs/getting-started.md#install).
 
 ## Quick start
 
@@ -53,7 +55,7 @@ irgo-winvm app-create your.exe  # run your program in it and print its output
   Windows installer.
 - The install is slow, but only once: about 45 minutes you don't need to watch.
   After that `app-create` takes seconds, and with a
-  [golden image](docs/USING.md#the-golden-image) every new VM is a clone
+  [golden image](docs/guides/using.md#the-golden-image) every new VM is a clone
   that answers in about 23 seconds.
 - Every command is safe to repeat. If the work is already done, it says so and
   stops.
@@ -69,7 +71,7 @@ claude mcp add irgo-winvm -- irgo-winvm mcp
 Other clients, what each tool does, a typical session and the exit codes are in
 the [MCP guide](https://joeblew999.github.io/irgo-windows-vm/mcp.html);
 `irgo-winvm mcp -h` prints the essentials. Serving it over HTTP and filing
-issues from another repository are in [For agents](docs/FOR-AGENTS.md).
+issues from another repository are in [For agents](docs/guides/agents.md).
 
 ## What you'll see
 
@@ -84,20 +86,23 @@ Windows ready to run your program:
 
 ## Documentation
 
+Every page, and what is what, is on the [docs home page](docs/README.md). To
+start:
+
 | page | read it to |
 |---|---|
-| [Getting started](docs/GETTING-STARTED.md) | install it, make your first VM and run your first program |
-| [Using it](docs/USING.md) | understand each command, the exit codes, the costs and the golden image |
-| [For agents](docs/FOR-AGENTS.md) | drive it from an AI agent, over MCP or HTTP, and file issues |
+| [Getting started](docs/getting-started.md) | install it, make your first VM and run your first program |
+| [Using it](docs/guides/using.md) | understand each command, the exit codes, the costs, Linux VMs and the golden image |
+| [For agents](docs/guides/agents.md) | drive it from an AI agent, over MCP or HTTP, and file issues |
 | [Command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html) | look up every command and flag, captured from the binary |
-| [Testing](docs/TESTING.md) | find out whether glaze works on Windows, and drive a glaze app with real input |
-| [Architecture](docs/ARCHITECTURE.md) | see how it is built, before you change it |
-| [Contributing](docs/CONTRIBUTING.md) | set up, run the checks, land a change, cut a release |
-| [Results](docs/RESULTS.md) | see what has been measured, with dates and screenshots |
-| [Upstream](docs/UPSTREAM.md) | see the bugs found in glaze, native and UTM, and their status |
+| [Testing](docs/guides/testing.md) | find out whether glaze works on Windows, and drive a glaze app with real input |
+| [Architecture](docs/concepts/architecture.md) | see how it is built, before you change it |
+| [This repository](docs/contributing.md) | set up, run the checks, land a change, cut a release |
+| [Findings](docs/findings.md) | see what has been measured, with dates and screenshots |
+| [Upstream bugs](docs/reference/upstream.md) | see the bugs found in glaze, native and UTM, and their status |
 
-The [Glaze status](docs/GLAZE-STATUS.md), [Known traps](docs/TRAPS.md),
-[Roadmap](docs/ROADMAP.md) and [Threat model](docs/THREAT-MODEL.md) are linked
+The [Glaze status](docs/GLAZE-STATUS.md), [Known traps](docs/reference/traps.md),
+[Roadmap](docs/roadmap.md) and [Threat model](docs/concepts/threat-model.md) are linked
 from those pages.
 
 MIT licensed. See [LICENSE](LICENSE).

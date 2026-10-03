@@ -7,7 +7,7 @@ package utmvm
 // which reads a seed CD for the account to make and the packages to add. So
 // "install" is a download, a conversion of seconds and one boot of about half
 // a minute, and nothing is typed at any point: UTM's firmware boots the disk
-// by itself (docs/RESULTS.md, "A Linux guest by hand").
+// by itself (docs/findings.md, "A Linux guest by hand").
 //
 // The host side is what Windows uses, unchanged: a bundle written to staging
 // and imported by UTM, started with a display, waited for through the guest
@@ -278,7 +278,7 @@ func createLinuxBundle(name, outDir, image string) (string, error) {
 	// The seed is a VirtIO CD, not a USB one like the Windows CDs. As a USB
 	// CD cloud-init never ran: no account, no network, two minutes waiting
 	// for one, then a login prompt nobody can use (measured twice, 2 Oct
-	// 2026; docs/TRAPS.md). As VirtIO it is /dev/vdb and is read.
+	// 2026; docs/reference/traps.md). As VirtIO it is /dev/vdb and is read.
 	cfg.Drives = []Drive{
 		{ID: newUUID(), ImageName: diskImage, Type: DriveDisk, Interface: g.diskIface},
 		{ID: newUUID(), ImageName: seedISO, Type: DriveCD, Interface: IfaceVirtIO, ReadOnly: true},

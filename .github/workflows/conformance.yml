@@ -20,7 +20,7 @@
 # nothing is -short here.
 #
 # Known upstream bugs. The suite does not skip them: TestAppScheme/
-# absolute_subresources FAILS on Windows (docs/UPSTREAM.md §1b), and the table
+# absolute_subresources FAILS on Windows (docs/reference/upstream.md §1b), and the table
 # in the job summary shows it failing, with its reference. glaze-check exits 0
 # when the ONLY failures are ones listed in glazecheck.KnownUpstream (verdict
 # "KNOWN BUGS ONLY"), so this job stays green for a change that broke nothing
@@ -85,7 +85,7 @@ jobs:
       # its [env] reads $HOME and its tasks are bash — and the tool is a macOS
       # program that only glaze-check makes sense of on Windows. The Go version
       # is the same pin: every go.mod says the version mise.toml pins
-      # (docs/CONTRIBUTING.md, mise tasks), and go-version-file reads it from there.
+      # (docs/contributing.md, mise tasks), and go-version-file reads it from there.
       - if: runner.os == 'Windows'
         uses: actions/setup-go@v7.0.0
         with:
@@ -147,7 +147,7 @@ jobs:
       # wire/routes.go), the code every other caller of the Worker uses: the
       # manifest and exactly the pictures it names. It does nothing but say
       # so until the owner sets the repository variable GLAZE_STATUS_URL (the
-      # Worker's origin) and the secret GLAZE_STATUS_TOKEN (docs/WORKER.md,
+      # Worker's origin) and the secret GLAZE_STATUS_TOKEN (docs/worker.md,
       # "Deploying it").
       # continue-on-error: a Worker that is down is not a glaze failure, and
       # the step still shows red.

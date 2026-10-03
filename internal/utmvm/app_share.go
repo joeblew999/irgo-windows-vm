@@ -34,7 +34,7 @@ import (
 // the script spells them the same way.
 //
 // The account is dev with the password dev, from autounattend.xml: a throwaway
-// VM's obvious credentials, reachable only from this Mac (see docs/USING.md).
+// VM's obvious credentials, reachable only from this Mac (see docs/guides/using.md).
 const (
 	shareName = "irgo-drop"
 	shareDir  = `C:\irgo-drop`

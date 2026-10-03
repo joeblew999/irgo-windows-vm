@@ -1,8 +1,14 @@
+---
+title: Using it
+nav_order: 1
+parent: Guides
+---
+
 # Using it
 
 What each command does, what it exits with, what it costs, and how to keep VMs
 cheap with the golden image. Installing and the first run are in
-[Getting started](GETTING-STARTED.md). Every flag is in the
+[Getting started](../getting-started.md). Every flag is in the
 [command reference](https://joeblew999.github.io/irgo-windows-vm/reference.html),
 captured from the binary at build time: `irgo-winvm help` explains the
 sequence, every command documents its flags with `-h`, and no page here lists
@@ -31,7 +37,7 @@ deleting nothing is success.
   prints what it wrote. `-gui` runs it on the guest's desktop, which anything
   with a window needs ([why](#why--gui-exists)); `-detach` leaves it running
   and returns. Over HTTP, `app-upload` stages a binary for it
-  ([For agents](FOR-AGENTS.md#over-http)).
+  ([For agents](agents.md#over-http)).
 
 **A Linux VM** is the same second step with `-os linux`, and has no first or
 third step yet: [A Linux VM](#a-linux-vm).
@@ -39,12 +45,12 @@ third step yet: [A Linux VM](#a-linux-vm).
 Long work returns a job instead of blocking: `vm-create -install` (about 45
 minutes), `iso-create -fetch`, and the `vm-golden-*` commands. The job outlives
 the terminal or client that started it; `status` reports what is running, what
-finished and how long it took ([how jobs work](ARCHITECTURE.md#jobs)).
+finished and how long it took ([how jobs work](../concepts/architecture.md#jobs)).
 
 A command that changes something takes a lock on what it changes. A second
 change to the same VM is **refused, not queued**, with exit code 6 and a message
 naming the busy lock; `app-create` on two different VMs runs side by side
-([the mutation locks](ARCHITECTURE.md#the-mutation-locks)).
+([the mutation locks](../concepts/architecture.md#the-mutation-locks)).
 
 ## Commands that change nothing
 
@@ -66,7 +72,7 @@ naming the busy lock; `app-create` on two different VMs runs side by side
 - **`capacity`** reports the disk and memory: what each VM and the tool's data
   hold, by owner, and how many more VMs fit ([Is there room?](#is-there-room)).
 - **`report`** prints a redacted diagnostic block for an issue
-  ([Reporting issues](FOR-AGENTS.md#reporting-issues)).
+  ([Reporting issues](agents.md#reporting-issues)).
 
 **`vm-reap`** does change something: it removes the clones callers left behind
 ([Sharing one Mac](#sharing-one-mac)). So does **`prune`**, which removes the
@@ -76,14 +82,14 @@ screenshots, logs and staged binaries past their bounds
 Four commands, **`glaze-check`** and **`glaze-status`**, **`vm-check`** and
 **`vm-status`**, work only in a checkout of this repository, because they
 build and read `examples/`. The first two answer "does glaze work?"
-([Testing](TESTING.md#does-glaze-work)); the other two "does this VM have
+([Testing](testing.md#does-glaze-work)); the other two "does this VM have
 what the project relies on?", reading only
-([the VM conformance suite](TESTING.md#the-vm-conformance-suite)). Outside a
+([the VM conformance suite](testing.md#the-vm-conformance-suite)). Outside a
 checkout they exit 2 and say where they looked.
 
 ## What it exits with
 
-`utmctl` exits 0 when it fails (see [UPSTREAM.md](UPSTREAM.md#utm)), so this
+`utmctl` exits 0 when it fails (see [Upstream bugs](../reference/upstream.md#utm)), so this
 tool's exit code is the only reliable signal a caller gets. Each code means one
 thing:
 
@@ -107,12 +113,12 @@ script.
 **4 and 6 are worth retrying.** Windows Update takes the guest agent away for
 minutes at a time while the VM is fine. `app-create` already waits and tries to
 recover before giving up, which is why it can take several minutes to return 4.
-6 means another mutation holds a [lock](ARCHITECTURE.md#the-mutation-locks)
+6 means another mutation holds a [lock](../concepts/architecture.md#the-mutation-locks)
 this one needs, and the message names which; the holder finishes on its own
 schedule. **7 is worth retrying once a VM stops**: the message gives the
 numbers and names the running VMs, and `status` says whose they are.
 
-**8 is worth submitting again.** A [remote job](FOR-AGENTS.md#from-another-machine-linux-windows-github)
+**8 is worth submitting again.** A [remote job](agents.md#from-another-machine-linux-windows-github)
 that ran exits with the code its Mac's command exited with, on this same
 table, and a code this build does not declare is 1. 8 is the job that never
 ran to the end: cancelled, expired in the queue, or its Mac stopped reporting.
@@ -127,11 +133,11 @@ intends to close.
 
 | step | time | |
 |---|---|---|
-| `iso-create -fetch` | minutes, and the 4.2 GB `.esd` below | downloaded once; a rebuild from the kept `.esd` needs no network ([measured](RESULTS.md#the-iso-scan-verdict-is-recorded-at-build-time--13-aug-2026)) |
+| `iso-create -fetch` | minutes, and the 4.2 GB `.esd` below | downloaded once; a rebuild from the kept `.esd` needs no network ([measured](../findings.md#the-iso-scan-verdict-is-recorded-at-build-time--13-aug-2026)) |
 | `vm-create -install` | **about 45 minutes** | an estimate, not a measurement — unattended, you click nothing |
-| `vm-create` from a golden image | **about 23 s** to an answering agent | [measured](RESULTS.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
-| `vm-create -os linux -install` | **1 min 42 s** with the 620 MB download, about a minute without | [measured](RESULTS.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
-| `app-create` | seconds | [measured](RESULTS.md#the-inner-loop-works), cross-compiled on the Mac with no toolchain |
+| `vm-create` from a golden image | **about 23 s** to an answering agent | [measured](../findings.md#a-vm-of-your-own-in-23-s--measured-1-oct-2026) |
+| `vm-create -os linux -install` | **1 min 42 s** with the 620 MB download, about a minute without | [measured](../findings.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
+| `app-create` | seconds | [measured](../findings.md#the-inner-loop-works), cross-compiled on the Mac with no toolchain |
 
 | on disk | size | |
 |---|---|---|
@@ -175,7 +181,7 @@ password that never expires.
 > reachable from a network you do not control.**
 
 Binaries reach the guest over an SMB share the guest serves, in about a second
-for 8 MB ([how](ARCHITECTURE.md#how-a-binary-gets-into-the-guest)).
+for 8 MB ([how](../concepts/architecture.md#how-a-binary-gets-into-the-guest)).
 
 ### A Linux VM
 
@@ -231,7 +237,7 @@ when that has finished and been checked.
 
 A VM that starts and never answers is, on a first boot, either still
 installing the agent or one whose first boot did not find its seed
-([traps](TRAPS.md#host-utm-and-the-iso)); `vm-create` waits ten minutes and
+([traps](../reference/traps.md#host-utm-and-the-iso)); `vm-create` waits ten minutes and
 then says so.
 
 ### Why `-gui` exists
@@ -262,7 +268,7 @@ operating system enforces that split.
 `irgo-winvm vm-repair -reboot` fixes both, running as SYSTEM. `app-create -gui`
 refuses up front, naming the problem, when nobody is logged in, instead of
 waiting out its timeout. `vm-repair` also re-applies the desktop settings
-described in [Desktop hygiene](TESTING.md#desktop-hygiene) and the SMB share
+described in [Desktop hygiene](testing.md#desktop-hygiene) and the SMB share
 (`-share=false` removes it).
 
 ### When UTM is not running
@@ -272,7 +278,7 @@ before asking it anything, saying so as it does: `UTM is not running: opening
 /Applications/UTM.app in the background, then waiting 2s before asking it
 anything`. A UTM that a request has to launch, or that gets one as it
 launches, can stop answering VM starts
-([the trap](TRAPS.md#host-utm-and-the-iso)). So open it that way yourself, or
+([the trap](../reference/traps.md#host-utm-and-the-iso)). So open it that way yourself, or
 leave it to the command, and do not run `utmctl` or an AppleScript against a
 closed UTM. A second command arriving meanwhile waits for the first, up to
 30 s, then fails as busy.
@@ -349,9 +355,9 @@ irgo-winvm vm-ssh-delete -vm z1
   does not exist is nothing to undo.
 
 Who can reach that port, and what else lets them in, is in the
-[threat model](THREAT-MODEL.md#ssh-into-a-guest). How it is built, and what of
+[threat model](../concepts/threat-model.md#ssh-into-a-guest). How it is built, and what of
 it has been run against a guest, is in
-[Architecture](ARCHITECTURE.md#ssh-into-the-guest).
+[Architecture](../concepts/architecture.md#ssh-into-the-guest).
 
 ## The golden image
 
@@ -385,7 +391,7 @@ clone has its own MAC, address, machine-id and, once `vm-ssh-create` makes
 them, its own SSH host keys. `vm-create` then gives the clone its name and
 checks it as it checks a VM it has just made. The image is 3.9 GiB, a clone
 answers in about 18 s, and nothing is downloaded
-([measured](RESULTS.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
+([measured](../findings.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
 There is no private cache of a Linux image: making one is a minute and a
 half.
 
@@ -400,7 +406,7 @@ asked before any of this ([Is there room?](#is-there-room)). `doctor` reports
 the golden image from its `golden.json`.
 
 How sealing and cloning work, and why, is in
-[Architecture](ARCHITECTURE.md#the-golden-image-sealing-and-cloning).
+[Architecture](../concepts/architecture.md#the-golden-image-sealing-and-cloning).
 
 ### A new VM on a machine with no golden image
 
@@ -414,7 +420,7 @@ What `vm-create` does depends on the [private cache](#the-private-r2-cache)
 | some set, not all | exit 2 naming what is missing, and `-golden=false` | the same |
 
 - **Only with `-install`**, because a pull is minutes (4 min 37 s for 8.4 GB,
-  [measured](RESULTS.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026))
+  [measured](../findings.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026))
   and `-install` is what makes `vm-create` a job over MCP. Without it nothing is
   written: a VM that exists is never cloned, so a bundle written now would make
   the next `-install` install after all.
@@ -442,7 +448,7 @@ proven by running it.
 An optional, **owner-only** cache of the golden image in a private Cloudflare
 R2 bucket, so a machine of yours without one downloads it instead of installing
 Windows for 45 minutes: 8.4 GB compressed, pulled byte-identical in 4 min 37 s
-([measured](RESULTS.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026));
+([measured](../findings.md#the-real-golden-image-through-the-private-r2-cache--measured-1-oct-2026));
 55 MB/s was measured from Cloudflare's edge.
 
 | command | what it does | undo |
@@ -452,7 +458,7 @@ Windows for 45 minutes: 8.4 GB compressed, pulled byte-identical in 4 min 37 s
 
 Both are transport only: a bundle directory goes up, the same bytes come down.
 `-bundle` must be a copy this process can read, because macOS refuses it UTM's
-container ([traps](TRAPS.md#host-utm-and-the-iso)). Over MCP both always run as
+container ([traps](../reference/traps.md#host-utm-and-the-iso)). Over MCP both always run as
 jobs. Do not run `-delete` on push while a push to the same bucket is under way
 elsewhere: that push's chunks are unreferenced until its manifest is written.
 
@@ -463,7 +469,7 @@ elsewhere: that push's chunks are unreferenced until its manifest is written.
 > credentials. Both commands print this on every run.
 
 **Two ways to reach the bucket, one format.** With `IRGO_GOLDEN_URL` set, both
-commands go through [the Worker](WORKER.md), which has the bucket bound and
+commands go through [the Worker](../worker.md), which has the bucket bound and
 needs no R2 keys; this is the way in use, because the owner's Cloudflare token
 can deploy Workers but cannot create R2 API tokens. Without it they use R2's S3
 API with an access key. Either reads what the other wrote.
@@ -482,7 +488,7 @@ binding is not a public route and every request to it needs a token, but the
 bucket's own public routes go unchecked.
 
 What is stored in the bucket, and how push and pull verify every byte, is in
-[Architecture](ARCHITECTURE.md#the-private-r2-cache-storage-and-transfer).
+[Architecture](../concepts/architecture.md#the-private-r2-cache-storage-and-transfer).
 
 ### Setting up the bucket
 
@@ -490,7 +496,7 @@ Done once, by the owner. This tool creates no Cloudflare resources.
 
 **Through the Worker** (in use): the bucket `irgo-golden` exists with no public
 access, the Worker binds it as `GOLDEN` and holds its two tokens
-([Deploying it](WORKER.md#deploying-it)). Then `.env.r2` needs:
+([Deploying it](../worker.md#deploying-it)). Then `.env.r2` needs:
 
 ```
 IRGO_GOLDEN_URL=https://irgo-windows-vm.gedw99.workers.dev
@@ -542,7 +548,7 @@ defaulted to the owner's VM, queued on its lock and left their binaries in it;
 any of them could create clones until the Mac ran out of memory; `app-delete`
 emptied every caller's uploads; and `vm-delete` and `app-delete` exited 0 when
 `utmctl` itself had failed. What an agent from another repository must do is in
-[For agents](FOR-AGENTS.md#sharing-the-mac).
+[For agents](agents.md#sharing-the-mac).
 
 **Who is calling** (`internal/utmvm/owner.go`) is, in order: `-owner` on the
 command, else `IRGO_WINVM_OWNER`, else the MCP client's name from its
@@ -620,7 +626,7 @@ refuse with exit 7, the numbers, and the running VMs by name.
   16 GiB Mac runs `irgo-win11` and one clone (16 − 8 − 4 = 4 left) and refuses
   a second; 32 GiB runs `irgo-win11` and four. A 4 GiB clone beside
   `irgo-win11` passed `glaze-check -windows` and `vm-check`
-  ([RESULTS](RESULTS.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)).
+  ([Findings](../findings.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)).
   `-overcommit` skips the memory half for a person who accepts swapping.
 - **Disk:** free space on the volume holding UTM's VMs (`statfs`, which works
   there without Full Disk Access) must cover the new VM, plus what the VMs
@@ -631,12 +637,12 @@ refuse with exit 7, the numbers, and the running VMs by name.
   **30 GiB**; a Linux VM from the cloud image `linuxReserveBytes`, **8 GiB**;
   a clone of the Linux golden image a clone's 4 GiB, at a Linux VM's 2 GiB of
   memory (one wrote 0.4 GiB of its own through a package install and a reboot,
-  [measured](RESULTS.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
+  [measured](../findings.md#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026)).
   Every VM is allowed to grow to its reserve: one that has written
   1 GiB of its own is still promised 3, and that space counts as taken. A clone
   measured on 1 Oct 2026 wrote 0.28 GiB of its own through a boot, a
   `glaze-check -windows`, twenty `app-create`s and 90 idle minutes
-  ([RESULTS](RESULTS.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)),
+  ([Findings](../findings.md#vm-capacity-what-a-clone-really-costs--measured-1-oct-2026)),
   so 4 GiB is fourteen times that, for a Windows update that session did not
   show. An existing stopped VM being booted needs no disk check. One VM whose
   disk cannot be measured makes the answer cannot tell.
@@ -654,7 +660,7 @@ more; unset, it never deletes a VM, and the refusal says the variable exists.
 
 The numbers live in one place, `internal/utmvm/capacity_model.go`, read by this
 check, by `capacity` and by `doctor`; how they are measured is in
-[Architecture](ARCHITECTURE.md#the-capacity-model).
+[Architecture](../concepts/architecture.md#the-capacity-model).
 
 **`irgo-winvm capacity`** (`-json` for scripts, and the `capacity` tool over
 MCP) answers how much room there is and who holds it:
@@ -702,4 +708,4 @@ August, 103 MB by APFS's count and by `du`.
 Everything the tool writes goes under
 `~/Library/Application Support/irgo-winvm/`, with nothing to configure; VMs live
 where UTM keeps them. `doctor` names every path, and the layout is in
-[Architecture](ARCHITECTURE.md#runtime-data).
+[Architecture](../concepts/architecture.md#runtime-data).

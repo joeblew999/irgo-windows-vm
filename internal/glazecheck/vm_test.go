@@ -242,7 +242,7 @@ func TestVMVerdicts(t *testing.T) {
 		}
 	}
 	// Glaze keeps its own words.
-	g := section(TargetWindows, Result{Name: "TestA", Outcome: Fail, Known: "docs/UPSTREAM.md §1"})
+	g := section(TargetWindows, Result{Name: "TestA", Outcome: Fail, Known: "docs/reference/upstream.md §1"})
 	if v := g.Verdict(); !strings.HasPrefix(v, "KNOWN BUGS ONLY") || !g.Passed() {
 		t.Errorf("glaze's known verdict became %q", v)
 	}

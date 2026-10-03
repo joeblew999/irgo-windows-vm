@@ -2,7 +2,7 @@ package mcpserver
 
 // The server over HTTP.
 //
-// Read docs/THREAT-MODEL.md before enabling this. The product is "run this
+// Read docs/concepts/threat-model.md before enabling this. The product is "run this
 // arbitrary binary on my machine", so anything that can reach this port can
 // execute code of its choosing in the Windows guest and lever on the host
 // through everything the three steps already touch.

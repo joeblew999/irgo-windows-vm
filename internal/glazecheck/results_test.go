@@ -180,7 +180,7 @@ func TestNeverReached(t *testing.T) {}
 	}
 }
 
-// TestKnownUpstream is the policy for a failure recorded in docs/UPSTREAM.md:
+// TestKnownUpstream is the policy for a failure recorded in docs/reference/upstream.md:
 // failing is KNOWN BUGS ONLY and lets the gate through, passing is an
 // UNEXPECTED PASS that does not, and a new failure beside it is still NO.
 //
@@ -188,7 +188,7 @@ func TestNeverReached(t *testing.T) {}
 // first case.
 func TestKnownUpstream(t *testing.T) {
 	defer func(k []Known) { KnownUpstream = k }(KnownUpstream)
-	KnownUpstream = []Known{{Target: TargetWindows, Test: "TestParent/broken", Ref: "docs/UPSTREAM.md §9"}}
+	KnownUpstream = []Known{{Target: TargetWindows, Test: "TestParent/broken", Ref: "docs/reference/upstream.md §9"}}
 	events := runFake(t, fakeSuite)
 
 	win, err := parseEvents(TargetWindows, events)
@@ -208,9 +208,9 @@ func TestKnownUpstream(t *testing.T) {
 		prefix string
 		passed bool
 	}{
-		{"only the known failure", onlyKnown, "KNOWN BUGS ONLY: TestParent/broken (docs/UPSTREAM.md §9)", true},
+		{"only the known failure", onlyKnown, "KNOWN BUGS ONLY: TestParent/broken (docs/reference/upstream.md §9)", true},
 		{"a new failure beside it", win, "NO: failed: TestFails TestParentOwnFailure", false},
-		{"the known failure passes", []Result{{Name: "TestParent/broken", Outcome: Pass, Known: "docs/UPSTREAM.md §9"}}, "UNEXPECTED PASS", false},
+		{"the known failure passes", []Result{{Name: "TestParent/broken", Outcome: Pass, Known: "docs/reference/upstream.md §9"}}, "UNEXPECTED PASS", false},
 	} {
 		sec := Section{Results: c.rs}
 		if v := sec.Verdict(); !strings.HasPrefix(v, c.prefix) || sec.Passed() != c.passed {

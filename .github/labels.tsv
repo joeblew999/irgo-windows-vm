@@ -1,9 +1,9 @@
 name	color	description
 bug	d73a4a	irgo-winvm does the wrong thing
 feature	a2eeef	a calling repository needs something irgo-winvm does not do
-upstream-glaze	5319e7	a bug in crgimenes/glaze: fixed there, recorded in docs/UPSTREAM.md
-upstream-native	5319e7	a bug in crgimenes/native: fixed there, recorded in docs/UPSTREAM.md
-upstream-utm	5319e7	a bug in utmapp/UTM: reported there, recorded in docs/UPSTREAM.md
+upstream-glaze	5319e7	a bug in crgimenes/glaze: fixed there, recorded in docs/reference/upstream.md
+upstream-native	5319e7	a bug in crgimenes/native: fixed there, recorded in docs/reference/upstream.md
+upstream-utm	5319e7	a bug in utmapp/UTM: reported there, recorded in docs/reference/upstream.md
 needs-triage	fbca04	not looked at yet; every form adds it
 needs-report	e99695	a bug without the irgo-winvm report block; triage waits for it
 triaged	0e8a16	classified and labelled, with the next step named in a comment

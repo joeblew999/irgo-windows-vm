@@ -10,6 +10,11 @@
 # listed in the footer and lights up its parent's entry, which keeps the header
 # to one line at 1280 px. Three pages have no markdown file: a hook in this
 # directory generates each (`go run ./site <name>`, see main.go).
+#
+# The header is docs/'s sections (docs/writing.md: Getting started, Guides,
+# Concepts, Reference, This repository), each section's pages under it. Every
+# `out` is the name the page had before the docs moved into those sections,
+# because messages in released binaries and other sites link them.
 
 name = "irgo-windows-vm"
 root = ".."
@@ -29,7 +34,8 @@ prefixes = ['SiteURL\s*\+\s*"']
 [llms]
 about = """
 Documentation for a tool that installs Windows 11 ARM64 on Apple Silicon
-unattended and runs Go binaries inside it. Generated from the repository's
+unattended and runs Go binaries inside it, and makes Ubuntu Linux VMs to SSH
+into. Generated from the repository's
 own markdown, so it cannot disagree with the source.
 """
 full_note = """
@@ -56,98 +62,96 @@ so the raw-markdown route silently omits it.
 """
 
 [[page]]
-src = "README.md"
+src = "docs/README.md"
+out = "index.html"
 title = "irgo-windows-vm"
-blurb = "What it does, and how to get started"
+blurb = "What it is for, what is what, and every page"
 
 [[page]]
-src = "docs/GETTING-STARTED.md"
+src = "docs/getting-started.md"
 out = "getting-started.html"
 title = "Getting started"
 nav = "Get started"
 blurb = "Install it, make your first VM, run your first program"
 
 [[page]]
-src = "docs/USING.md"
-out = "using.html"
-title = "Using it"
-nav = "Using it"
-blurb = "Each command, exit codes, costs, the golden image and the private cache"
+src = "docs/guides.md"
+out = "guides.html"
+title = "Guides"
+nav = "Guides"
+blurb = "One job per page: using it, from an agent, testing glaze"
 
 [[page]]
-src = "docs/FOR-AGENTS.md"
+src = "docs/guides/using.md"
+out = "using.html"
+title = "Using it"
+parent = "guides.html"
+blurb = "Each command, exit codes, costs, Linux VMs, the golden image and the private cache"
+
+[[page]]
+src = "docs/guides/agents.md"
 out = "agents.html"
 title = "For agents"
-nav = "Agents"
+parent = "guides.html"
 blurb = "Drive it from an AI agent, over MCP or HTTP, and file issues"
+
+[[page]]
+src = "docs/guides/testing.md"
+out = "testing.html"
+title = "Testing"
+parent = "guides.html"
+blurb = "Does glaze work? The conformance suite, driving an app, the cycle tests"
+
+[[page]]
+src = "docs/concepts.md"
+out = "concepts.html"
+title = "Concepts"
+nav = "Concepts"
+blurb = "Why it works the way it does"
+
+[[page]]
+src = "docs/concepts/architecture.md"
+out = "architecture.html"
+title = "Architecture"
+parent = "concepts.html"
+blurb = "How the code is built: stages, packages, locks, jobs, data, the golden image"
+
+# Intent: it names commands in the context of what an attacker could call,
+# which is not telling a reader to run them, so cmd/irgo-winvm/docs_test.go
+# does not require every command it names to exist.
+[[page]]
+src = "docs/concepts/threat-model.md"
+out = "threat-model.html"
+title = "Threat model"
+parent = "concepts.html"
+blurb = "What anyone who reaches the HTTP port can do"
+intent = true
+
+[[page]]
+src = "docs/reference.md"
+out = "reference-index.html"
+title = "Reference"
+nav = "Reference"
+blurb = "Commands, MCP tools, the Worker API, traps, upstream bugs, the status records"
+
+# Captured from the binary: `irgo-winvm help`, and `-h` for every command.
+[[page]]
+out = "reference.html"
+title = "Commands"
+parent = "reference-index.html"
+blurb = "Every command and flag, captured from the binary"
+footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
+generate = { run = ["go", "run", "./site", "reference"] }
 
 # Built by listing a live MCP server, so the page cannot describe a tool the
 # server does not offer.
 [[page]]
 out = "mcp.html"
 title = "MCP"
-parent = "agents.html"
+parent = "reference-index.html"
 blurb = "The MCP server's tools, arguments and instructions, captured from a live server"
 footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
 generate = { run = ["go", "run", "./site", "mcp"] }
-
-# Intent: it names commands in the context of what an attacker could call,
-# which is not telling a reader to run them, so cmd/irgo-winvm/docs_test.go
-# does not require every command it names to exist.
-[[page]]
-src = "docs/THREAT-MODEL.md"
-out = "threat-model.html"
-title = "Threat model"
-parent = "agents.html"
-blurb = "What anyone who reaches the HTTP port can do"
-intent = true
-
-# Captured from the binary: `irgo-winvm help`, and `-h` for every command.
-[[page]]
-out = "reference.html"
-title = "Commands"
-nav = "Commands"
-blurb = "Every command and flag, captured from the binary"
-footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
-generate = { run = ["go", "run", "./site", "reference"] }
-
-[[page]]
-src = "docs/TESTING.md"
-out = "testing.html"
-title = "Testing"
-nav = "Testing"
-blurb = "Does glaze work? The conformance suite, driving an app, the cycle tests"
-
-# Ends with a script that shows the Worker's latest glaze runs, when the site
-# is served from the Worker.
-[[page]]
-src = "docs/GLAZE-STATUS.md"
-out = "glaze-status.html"
-title = "Glaze status"
-parent = "testing.html"
-blurb = "Does glaze work on the Mac and on Windows? The last recorded run of each"
-foot = { run = ["go", "run", "./site", "glaze-live"], format = "html" }
-
-[[page]]
-src = "docs/VM-STATUS.md"
-out = "vm-status.html"
-title = "VM status"
-parent = "testing.html"
-blurb = "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"
-
-[[page]]
-src = "docs/ARCHITECTURE.md"
-out = "architecture.html"
-title = "Architecture"
-nav = "Architecture"
-blurb = "How the code is built: stages, packages, locks, jobs, data, the golden image"
-
-[[page]]
-src = "docs/WORKER.md"
-out = "worker.html"
-title = "The Cloudflare Worker"
-parent = "architecture.html"
-blurb = "The Worker: the site, live glaze status and the golden image's private API"
 
 # From the Worker's route table in package wire, the table the Worker routes
 # by and the tool's client builds requests from. To render the OpenAPI
@@ -155,36 +159,67 @@ blurb = "The Worker: the site, live glaze status and the golden image's private 
 [[page]]
 out = "api.html"
 title = "Worker API"
-parent = "architecture.html"
+parent = "reference-index.html"
 blurb = "Every endpoint of the Cloudflare Worker, generated from its route table"
 footer = "Built from the Go code at build time (the binary, or the Worker's route table); nothing on it is typed by hand. To correct this page, change the Go code: no markdown file feeds it."
 generate = { run = ["go", "run", "./site", "api"] }
 
 [[page]]
-src = "docs/TRAPS.md"
+src = "docs/reference/traps.md"
 out = "traps.html"
 title = "Known traps"
-parent = "architecture.html"
+parent = "reference-index.html"
 blurb = "What fails silently or misleadingly, one line each"
 
 [[page]]
-src = "docs/CONTRIBUTING.md"
+src = "docs/reference/upstream.md"
+out = "upstream.html"
+title = "Upstream bugs"
+parent = "reference-index.html"
+blurb = "Bugs found in glaze, native and UTM, and their status"
+
+# Ends with a script that shows the Worker's latest glaze runs, when the site
+# is served from the Worker.
+[[page]]
+src = "docs/GLAZE-STATUS.md"
+out = "glaze-status.html"
+title = "Glaze status"
+parent = "reference-index.html"
+blurb = "Does glaze work on the Mac and on Windows? The last recorded run of each"
+foot = { run = ["go", "run", "./site", "glaze-live"], format = "html" }
+
+[[page]]
+src = "docs/VM-STATUS.md"
+out = "vm-status.html"
+title = "VM status"
+parent = "reference-index.html"
+blurb = "Does each Windows VM have what this project relies on? The last recorded check of each, with pictures"
+
+[[page]]
+src = "docs/contributing.md"
 out = "contributing.html"
-title = "Contributing"
-nav = "Contributing"
+title = "This repository"
+nav = "This repo"
 blurb = "Set up, run the checks, land a change, cut a release"
 
 [[page]]
-src = "docs/CONVENTIONS.md"
+src = "docs/rules.md"
 out = "conventions.html"
-title = "Conventions"
+title = "Rules"
 parent = "contributing.html"
 blurb = "How code here is written, and the defect behind each rule"
+
+[[page]]
+src = "docs/findings.md"
+out = "results.html"
+title = "Findings"
+parent = "contributing.html"
+blurb = "What has been measured, and when"
 
 # Intent: the one page that states what is next rather than what is true, and
 # says so in its first line.
 [[page]]
-src = "docs/ROADMAP.md"
+src = "docs/roadmap.md"
 out = "roadmap.html"
 title = "Roadmap"
 parent = "contributing.html"
@@ -192,15 +227,17 @@ blurb = "What is next, and the one claim not yet verified"
 intent = true
 
 [[page]]
-src = "docs/RESULTS.md"
-out = "results.html"
-title = "Results"
-nav = "Results"
-blurb = "What has been measured, and when"
+src = "docs/worker.md"
+out = "worker.html"
+title = "The Cloudflare Worker"
+parent = "contributing.html"
+blurb = "The Worker: the site, live glaze status and the golden image's private API"
 
+# Written by charter (mise run docs:setup), the same page in every repo of the
+# owner's: the rules every page in docs/ is held to.
 [[page]]
-src = "docs/UPSTREAM.md"
-out = "upstream.html"
-title = "Upstream"
-nav = "Upstream"
-blurb = "Bugs found in glaze, native and UTM, and their status"
+src = "docs/writing.md"
+out = "writing.html"
+title = "Writing docs"
+parent = "contributing.html"
+blurb = "The rules a page in docs/ is held to, from charter"

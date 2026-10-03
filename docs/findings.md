@@ -1,4 +1,10 @@
-# Results
+---
+title: Findings
+nav_order: 2
+parent: This repository
+---
+
+# Findings: what has been measured, and when
 
 What has been measured, newest first. Each entry keeps the date it was measured
 and the numbers it found. If a later run changes a number, correct it here too.
@@ -8,7 +14,7 @@ platforms. A pass on one OS proves nothing on its own. Entries up to 30 Sep
 2026 name the probes they ran: `examples/probe/` (native capabilities), and
 `examples/verify` and `examples/verify-events` (glaze's `app://` scheme and its
 Events bridge). Since then the same checks are the test suite
-`examples/conformance`, and [GLAZE-STATUS.md](GLAZE-STATUS.md) holds its latest
+`examples/conformance`, and [Glaze status](GLAZE-STATUS.md) holds its latest
 run per platform.
 
 ## At a glance
@@ -186,7 +192,7 @@ then never answers a VM start, until it is quit and reopened. `vm-create` and
 `capacity` begin with an AppleScript, so run with UTM closed they did it to
 themselves: that is the two-minute `AppleEvent timed out. (-1712)` of the
 same morning. Opening UTM with `open -g -a` first prevents it. Why is not
-known ([UPSTREAM.md](UPSTREAM.md#utm-stops-answering-start-requests)).
+known ([Upstream bugs](reference/upstream.md#utm-stops-answering-start-requests)).
 
 M2 Pro, 16 GiB, macOS 27.0.1, UTM 4.7.5, the screen locked throughout. One
 VM, `claude-rig-test`, a 4 GiB clone of the golden image (Windows 11 ARM64);
@@ -457,7 +463,7 @@ not), is what deleting a VM gives back. M2 Pro, 16 GiB, 460 GiB volume, UTM
 
 ## Several callers on one Mac — measured 1 Oct 2026
 
-**Result:** the guards in [Sharing one Mac](DEVELOPMENT.md#sharing-one-mac)
+**Result:** the guards in [Sharing one Mac](guides/using.md#sharing-one-mac)
 behave on the real machine. M2 Pro, 16 GiB, UTM 4.7.5, with `irgo-win11`
 running throughout and never touched; one disposable clone, `z1`.
 
@@ -598,7 +604,7 @@ Prohibited activation policy, window behind every other window.
 | `Click("#inc")` ×3 | yes | three trusted `click` events on `button#inc`; label `count: 3` |
 | the same click by script (`.click()` through `Eval`) | no, on purpose | arrives with `isTrusted` false: the control |
 | `ClickAt` 17,23 into `#pad` | yes | `mousedown` on `div#pad` at exactly that point; with the 32-point title-bar offset dropped it lands 32 points higher, on `body` |
-| `Scroll(0, -5)` | yes | trusted `wheel`, `deltaY` positive, `scrollY` > 0 — on the first post in `glaze:mac`, on the second when run straight after another test's input ([UPSTREAM §6](UPSTREAM.md#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped)) |
+| `Scroll(0, -5)` | yes | trusted `wheel`, `deltaY` positive, `scrollY` > 0 — on the first post in `glaze:mac`, on the second when run straight after another test's input ([Upstream bugs §6](reference/upstream.md#6-nativeinput--the-first-background-scroll-to-a-new-process-is-dropped)) |
 | element lookup, `WaitFor*`, reading values | no: the JavaScript bridge | — |
 | `Screenshot` | `screen.CaptureWindow` (ScreenCaptureKit) | the window's content while it sits behind other windows |
 
@@ -729,7 +735,7 @@ What each row proves:
 **Not verified: a long job.** `iso-create -fetch` finished in under a second
 because the ISO was already built. `vm-create -install`, the 45-minute case jobs
 were written for, has not been run over MCP. The mechanism is proven; the
-duration is not. See the [roadmap](ROADMAP.md).
+duration is not. See the [roadmap](roadmap.md).
 
 ## The ISO scan verdict is recorded at build time — 13 Aug 2026
 
@@ -780,7 +786,7 @@ presses reached Setup's UI. Media built with the no-prompt loader doesn't need
 it.
 
 The two failed attempts, and why they failed, are in the trap table in
-[Known traps](TRAPS.md).
+[Known traps](reference/traps.md).
 
 ## Suspend and resume — 400 ms, verified 12 Aug 2026
 
@@ -810,7 +816,7 @@ restarting.
 version isn't offered: `utmctl suspend --save-state` either refuses (naming GPU
 acceleration, then NVMe) or *reports success and power-cuts the guest*: exit 0,
 no state file, and the next boot goes through "Diagnosing your PC". See the trap
-table in [Known traps](TRAPS.md).
+table in [Known traps](reference/traps.md).
 
 ## glaze and native on Windows ARM64 — measured 12 Aug 2026
 
@@ -837,7 +843,7 @@ args: [alpha beta]
   the guest's code. A binary exiting 3 exits `app-create` **1**, with "exited 3
   in the guest" in the message. The two must differ, because a missing VM exits
   3 and a busy guest agent exits 4. See the contract in
-  [What it exits with](USING.md#what-it-exits-with).
+  [What it exits with](guides/using.md#what-it-exits-with).
 
 ### Native capabilities — windows/arm64, native
 
@@ -875,7 +881,7 @@ has, and neither is a failure.
   process starts.
 
 Getting the report to *say* so needed a fix in glaze and native themselves
-([UPSTREAM.md](UPSTREAM.md) §2). Every package defined its own `ErrUnsupported`
+([Upstream bugs](reference/upstream.md) §2). Every package defined its own `ErrUnsupported`
 without wrapping the standard one, so both rows read FAILED and a wholly correct
 run exited non-zero.
 
@@ -918,7 +924,7 @@ Windows, with nothing to say why.
 - **Workaround for app authors:** reference assets relatively and both
   platforms work. `verifyevents` now does this, which is why it passes.
 - **Fix:** WebView2's real custom-scheme registration, written up in
-  [UPSTREAM.md](UPSTREAM.md) §1b.
+  [Upstream bugs](reference/upstream.md) §1b.
 
 This is exactly the class of bug the project was built to find: invisible from a
 Mac, invisible in glaze's own CI (`windows-latest` is x64 and has no ARM64
@@ -1055,4 +1061,4 @@ not by hidden reference as on amd64). Every `-gui` run above executes it, since
 a window can't be positioned without it. No run has reported on it
 specifically, so this page makes no claim either way.
 
-Open work that isn't a measurement is on the [roadmap](ROADMAP.md#known-gaps).
+Open work that isn't a measurement is on the [roadmap](roadmap.md#known-gaps).

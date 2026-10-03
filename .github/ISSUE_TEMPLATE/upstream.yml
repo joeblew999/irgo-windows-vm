@@ -11,7 +11,7 @@ body:
       value: |
         Bugs in [glaze](https://github.com/crgimenes/glaze), [native](https://github.com/crgimenes/native)
         and [UTM](https://github.com/utmapp/UTM) are fixed **upstream**, never worked around here.
-        [docs/UPSTREAM.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/UPSTREAM.md)
+        [docs/reference/upstream.md](https://github.com/joeblew999/irgo-windows-vm/blob/main/docs/reference/upstream.md)
         is the ledger: if your bug is already in it, add what you found to that entry's issue
         instead of filing. This form is for a bug the ledger does not have yet; triage decides
         whether it is theirs (then it is recorded and filed or patched upstream) or ours
@@ -33,8 +33,8 @@ body:
   - type: input
     id: ledger
     attributes:
-      label: UPSTREAM.md entry
-      description: The closest entry in docs/UPSTREAM.md, by heading, or "none".
+      label: Upstream bugs entry
+      description: The closest entry in docs/reference/upstream.md, by heading, or "none".
     validations:
       required: true
   - type: input
@@ -71,7 +71,7 @@ body:
     attributes:
       label: Checks
       options:
-        - label: It is not already in docs/UPSTREAM.md or an open issue.
+        - label: It is not already in docs/reference/upstream.md or an open issue.
           required: true
         - label: I read the report and it holds no secret, token or personal path.
           required: true

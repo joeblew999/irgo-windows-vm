@@ -1,27 +1,27 @@
 # For agents
 
-All documentation is in [docs/](docs/). This file only points there.
+Everything about this repo is in [docs/](docs/README.md), the same pages people
+read. Nothing is kept here, so there is one source of truth. The same index for
+machines: https://joeblew999.github.io/irgo-windows-vm/llms.txt
 
-**Before writing code, read [Conventions](docs/CONVENTIONS.md),
-[Architecture](docs/ARCHITECTURE.md) and [Known traps](docs/TRAPS.md)**, and
-check what already exists before adding anything. Most of the duplication this
-project has had to clean up was written by an agent that did not check.
+Read, in this order:
 
-| file | read it before you |
-|---|---|
-| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | write any code: the rules, and the defect behind each |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | change a package, a lock, a job, the data on disk, pushes, the golden image or the cache |
-| [docs/TRAPS.md](docs/TRAPS.md) | touch UTM, the ISO, the answer file, the guest or a window on Windows |
-| [docs/WORKER.md](docs/WORKER.md) | change `worker/` |
-| [docs/TESTING.md](docs/TESTING.md) | change `examples/`, or claim glaze works |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | push, release, or add a doc section ([where it goes](docs/CONTRIBUTING.md#where-a-topic-goes)) |
-| [docs/USING.md](docs/USING.md) | change what a command does for its user, or an exit code |
-| [docs/UPSTREAM.md](docs/UPSTREAM.md) | work around anything in glaze, native or UTM (don't: fix it there) |
-| [docs/RESULTS.md](docs/RESULTS.md) | state a number: what has been measured, dated |
-| [docs/GLAZE-STATUS.md](docs/GLAZE-STATUS.md) | say whether glaze works (generated: never edit it) |
-| [docs/VM-STATUS.md](docs/VM-STATUS.md) | say whether a VM has what the project relies on (generated: never edit it) |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | pick up what is next |
-| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | touch the HTTP transport, or open a port in the guest |
+1. [docs/README.md](docs/README.md): what the tool is for, what is what, and
+   the index of every page.
+2. [docs/rules.md](docs/rules.md): how code here is written, and the defect
+   behind each rule. They are binding.
+3. [docs/concepts/architecture.md](docs/concepts/architecture.md) and
+   [docs/reference/traps.md](docs/reference/traps.md), before changing code.
+   Check what already exists before adding anything: most of the duplication
+   this project has had to clean up was written by an agent that did not check.
+4. The page for the part you are changing, from the index.
+5. [docs/writing.md](docs/writing.md) before you write or change a page in
+   `docs/`, and [docs/contributing.md](docs/contributing.md) before you push or
+   release.
+
+When you learn or change something, write it in the page in `docs/` it belongs
+to, and run `mise run docs:check` and `mise run site:check`. Don't add README
+files elsewhere.
 
 Using `irgo-winvm` from another repository, and filing an issue here:
-[For agents](docs/FOR-AGENTS.md).
+[For agents](docs/guides/agents.md).

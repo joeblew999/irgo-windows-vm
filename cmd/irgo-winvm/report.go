@@ -102,7 +102,7 @@ var reporterSection = issueSection{heading: "Reporting repo and agent",
 	hint: "owner/repo you were working in, and the agent (e.g. Claude Code) or person who hit this"}
 
 var checksSection = issueSection{heading: "Checks", body: func(string) string {
-	return "- [ ] It is not already in docs/UPSTREAM.md or an open issue.\n" +
+	return "- [ ] It is not already in docs/reference/upstream.md or an open issue.\n" +
 		"- [ ] I read the report and it holds no secret, token or personal path."
 }}
 
@@ -132,7 +132,7 @@ var issueKinds = map[string]issueKind{
 	"upstream": {form: "upstream.yml", title: "[upstream] ", labels: []string{"needs-triage", "agent-filed"}, withReport: true,
 		sections: []issueSection{
 			{heading: "Project", hint: "one of: glaze, native, UTM, not sure"},
-			{heading: "UPSTREAM.md entry", hint: "the closest heading in docs/UPSTREAM.md, or none"},
+			{heading: "Upstream bugs entry", hint: "the closest heading in docs/reference/upstream.md, or none"},
 			reporterSection,
 			{heading: "Why it is upstream", hint: "what the project's documentation promises, and what it does instead"},
 			{heading: "Minimal reproduction", hint: "the smallest program or command sequence that shows it, and on which OS"},

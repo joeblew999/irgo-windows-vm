@@ -10,7 +10,7 @@ set -euo pipefail
 # 6.98 MiB (1998 KiB gzip), measured 1 Oct 2026 with `wrangler deploy
 # --dry-run`. Both fit Workers' 64 MiB; the smaller one is less to compile
 # against the 1 s startup limit. The numbers, the local timings and the two
-# TinyGo traps this code avoids are in docs/WORKER.md, "The Cloudflare
+# TinyGo traps this code avoids are in docs/worker.md, "The Cloudflare
 # Worker".
 #
 # -target wasm runs wasm-opt, which is binaryen, pinned in mise.toml: without

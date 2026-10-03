@@ -1,9 +1,34 @@
-# Contributing
+---
+title: This repository
+nav_order: 6
+has_children: true
+---
+
+# This repository: set up, check, land a change, release
 
 How to set up, what to run, and how to land a change. Before you write code,
-read [Conventions](CONVENTIONS.md), [Architecture](ARCHITECTURE.md) and
-[Known traps](TRAPS.md): most of the duplication this project has had to remove
+read [Rules](rules.md), [Architecture](concepts/architecture.md) and
+[Known traps](reference/traps.md): most of the duplication this project has had to remove
 was written by someone who didn't check what already existed.
+
+## What to read before you change something
+
+| page | read it before you |
+|---|---|
+| [Rules](rules.md) | write any code: the rules, and the defect behind each |
+| [Architecture](concepts/architecture.md) | change a package, a lock, a job, the data on disk, pushes, the golden image or the cache |
+| [Known traps](reference/traps.md) | touch UTM, the ISO, the answer file, the guest or a window on Windows |
+| [The Cloudflare Worker](worker.md) | change `worker/` |
+| [Testing](guides/testing.md) | change `examples/`, or claim glaze works |
+| this page | push, release, or add a page ([where it goes](#where-a-topic-goes)) |
+| [Writing docs](writing.md) | write or change a page in `docs/` |
+| [Using it](guides/using.md) | change what a command does for its user, or an exit code |
+| [Upstream bugs](reference/upstream.md) | work around anything in glaze, native or UTM (don't: fix it there) |
+| [Findings](findings.md) | state a number: what has been measured, dated |
+| [Glaze status](GLAZE-STATUS.md) | say whether glaze works (generated: never edit it) |
+| [VM status](VM-STATUS.md) | say whether a VM has what the project relies on (generated: never edit it) |
+| [Roadmap](roadmap.md) | pick up what is next |
+| [Threat model](concepts/threat-model.md) | touch the HTTP transport, or open a port in the guest |
 
 ## Set up
 
@@ -15,7 +40,7 @@ mise run go:check  # confirms the setup works
 ```
 
 `mise install` also fetches the Worker's TinyGo (1.2 GB), binaryen, node and
-wrangler ([why](WORKER.md#traps)). That is all you need to build and test the
+wrangler ([why](worker.md#traps)). That is all you need to build and test the
 Go code. Work on the VM itself also
 needs macOS on Apple Silicon and UTM, which `vm-create` installs.
 
@@ -36,8 +61,8 @@ After you push, wait for CI with:
 mise run ci:watch   # exits non-zero if any workflow on your commit failed
 ```
 
-Run the [glaze gates](TESTING.md#does-glaze-work) when you touch anything they
-exercise, and the [cycle test](TESTING.md#run-the-cycle-tests) for the stage you
+Run the [glaze gates](guides/testing.md#does-glaze-work) when you touch anything they
+exercise, and the [cycle test](guides/testing.md#run-the-cycle-tests) for the stage you
 changed.
 
 ### What the checks cover
@@ -47,7 +72,7 @@ changed.
   cross-compiles for Linux and Windows as well as macOS. Deleting
   a function from `sysfile_other.go` once passed every check being run, because
   they all ran on darwin. The module split is in
-  [Architecture](ARCHITECTURE.md#go-modules); `go list -deps ./cmd/irgo-winvm`
+  [Architecture](concepts/architecture.md#go-modules); `go list -deps ./cmd/irgo-winvm`
   names nineteen third-party modules, and neither glaze nor native is among
   them.
 - **`go:lint` pins `GOOS=darwin`**, so a Mac and the Linux CI runner lint the
@@ -57,7 +82,7 @@ changed.
   while the same command passed on the Mac that wrote it.
 - **Nothing that touches a real guest is in CI.** Unit tests cover the iso
   stage well, and the vm and app stages only at the edges; those paths are
-  proven by running them ([Testing](TESTING.md#run-the-cycle-tests)).
+  proven by running them ([Testing](guides/testing.md#run-the-cycle-tests)).
 - **Wait for CI with `mise run ci:watch`**, never a hand-written `sleep` loop
   around `gh run list --commit`, which matches only the full 40-character SHA:
   a short one returns an empty list, which looks exactly like a run that
@@ -110,10 +135,10 @@ means a patch to [crgimenes/glaze](https://github.com/crgimenes/glaze) or
 here. A bug worked around in an example still ships to everyone using those
 libraries, and the workaround hides it.
 
-Record what you found, and where it was fixed, in [UPSTREAM.md](UPSTREAM.md).
+Record what you found, and where it was fixed, in [Upstream bugs](reference/upstream.md).
 
 To build and test this repository against your local clones of glaze and native,
-see [Test your own changes to glaze or native](TESTING.md#test-your-own-changes-to-glaze-or-native).
+see [Test your own changes to glaze or native](guides/testing.md#test-your-own-changes-to-glaze-or-native).
 
 ## Commits
 
@@ -125,13 +150,31 @@ see [Test your own changes to glaze or native](TESTING.md#test-your-own-changes-
 - **Include measurements.** If you measured something to be sure, put the
   numbers in the message.
 - **Correct a measurement everywhere it appears**, including
-  [RESULTS.md](RESULTS.md), which is dated on purpose.
+  [Findings](findings.md), which is dated on purpose.
 
 ## The docs site
 
-<https://joeblew999.github.io/irgo-windows-vm/> is generated from the markdown
-in this repository and published by `pages.yml` on every push to `main`. There
-is no separate copy to edit: if a page is wrong, fix the markdown. The
+`docs/` is kept the way every repository of the owner's keeps it, by
+[charter](https://github.com/joeblew999/charter): the sections and the rules
+for a page are in [Writing docs](writing.md), which charter writes, and every
+page opens with front matter (`title`, `nav_order`, `parent`).
+
+```sh
+mise run docs:check    # charter's files are current, and docs/ has nothing a program can fault
+mise run docs:setup    # write docs/_config.yml, docs/writing.md, docs/llms.txt, docs/_sass/ again
+mise run docs:review   # have Claude bring docs/ into line with docs/writing.md
+```
+
+`docs:check` is not in CI: CI installs only the Go tools, and `charter docs
+-check` asks GitHub for the repository's description. Run it before you push a
+change to `docs/`.
+
+<https://joeblew999.github.io/irgo-windows-vm/> is generated from the same
+markdown by this repository's own generator, docsite, and published by
+`pages.yml` on every push to `main`; charter's GitHub Pages site (Jekyll over
+`docs/`, which `docs/_config.yml` configures) is not switched on. Why, and what
+replacing docsite would take: `.plans/2026-10-03_1200_docs-site-charter.md`.
+There is no separate copy to edit: if a page is wrong, fix the markdown. The
 exceptions are the [command reference](#the-command-reference), the MCP page
 and the Worker API page, which are generated from the code.
 
@@ -204,26 +247,31 @@ on the page for its reader:
 | page | holds |
 |---|---|
 | `README.md` | what this is, install, a three-step quick start, links. Nothing else |
-| `docs/GETTING-STARTED.md` | requirements, every way to install, the first VM and the first program |
-| `docs/USING.md` | each command for its user: exit codes, costs, the VM, `-gui`, the golden image, the private cache |
-| `docs/FOR-AGENTS.md` | using it from an agent: MCP, HTTP, filing issues |
-| `docs/TESTING.md` | the glaze gates, the conformance suite, `examples/drive`, desktop hygiene, the cycle tests |
-| `docs/ARCHITECTURE.md` | how the code is built: stages, packages, locks, jobs, data, pushes, the golden image and cache internals |
-| `docs/WORKER.md` | the Cloudflare Worker |
-| `docs/CONVENTIONS.md` | how code here is written |
-| `docs/TRAPS.md` | what fails silently, one line each |
-| `docs/CONTRIBUTING.md` | this page: setup, checks, the site, commits, releases, triage, licence |
-| `docs/RESULTS.md` | what was measured, dated. History goes here, not in the reference pages |
-| `docs/UPSTREAM.md` | bugs in glaze, native and UTM, and their status |
-| `docs/ROADMAP.md`, `docs/THREAT-MODEL.md` | intent, and what the HTTP transport exposes |
-| `docs/GLAZE-STATUS.md` | generated by `glaze-check`: never edit it by hand |
+| `docs/README.md` | the home page: what it is for and who for, what is what, what is generated, every page |
+| `docs/guides.md`, `docs/concepts.md`, `docs/reference.md` | a section's pages, one line each |
+| `docs/getting-started.md` | requirements, every way to install, the first VM and the first program |
+| `docs/guides/using.md` | each command for its user: exit codes, costs, the VM, `-gui`, the golden image, the private cache |
+| `docs/guides/agents.md` | using it from an agent: MCP, HTTP, filing issues |
+| `docs/guides/testing.md` | the glaze gates, the conformance suite, `examples/drive`, desktop hygiene, the cycle tests |
+| `docs/concepts/architecture.md` | how the code is built: stages, packages, locks, jobs, data, pushes, the golden image and cache internals |
+| `docs/worker.md` | the Cloudflare Worker |
+| `docs/rules.md` | how code here is written |
+| `docs/reference/traps.md` | what fails silently, one line each |
+| `docs/contributing.md` | this page: setup, checks, the site, commits, releases, triage, licence |
+| `docs/findings.md` | what was measured, dated. History goes here, not in the reference pages |
+| `docs/reference/upstream.md` | bugs in glaze, native and UTM, and their status |
+| `docs/roadmap.md`, `docs/concepts/threat-model.md` | intent, and what the HTTP transport exposes |
+| `docs/GLAZE-STATUS.md`, `docs/VM-STATUS.md` | generated by `glaze-check` and `vm-check`: never edit them by hand |
+| `docs/writing.md` | the rules for a page, written by charter: never edit it here |
 
 `AGENTS.md` and `CLAUDE.md` at the root only point into `docs/`.
 
 ### Add a page
 
-Every file above becomes a page. To add one, add a `[[page]]` to
-`site/docsite.toml`. Nothing is discovered by scanning a directory, so nothing
+Every file above becomes a page. To add one, put it in its section's folder
+with front matter ([Writing docs](writing.md#the-mechanics)), give it a row in
+its section's page and in the home page's "Every page" table, and add a
+`[[page]]` to `site/docsite.toml`. Nothing is discovered by scanning a directory, so nothing
 is published by accident. A page with a `nav` label is in the header; one with
 `parent` set is listed in the footer and lights up its parent's entry, which
 keeps the header to one line at 1280 px. A page that names commands that do not
@@ -238,7 +286,7 @@ string is ever transcribed. `iso-create -fetch` computes its usage text from a
 constant, so only a captured copy is correct.
 
 It asks the binary for the list with `irgo-winvm commands`
-([tooling commands](ARCHITECTURE.md#adding-a-command)).
+([tooling commands](concepts/architecture.md#adding-a-command)).
 
 ### Screenshots
 
@@ -295,7 +343,7 @@ install, because the binary is not signed with an Apple Developer ID and Homebre
 cask downloads.
 
 **Gatekeeper.** The binaries are ad-hoc signed and not notarized; what that
-means for a user is in [Getting started](GETTING-STARTED.md#install).
+means for a user is in [Getting started](getting-started.md#install).
 
 `release.yml` then:
 
@@ -332,7 +380,7 @@ The version is compiled into the binary, so it is part of those bytes, which is
 why the build reads it from the tag your checkout is on. Before v0.2.1 it
 didn't: CI passed `VERSION` and a hand-run build didn't, so a local build said
 `dev` and hashed differently. The byte-for-byte check against a published
-release is in [RESULTS.md](RESULTS.md).
+release is in [Findings](findings.md).
 
 ## Triage and labels
 
@@ -342,14 +390,14 @@ comment lines, so GitHub shows the file as a searchable table. Then `mise run gh
 on GitHub with `gh label create --force`. It deletes nothing. `DRY_RUN=1`
 prints the commands instead of running them, and `REPO=owner/name` points it
 at another repository. `cmd/irgo-winvm/issue_test.go` fails if a form,
-`report -issue` or [For agents](FOR-AGENTS.md#reporting-issues) names a label the file does not define, or if a
+`report -issue` or [For agents](guides/agents.md#reporting-issues) names a label the file does not define, or if a
 form and `report -issue` disagree about the headings.
 
 | label | means |
 |---|---|
 | `bug` | `irgo-winvm` does the wrong thing |
 | `feature` | a calling repository needs something it does not do |
-| `upstream-glaze`, `upstream-native`, `upstream-utm` | the bug is theirs: recorded in UPSTREAM.md, fixed there |
+| `upstream-glaze`, `upstream-native`, `upstream-utm` | the bug is theirs: recorded in [Upstream bugs](reference/upstream.md), fixed there |
 | `needs-triage` | nobody has looked yet; every form adds it |
 | `needs-report` | a bug without the report; triage waits for it |
 | `triaged` | classified, labelled, and the next step is named in a comment |
@@ -357,9 +405,9 @@ form and `report -issue` disagree about the headings.
 | `good first issue` | small and self-contained, with the fix described |
 | `duplicate`, `wontfix` | closed, with a comment linking the original or saying why |
 
-How agents file issues is in [For agents](FOR-AGENTS.md#reporting-issues).
+How agents file issues is in [For agents](guides/agents.md#reporting-issues).
 
-Triage: read the report, move an upstream bug into [UPSTREAM.md](UPSTREAM.md)
+Triage: read the report, move an upstream bug into [Upstream bugs](reference/upstream.md)
 and label it `upstream-*`, swap `needs-triage` for `triaged`, and say the next
 step in a comment.
 

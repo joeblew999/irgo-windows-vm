@@ -161,7 +161,7 @@ func isoDeleteRefusal(media mediaFiles, tools int, all bool) error {
 	case all:
 		msg += "\n  Includes the .esd: " + utmvm.ISODownloadSize() + " to re-fetch from a source that rate-limits."
 	default:
-		// 40s is measured; see docs/RESULTS.md.
+		// 40s is measured; see docs/findings.md.
 		msg += "\n  The .esd is kept, so iso-create rebuilds this in about 40s with\n" +
 			"  no network. Add -all to delete that too."
 	}

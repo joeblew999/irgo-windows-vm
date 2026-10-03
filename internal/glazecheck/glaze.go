@@ -28,9 +28,9 @@ var Glaze = Suite{
 	},
 	Known:        func() []Known { return KnownUpstream },
 	KnownVerdict: "KNOWN BUGS ONLY",
-	KnownTail:    " fail, known upstream bugs listed in docs/UPSTREAM.md; nothing else did",
+	KnownTail:    " fail, known upstream bugs listed in docs/reference/upstream.md; nothing else did",
 	KnownLabel:   "known upstream",
-	XPassTail:    " — if the fix is released, remove it from glazecheck.KnownUpstream and update docs/UPSTREAM.md",
+	XPassTail:    " — if the fix is released, remove it from glazecheck.KnownUpstream and update docs/reference/upstream.md",
 	Thing:        "conformance suite",
 	Subject:      "glaze",
 	ShotsBullet:  "- screenshots: %d of the %d tests that open a window took one — see [Screenshots](#screenshots)\n",
@@ -73,7 +73,15 @@ func titleShort(target string) string {
 	return "Windows"
 }
 
-const header = `# Glaze status
+// The header opens with the front matter every page in docs/ has
+// (docs/writing.md): the file is a page under Reference.
+const header = `---
+title: Glaze status
+nav_order: 3
+parent: Reference
+---
+
+# Glaze status
 
 Does glaze work on the Mac and on Windows? The last recorded answer for each,
 written by ` + "`irgo-winvm glaze-check`" + ` (` + "`mise run glaze:mac`" + ` and
@@ -81,7 +89,7 @@ written by ` + "`irgo-winvm glaze-check`" + ` (` + "`mise run glaze:mac`" + ` an
 which also says whether it still describes the tree. Generated: do not edit it by
 hand. Each run replaces only its own section. Every row is one test of
 ` + "`examples/conformance`" + `, from its test2json events; what each checks is in its
-comment, and how the suite runs is in [TESTING.md](TESTING.md#does-glaze-work).
+comment, and how the suite runs is in [Testing](guides/testing.md#does-glaze-work).
 
 `
 

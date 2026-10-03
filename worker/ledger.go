@@ -1,7 +1,7 @@
 package main
 
 // The ledger: a durable, cross-machine record of which agent used which VM, on
-// which machine, doing what (docs/WORKER.md, "The ledger"). The tool's
+// which machine, doing what (docs/worker.md, "The ledger"). The tool's
 // local lock files stay the authority; this is the record that survives a
 // machine and can be read from anywhere.
 //

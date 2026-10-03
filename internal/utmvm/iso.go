@@ -275,7 +275,7 @@ func isoEncode16be(s string) []byte {
 //   - the boot image should be efisys_noprompt.bin, not efisys.bin, because the
 //     difference is whether the disc stops at "Press any key to boot from CD";
 //   - and `hdiutil makehybrid` cannot do it at all — measured, twice, see
-//     docs/RESULTS.md. An external masterer is required.
+//     docs/findings.md. An external masterer is required.
 //
 // Only the masterer is external. Everything else — mounting, copying, checking,
 // refusing to overwrite media in use — is done here, so the part that can

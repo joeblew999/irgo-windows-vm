@@ -4,8 +4,8 @@ package utmvm
 // kept back for macOS, and how much one caller may hold. One place, read by
 // vm-create's guard (vm_capacity.go), `capacity` (capacity.go) and doctor, so
 // the answer to "is there room?" and the report of "how much room is there"
-// cannot disagree. docs/USING.md, "Is there room?", and docs/ARCHITECTURE.md, "The capacity model", have the reasoning; the
-// measurements are in docs/RESULTS.md.
+// cannot disagree. docs/guides/using.md, "Is there room?", and docs/concepts/architecture.md, "The capacity model", have the reasoning; the
+// measurements are in docs/findings.md.
 
 import (
 	"errors"
@@ -25,11 +25,11 @@ const vmMemoryMiB = 8192
 // (cloneVM). irgo-win11 and installs keep vmMemoryMiB. On a 16 GiB Mac that
 // is the difference between no clone while irgo-win11 runs (16 - 8 - 8 = 0
 // left, want 4) and one (16 - 8 - 4 = 4). A 4 GiB clone passed glaze-check
-// -windows and vm-check (docs/RESULTS.md, "VM capacity").
+// -windows and vm-check (docs/findings.md, "VM capacity").
 const cloneMemoryMiB = 4096
 
 // linuxMemoryMiB is what a Linux VM is made with. A server image with no
-// desktop: 275 MiB in use after its first boot (docs/RESULTS.md, "A Linux
+// desktop: 275 MiB in use after its first boot (docs/findings.md, "A Linux
 // guest by hand"). On a 16 GiB Mac one fits beside irgo-win11 and a Windows
 // clone both stopped or either running, and beside both running it does not
 // (16 - 8 - 4 - 2 = 2 left, want 4).
@@ -62,7 +62,7 @@ const hostDiskReserveBytes = 10 << 30
 const cloneReserveBytes = 4 << 30
 
 // installReserveBytes is what a VM installed from the ISO takes: about 30 GiB
-// once Windows is on it ("What it costs" in docs/USING.md). It also
+// once Windows is on it ("What it costs" in docs/guides/using.md). It also
 // covers vm-create pulling the golden image when there is none here: 8.4 GB
 // of chunks, then the bundle rebuilt (19 GB of data, measured 1 Oct 2026).
 const installReserveBytes = 30 << 30

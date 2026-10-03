@@ -356,7 +356,7 @@ func TestDriveScroll(t *testing.T) {
 	}
 	snap(t, s, "before")
 
-	// STANDING IN FOR AN UPSTREAM FIX — docs/UPSTREAM.md §6: the first scroll
+	// STANDING IN FOR AN UPSTREAM FIX — docs/reference/upstream.md §6: the first scroll
 	// posted to a new process, after this one has posted input to another, is
 	// dropped. Up to three posts; one when §6 is fixed or the test runs alone.
 	var e drive.Event
@@ -374,7 +374,7 @@ func TestDriveScroll(t *testing.T) {
 		if post == 3 {
 			t.Fatalf("three scrolls posted and the page saw no wheel event: %v", err)
 		}
-		retried(t, "scroll post %d reached the page as no wheel event within 500ms (docs/UPSTREAM.md §6): posting again", post)
+		retried(t, "scroll post %d reached the page as no wheel event within 500ms (docs/reference/upstream.md §6): posting again", post)
 	}
 	if !e.Trusted {
 		t.Fatalf("the wheel event was not trusted (isTrusted false): %s", e)

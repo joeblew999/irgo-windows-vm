@@ -199,7 +199,7 @@ func TestSeedHostname(t *testing.T) {
 // the output is the size asked for with the source's bytes at the start, and
 // a source that is not a disk with a partition table, or is larger than the
 // disk to be made, is an error and not a VM that will not boot. That it reads
-// Ubuntu's compressed qcow2 is measured, not tested here (docs/RESULTS.md).
+// Ubuntu's compressed qcow2 is measured, not tested here (docs/findings.md).
 //
 // Negative controls, run by hand 2 Oct 2026: without the Truncate the size
 // check fails; without the read-back, "no partition table" returns nil.

@@ -6,7 +6,7 @@ package command
 type Code int
 
 // The exit codes. utmctl exits 0 when it fails, so these are the only reliable
-// signal a caller gets; docs/USING.md documents them for people.
+// signal a caller gets; docs/guides/using.md documents them for people.
 const (
 	CodeOK Code = 0
 

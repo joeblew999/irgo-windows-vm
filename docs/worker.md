@@ -1,17 +1,23 @@
+---
+title: The Cloudflare Worker
+nav_order: 4
+parent: This repository
+---
+
 # The Cloudflare Worker
 
 `worker/` is one Cloudflare Worker, written in Go on
 [syumai/workers-go](https://github.com/syumai/workers-go) and deployed at
 `https://irgo-windows-vm.gedw99.workers.dev`. How it fits the rest of the tool
-is in [Architecture](ARCHITECTURE.md); the golden image it serves is described
-in [Using it](USING.md#the-private-r2-cache).
+is in [Architecture](concepts/architecture.md); the golden image it serves is described
+in [Using it](guides/using.md#the-private-r2-cache).
 
 ## The API
 
 It serves five things. GitHub Pages (`pages.yml`) keeps publishing the site as
 before until the owner switches.
 
-- **The site.** `site/dist`, from `mise run site:build`, as Workers static
+- **The site.** `site/dist/`, from `mise run site:build`, as Workers static
   assets. Cloudflare serves a matching file before the Worker runs, so pages
   cost no Worker CPU. Only `/api/*` reaches Go (`run_worker_first`).
 - **Live glaze status.** CI's conformance job posts each runner's
@@ -22,7 +28,7 @@ before until the owner switches.
   unchanged.
 - **The golden image** (`worker/golden.go`), the private bucket bound as
   `GOLDEN`, and the only way `vm-golden-push` and `vm-golden-pull` reach it
-  when `IRGO_GOLDEN_URL` is set ([the private R2 cache](USING.md#the-private-r2-cache)).
+  when `IRGO_GOLDEN_URL` is set ([the private R2 cache](guides/using.md#the-private-r2-cache)).
   A key is exactly one the cache writes: `golden/latest`,
   `golden/manifests/<sha256>.json` or `golden/chunks/<sha256>.zst`. Anything
   else is 404 with any token.
@@ -123,7 +129,7 @@ The [traps](#traps) below apply to anything a handler or `wire` does: no
   `vm-golden-push -delete`, which has to find every manifest and every chunk
   no manifest names (an interrupted push leaves some); without it that answer
   would be cannot tell. The licence terms that make the image private are in
-  `.plans/2026-09-30_1700_vm-golden-image.md`.
+  `.plans/done/2026-09-30_1700_vm-golden-image.md`.
 - **Bytes never pass through Go.** A GET hands R2's body stream to the
   Response, and a PUT hands the request's stream to R2's `put`, through two
   hooks of workers-go (`GetRawJSBody` on a request body, `WriteRawJSBody` on
@@ -201,7 +207,7 @@ Three more, about the tools rather than the code:
 - **TinyGo's `-target wasm` runs `wasm-opt`**, and without binaryen it fails
   with "no usable wasm-opt found". binaryen is pinned in `mise.toml`.
 - **`workers-assets-gen -o build` empties `build/`** first, and **`wrangler
-  dev` does not see a rebuilt `site/dist`**, because `site:build` replaces the
+  dev` does not see a rebuilt `site/dist/`**, because `site:build` replaces the
   directory. Restart `wrangler dev` after `site:build`. Its simulated R2
   survives in `worker/.wrangler/state`.
 
@@ -268,7 +274,7 @@ Done on 1 Oct 2026 by these steps. In order:
    is renamed, change `bucket_name` there.
 4. **Build the site, then deploy**: `mise run site:build`, then
    `cd worker && wrangler deploy`. The deploy runs `mise run worker:wasm` and
-   uploads `site/dist` as the Worker's assets. Its output names the URL,
+   uploads `site/dist/` as the Worker's assets. Its output names the URL,
    `https://irgo-windows-vm.<subdomain>.workers.dev`, and `startup_time_ms`.
 5. **Set the secrets** from `worker/`, one `wrangler secret put <NAME>`
    each, each a different `openssl rand -hex 32`. Until one is set, its
@@ -286,7 +292,7 @@ Done on 1 Oct 2026 by these steps. In order:
    | `JOBS_RUNNER_TOKEN` | the Mac running `serve` (`IRGO_REMOTE_RUNNER_TOKEN`) |
 
    Keep the golden pair in `.env.r2` too (see
-   [Setting up the bucket](USING.md#setting-up-the-bucket)).
+   [Setting up the bucket](guides/using.md#setting-up-the-bucket)).
 
 6. **Point CI at it**:
    `gh variable set GLAZE_STATUS_URL --body https://irgo-windows-vm.<subdomain>.workers.dev`
@@ -306,8 +312,8 @@ of these steps.
 
 `worker/jobs.go`, routes in `wire/jobs.go`: how a developer, an agent or a
 workflow on any OS hands a Windows binary to a Mac running `irgo-winvm serve`
-([how to use it](FOR-AGENTS.md#from-another-machine-linux-windows-github),
-[what the Mac does](ARCHITECTURE.md#remote-jobs)). The Mac accepts no
+([how to use it](guides/agents.md#from-another-machine-linux-windows-github),
+[what the Mac does](concepts/architecture.md#remote-jobs)). The Mac accepts no
 connection, so the queue lives here and the Mac polls for work. Every route,
 its body and its answers are on the [Worker API](https://joeblew999.github.io/irgo-windows-vm/api.html) page; in short:
 
@@ -369,7 +375,7 @@ holds `IRGO_REMOTE_URL`, `IRGO_REMOTE_TOKEN` (the owner's caller token),
 Who used which VM, on which machine, doing what, and what was started and never
 finished, kept where any machine can read it. The events come from every
 command the tool runs; what they carry, and why sending them can never fail a
-command, is in [Architecture](ARCHITECTURE.md#the-ledger-client).
+command, is in [Architecture](concepts/architecture.md#the-ledger-client).
 
 It stores events in the D1 database `irgo-ledger`, schema in
 `worker/migrations/`. D1 rather than a Durable Object: workers-go opens a D1
@@ -410,7 +416,7 @@ free and total disk, the Mac's memory and what running VMs are configured with,
 VM, running and stale counts, the disk still promised to VMs, the tool's own
 bytes, whether another clone fits (`yes`, `no`, `cannot tell`) and how many more
 fit by disk and can run by memory. What the numbers mean is in
-[Is there room?](USING.md#is-there-room).
+[Is there room?](guides/using.md#is-there-room).
 
 `GET /api/ledger/vms` gives each machine its newest snapshot (`capacity`,
 `capacity_at`); one that does not parse, or has no disk size or verdict, is

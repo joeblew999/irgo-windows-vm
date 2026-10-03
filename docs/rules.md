@@ -1,8 +1,14 @@
-# Conventions
+---
+title: Rules
+nav_order: 1
+parent: This repository
+---
+
+# Rules: how code here is written
 
 How code in this repository is written. Each rule exists because its absence
 caused a real defect here, and each names that defect. Read them, with
-[Architecture](ARCHITECTURE.md) and [Known traps](TRAPS.md), before writing
+[Architecture](concepts/architecture.md) and [Known traps](reference/traps.md), before writing
 code: most of the duplication this project has had to remove was written by
 someone who did not check what already existed.
 
@@ -52,7 +58,7 @@ disabled the check it covered, because its test case also changed the other
 field.
 
 If a property can only be verified by measurement, record the measurement with
-a date in [RESULTS.md](RESULTS.md) rather than writing a test that looks like
+a date in [Findings](findings.md) rather than writing a test that looks like
 coverage; a test for "the build records its verdict" is marked as not proving
 that, because deleting the build's call leaves it green. Controls are run by
 hand, not automated: a mise task that applied eight mutations matched exact
@@ -65,7 +71,7 @@ Behaviour of UTM, Windows and the filesystem is established by running it, not
 by reasoning. Example: a length check added to the downloader was unreachable,
 because `net/http` already rejects a short body — proven by disabling the check
 and watching the test still pass. The other measured surprises are in
-[Known traps](TRAPS.md). For code, use the compiler and analysers rather
+[Known traps](reference/traps.md). For code, use the compiler and analysers rather
 than grep, which counts comment mentions as call sites and gave three wrong
 answers in one afternoon: delete the symbol, rebuild, run the tests, and put it
 back if either fails. `mise run go:lint` finds what grep does not.
@@ -91,7 +97,7 @@ A doc comment says what the thing does and, in a sentence or two, the
 non-obvious why. A measured trap or a warning stays in the code, tightly worded:
 why the display is `virtio-ramfb-gl`, why ESD image 3 needs `--boot`, why
 `utmctl suspend --save-state` must never be called. The story of how it was
-found belongs in [RESULTS.md](RESULTS.md) or [Known traps](TRAPS.md), not in the
+found belongs in [Findings](findings.md) or [Known traps](reference/traps.md), not in the
 code. If a comment is wrong, fix the fact, and look for any other copy of a
 measurement you correct.
 
@@ -103,7 +109,7 @@ user of those libraries and hides it. Example: `examples/conformance` (and
 `glaze-all`) carry one marked stand-in for the `ErrUnsupported` fix, to be
 deleted when a release contains it. A test for an upstream bug is never
 skipped to make a run green: it fails, and `glazecheck.KnownUpstream` names it
-as a known upstream bug (see [the conformance suite](TESTING.md#the-conformance-suite)). [UPSTREAM.md](UPSTREAM.md) is the ledger.
+as a known upstream bug (see [the conformance suite](guides/testing.md#the-conformance-suite)). [Upstream bugs](reference/upstream.md) is the ledger.
 
 ## Do not
 

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// The golden image is proven against a real VM (RESULTS.md). These cover the
+// The golden image is proven against a real VM (docs/findings.md). These cover the
 // parts that fail silently before any VM is involved.
 
 // TestCloneScriptTakesItsArguments: the script is rendered with Sprintf, and a

@@ -23,4 +23,4 @@ VM hardened (`vm-repair`, never-expiring password, fail-fast `-gui`).
 
 ## Working on glaze or native
 
-See [docs/TESTING.md](../docs/TESTING.md#does-glaze-work) — not repeated here.
+See [docs/guides/testing.md](../docs/guides/testing.md#does-glaze-work) — not repeated here.

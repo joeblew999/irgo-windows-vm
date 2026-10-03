@@ -57,7 +57,7 @@ var (
 
 // unsupportedErrs are the "no backend on this platform" sentinels.
 //
-// STANDING IN FOR AN UPSTREAM FIX — see docs/UPSTREAM.md §2. Delete this list, and
+// STANDING IN FOR AN UPSTREAM FIX — see docs/reference/upstream.md §2. Delete this list, and
 // isUnsupported with it, once the wrapping lands in a released glaze and
 // native; the whole thing collapses back to one errors.Is against the standard
 // sentinel.

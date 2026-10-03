@@ -15,7 +15,7 @@ import (
 
 // modulePath reduces a package path to the module that provides it:
 // github.com/pierrec/lz4/v4/internal/lz4block -> github.com/pierrec/lz4, the
-// unit docs/CONTRIBUTING.md's licence table is written in.
+// unit docs/contributing.md's licence table is written in.
 var modulePath = regexp.MustCompile(`^(github\.com/[^/]+/[^/]+|golang\.org/x/[^/]+)`)
 
 // forbidden are the libraries under test. They belong in the guest programs,
@@ -69,5 +69,5 @@ func TestShippedBinaryLinksNothingUnderTest(t *testing.T) {
 	}
 	sort.Strings(names)
 	t.Logf("%d third-party modules reach the binary: %s", len(names), strings.Join(names, " "))
-	t.Log("if that number changed, docs/CONTRIBUTING.md's licence table needs re-checking")
+	t.Log("if that number changed, docs/contributing.md's licence table needs re-checking")
 }

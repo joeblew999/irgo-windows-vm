@@ -8,7 +8,7 @@ set -euo pipefail
 # without #). Tabs, not spaces: a name may hold spaces. No comment lines — a
 # "#" line is a one-column row to GitHub, and the table stops rendering.
 # cmd/irgo-winvm/issue_test.go checks the shape, and that every label the issue
-# forms, `report -issue` and docs/FOR-AGENTS.md name is defined here.
+# forms, `report -issue` and docs/guides/agents.md name is defined here.
 # `gh label create --force` updates a label that already exists, so running it
 # again is safe. It never deletes: a label dropped from the file, or one of
 # GitHub's defaults, stays until someone removes it by hand.

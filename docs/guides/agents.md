@@ -1,3 +1,9 @@
+---
+title: For agents
+nav_order: 2
+parent: Guides
+---
+
 # For agents
 
 An agent writing a Go desktop app on a Mac cannot otherwise find out whether it
@@ -5,7 +11,7 @@ works on Windows. `irgo-winvm mcp` lets it ask, get an answer from a real
 Windows guest, and see the screen when the answer is that the app hung.
 
 This page is for agents that **use** the tool, from any repository. An agent
-changing this repository's code starts at [AGENTS.md](../AGENTS.md) instead.
+changing this repository's code starts at [AGENTS.md](../../AGENTS.md) instead.
 
 ## Connect
 
@@ -28,7 +34,7 @@ registers the server.
 - **Your `.exe` is anything built with `GOOS=windows GOARCH=arm64
   CGO_ENABLED=0`.** That is the whole contract.
 - **Match on the exit code or its `status` name**, never on the wording. The
-  codes are in [What it exits with](USING.md#what-it-exits-with): 1 is your
+  codes are in [What it exits with](using.md#what-it-exits-with): 1 is your
   program failing, with its real code in the message; 4 (`no-agent`) and 6
   (`busy`) are worth retrying, and so is 7 (no room) once a VM stops, and 8
   (`not-run`), a [remote job](#from-another-machine-linux-windows-github) that never ran to the end.
@@ -40,13 +46,13 @@ registers the server.
 ## Sharing the Mac
 
 The Mac is shared: the owner, agents in this repository and agents from other
-repositories all use it at once ([how](USING.md#sharing-one-mac)). The whole
+repositories all use it at once ([how](using.md#sharing-one-mac)). The whole
 contract for an agent from another repository:
 
 1. Set `IRGO_WINVM_OWNER` (or pass `-owner`) to something that names you, or
    rely on the MCP client name.
 2. `irgo-winvm vm-create -vm <name>`: with a
-   [golden image](USING.md#the-golden-image), a clone in about 23 seconds.
+   [golden image](using.md#the-golden-image), a clone in about 23 seconds.
    Exit 7 means no room: wait, or ask whoever `status` names. `capacity` says
    what holds the disk and memory, and how many more VMs fit; each owner may
    have 2 VMs holding 16 GiB unless the machine says otherwise.
@@ -63,7 +69,7 @@ a Linux machine, make the VM with
 `irgo-winvm vm-create -os linux -vm <name>` first: Ubuntu Server 24.04, a
 clone of the Linux golden image in about 30 seconds when the Mac has one, and
 otherwise, with `-install`, about a minute from Ubuntu's cloud image, a job
-over MCP like any `-install` ([A Linux VM](USING.md#a-linux-vm)). SSH is the only way to run anything in
+over MCP like any `-install` ([A Linux VM](using.md#a-linux-vm)). SSH is the only way to run anything in
 it: `app-create` is for Windows VMs.
 
 ```sh
@@ -74,7 +80,7 @@ Its last line is the command to run, `ssh dev@<address>`, printed only after
 an SSH server answered there from the Mac. Add
 `-o StrictHostKeyChecking=accept-new` the first time: every clone has host keys
 of its own. What it changes in the guest, and its exit codes, are in
-[Using it](USING.md#ssh-into-a-vm).
+[Using it](using.md#ssh-into-a-vm).
 
 - **The key is a `.pub` file on the Mac.** Never pass a private key: it is
   refused (exit 2) and nothing is sent.
@@ -88,7 +94,7 @@ of its own. What it changes in the guest, and its exit codes, are in
 - **`irgo-winvm vm-ssh-delete -vm <name>`** turns it off; `vm-delete` removes
   it with the VM.
 - **It is not a private channel.** Read
-  [who can reach port 22](THREAT-MODEL.md#ssh-into-a-guest) before putting
+  [who can reach port 22](../concepts/threat-model.md#ssh-into-a-guest) before putting
   anything in that VM you would not put in a throwaway.
 
 ## Over HTTP
@@ -108,7 +114,7 @@ for example `-http 127.0.0.1:8129`. A bare `:port` means loopback.
 
 > [!WARNING]
 > Anyone who can call `app-create` can run code of their choice on your Mac's
-> VM. Read the [threat model](THREAT-MODEL.md) before enabling `-http`, and
+> VM. Read the [threat model](../concepts/threat-model.md) before enabling `-http`, and
 > prefer no inbound listener at all.
 
 ## From another machine: Linux, Windows, GitHub
@@ -136,7 +142,7 @@ irgo-winvm remote-submit -gui app.exe --flag value
 
 `irgo-winvm remote-submit` can also be typed as two words, `remote submit`.
 
-- **The exit code is the job's**, on the same [table](USING.md#what-it-exits-with)
+- **The exit code is the job's**, on the same [table](using.md#what-it-exits-with)
   as everything else: 0 your program succeeded, 1 it failed (its own code is in
   the message), 7 the Mac had no room, and **8 it never ran to the end**:
   cancelled, no Mac took it within 2 hours, or its Mac went away. 4, 6, 7 and
@@ -175,33 +181,19 @@ hand it to the action, which fails the step unless the job exited 0 and
 uploads the result files as an artifact. Keep the token as a repository
 secret.
 
-```yaml
-jobs:
-  windows-arm64:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with: { go-version-file: go.mod }
-      - run: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go test -c -o suite.test.exe ./mysuite
-      - uses: joeblew999/irgo-windows-vm/.github/actions/run@main
-        with:
-          binary: suite.test.exe
-          test: true
-          gui: true
-          args: |
-            -test.run
-            TestWindow
-            -shots={out}
-          token: ${{ secrets.IRGO_REMOTE_TOKEN }}
-```
+The whole workflow is
+[`.github/actions/run/example.yml`](../../.github/actions/run/example.yml): copy
+it into your repository's `.github/workflows/`. It builds a test binary with
+`go test -c` on `ubuntu-latest` and hands it to the action
+(`joeblew999/irgo-windows-vm/.github/actions/run@main`) with `test`, `gui`, the
+arguments one per line, and the token from the secret `IRGO_REMOTE_TOKEN`.
 
 Inputs: `binary`, `args` (one per line), `gui`, `test`, `timeout`, `token`,
 `url`, `version`, `artifact`; outputs `job-id`, `exit-code`, `dir`. This
 repository's own `.github/workflows/remote.yml` runs it from Linux and Windows
 runners. How the queue works and what it accepts is in
-[the Worker](WORKER.md#the-remote-job-queue); what the Mac does with a job is
-in [Architecture](ARCHITECTURE.md#remote-jobs).
+[the Worker](../worker.md#the-remote-job-queue); what the Mac does with a job is
+in [Architecture](../concepts/architecture.md#remote-jobs).
 
 ## Reporting issues
 
@@ -215,14 +207,14 @@ something it does not.
 
 **Do not file here** when:
 
-- the bug is in glaze, native or UTM. Read [UPSTREAM.md](UPSTREAM.md) first:
+- the bug is in glaze, native or UTM. Read [Upstream bugs](../reference/upstream.md) first:
   if it is listed, add what you found to that entry's linked issue. If it is
   not, use the *upstream* kind below, so it is triaged into the ledger rather
   than misfiled as ours. It is upstream only if a correct caller, reading only
   that project's documentation, would hit it.
 - your own program failed. Exit 1 from `app-create` is your `.exe` failing,
   with its own exit code named in the message (see
-  [What it exits with](USING.md#what-it-exits-with)). Exits 4 and 6 are
+  [What it exits with](using.md#what-it-exits-with)). Exits 4 and 6 are
   worth retrying before filing.
 
 **Write the body with one command**, right after the failure, so the log still
@@ -253,7 +245,7 @@ skip them, so the body is the template. Use `--label feature,needs-triage,agent-
 for a feature and `--label needs-triage,agent-filed` for an upstream bug (add
 `upstream-glaze`, `upstream-native` or `upstream-utm` if you are sure). If gh
 says a label is not found, file without `--label`. What each label means is in
-[Triage](CONTRIBUTING.md#triage-and-labels).
+[Triage](../contributing.md#triage-and-labels).
 
 **What makes it actionable:**
 
@@ -274,7 +266,7 @@ An issue without the report gets `needs-report` and waits for it.
 hardware, free disk, UTM, the golden image, the last five commands and how
 they exited, the log around the last error (`-lines`, 40 by default),
 glaze-status's verdict lines, and `doctor -json`. Every command an agent can
-run logs its exit ([how](ARCHITECTURE.md#every-command-logs-its-exit)), so a
+run logs its exit ([how](../concepts/architecture.md#every-command-logs-its-exit)), so a
 failure reached over MCP is in the report as well as one on a terminal.
 
 Redaction is in `cmd/irgo-winvm/report.go`: values of credential-named and

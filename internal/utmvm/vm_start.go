@@ -12,7 +12,7 @@ import (
 // errUTMNotAnswering is UTM taking a start request and never replying. The
 // process is there and `utmctl list` and `status` answer at once; `start` and
 // `ip-address` time out. A UTM gets that way from a request that had to
-// launch it, or that reached it as it launched (docs/TRAPS.md). utmCommand
+// launch it, or that reached it as it launched (docs/reference/traps.md). utmCommand
 // sends neither; this is for a UTM something else did it to.
 var errUTMNotAnswering = errors.New("UTM is not answering start requests (AppleEvent timed out, -1712)")
 

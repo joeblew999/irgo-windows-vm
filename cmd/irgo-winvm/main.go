@@ -31,7 +31,7 @@ func init() { version = moduleVersion(version, debug.ReadBuildInfo) }
 
 // moduleVersion is the tag `go install ...@v0.5.0` records in the binary, for
 // a build GoReleaser did not stamp. A local build's VCS pseudo-version is not
-// a release and stays "dev", as CONTRIBUTING.md says it does.
+// a release and stays "dev", as docs/contributing.md says it does.
 func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string {
 	if stamped != "dev" {
 		return stamped
@@ -47,7 +47,7 @@ func moduleVersion(stamped string, read func() (*debug.BuildInfo, bool)) string 
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 func main() {
-	// The ledger (docs/ARCHITECTURE.md, "The ledger client"): off unless
+	// The ledger (docs/concepts/architecture.md, "The ledger client"): off unless
 	// IRGO_LEDGER_URL and IRGO_LEDGER_TOKEN are set. At exit it gets at most
 	// 2 s to send; what it cannot send stays spooled for the next run.
 	ledger.Configure(ledger.FromEnv(utmvm.Root(), version))

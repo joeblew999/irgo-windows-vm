@@ -72,7 +72,7 @@ func TestOpenURL(t *testing.T) {
 // UI thread and not waited on. And it comes after the window: on macOS glaze's
 // New runs a temporary [NSApp run] that ends only when
 // applicationDidFinishLaunching fires, once per process, and a tray started
-// first consumes it (docs/UPSTREAM.md §1). openWindow has already made a
+// first consumes it (docs/reference/upstream.md §1). openWindow has already made a
 // window by the time this runs, and earlier tests will have too.
 func TestTray(t *testing.T) {
 	w := openWindow(t, glaze.Options{}, nil)

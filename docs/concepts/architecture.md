@@ -1,10 +1,16 @@
+---
+title: Architecture
+nav_order: 1
+parent: Concepts
+---
+
 # Architecture
 
 How `irgo-winvm` is built: its stages, packages, locks and data, and how the
 golden image, the private cache and binary pushes work underneath. Read it,
-with [Conventions](CONVENTIONS.md) and [Known traps](TRAPS.md), before changing
-code. What each command does for its user is in [Using it](USING.md); the
-Cloudflare Worker has [its own page](WORKER.md).
+with [Rules](../rules.md) and [Known traps](../reference/traps.md), before changing
+code. What each command does for its user is in [Using it](../guides/using.md); the
+Cloudflare Worker has [its own page](../worker.md).
 
 ## Overview
 
@@ -14,7 +20,7 @@ Windows 11 ARM64 virtual machine in [UTM](https://mac.getutm.app), runs a Go
 serves the same commands to agents over the Model Context Protocol.
 
 The work is split into three stages, run in order. Each is one command with a
-matching undo (see [The three steps](USING.md#the-three-steps)):
+matching undo (see [The three steps](../guides/using.md#the-three-steps)):
 
 1. **iso** (`iso-create`) — Windows installation media, downloaded from
    Microsoft and mastered with `xorriso`.
@@ -43,7 +49,7 @@ the session model and the app stage are Windows-specific.
 A **Linux guest** is the vm stage alone. `vm-create -os linux` makes an Ubuntu
 Server VM from Ubuntu's cloud image, with no iso stage before it (there is no
 installer) and no app stage after it yet: it is reached over SSH
-([A Linux VM](USING.md#a-linux-vm)). It uses the same bundle, import, start,
+([A Linux VM](../guides/using.md#a-linux-vm)). It uses the same bundle, import, start,
 guest agent, locks, records and capacity guard as a Windows VM, and differs
 only in [the guest description](#the-guest-description) and in
 `internal/utmvm/linux_vm.go`, which fetches and converts the image and builds
@@ -119,7 +125,7 @@ There are four modules. The split controls what reaches the shipped binary.
 | root | the tool. `go list -deps ./cmd/irgo-winvm` is what actually reaches a user |
 | `examples` | builds against **glaze and native**, the libraries under test, which must never reach the shipped binary |
 | `docsite` | the docs site generator. Needs a markdown parser the tool has no business carrying, and imports nothing from this repository, so it can move to its own |
-| `worker` | the [Cloudflare Worker](WORKER.md), on workers-go and built to Wasm by TinyGo. Imports the root module's `wire` package only, through `replace … => ../` |
+| `worker` | the [Cloudflare Worker](../worker.md), on workers-go and built to Wasm by TinyGo. Imports the root module's `wire` package only, through `replace … => ../` |
 
 Verify the split with `go list -deps`, not by reading imports. The docsite
 module requires goldmark, its extensions, the chroma highlighter and a TOML
@@ -165,7 +171,7 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/mcpserver` | the MCP surface, with **no behaviour of its own** |
 | `internal/job` | work that outlives the caller that started it. Not in `utmvm`, because all three stages start such work and its owner must be able to report a **dead** process |
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports only `wire` and `internal/workerclient`, so `utmvm` can call it |
-| `wire` | the Worker's API declared once ([the route table](WORKER.md#the-route-table)): routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
+| `wire` | the Worker's API declared once ([the route table](../worker.md#the-route-table)): routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
 | `internal/workerclient` | the one client of the Worker, built from `wire`'s table |
 | `internal/remote` | the client of the Worker's job queue, and the loop `serve` runs, behind an `Executor` the CLI supplies; knows nothing of UTM, so it builds and is tested on every OS ([Remote jobs](#remote-jobs)) |
 | `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
@@ -199,7 +205,7 @@ value in its first row.
 
 `irgo-winvm mcp` serves the same commands over the Model Context Protocol, on
 stdin/stdout or over HTTP (`-http`, loopback by default). How an agent uses it
-is in [For agents](FOR-AGENTS.md); how it is built:
+is in [For agents](../guides/agents.md); how it is built:
 
 - **Tools are generated from the command list** in `internal/command`, so they
   are the commands and nothing else. A tool's description is the command's
@@ -223,8 +229,8 @@ is in [For agents](FOR-AGENTS.md); how it is built:
 - **Over HTTP** it is stateless Streamable HTTP with cross-origin protection in
   middleware, a 10 s read-header timeout and DNS-rebinding protection left on;
   binding wider than loopback requires `-allow-remote` and `IRGO_WINVM_TOKEN`.
-  Read the [threat model](THREAT-MODEL.md) first; the SDK options this depends
-  on are in [the roadmap's notes](ROADMAP.md#notes-for-whoever-works-on-the-http-transport).
+  Read the [threat model](threat-model.md) first; the SDK options this depends
+  on are in [the roadmap's notes](../roadmap.md#notes-for-whoever-works-on-the-http-transport).
 - **In this repository**, `.mcp.json` registers `irgo-winvm mcp` for any agent
   working here, rebuilding `.bin/irgo-winvm` first. mise's output goes to
   `/dev/null`, because stdout is the JSON-RPC channel. Before 30 Sep 2026 there
@@ -277,8 +283,8 @@ a flock file someone holds lets a third process lock a new file of that name.
 ## Remote jobs
 
 How a binary from another machine is run here; how to send one is in
-[For agents](FOR-AGENTS.md#from-another-machine-linux-windows-github), and the
-queue it comes through in [the Worker](WORKER.md#the-remote-job-queue).
+[For agents](../guides/agents.md#from-another-machine-linux-windows-github), and the
+queue it comes through in [the Worker](../worker.md#the-remote-job-queue).
 
 ```
  client (any OS, MCP, GitHub)          Worker (/api/jobs, R2 irgo-jobs)          Mac (irgo-winvm serve)
@@ -342,7 +348,7 @@ per-owner quota. Three readers, one answer: `vm-create`'s guard
 (`vm_capacity.go`, three-way, cannot tell refuses with exit 7), `capacity`
 (`capacity.go`, which runs the same `decideCapacity` for a clone with no owner),
 and `doctor`'s summary row. What a user sees is in
-[Is there room?](USING.md#is-there-room).
+[Is there room?](../guides/using.md#is-there-room).
 
 **Disk is measured the way APFS counts it** (`apfsUsage`, `sysfile_darwin.go`):
 `getattrlist` with `ATTR_CMNEXT_PRIVATESIZE`, the bytes a file shares with no
@@ -370,7 +376,7 @@ free for VMs already here. The guard's disk test is
 and the quota test, for a new VM, is the owner's VMs + 1 against
 `IRGO_WINVM_QUOTA_VMS` and its held bytes + the new reserve against
 `IRGO_WINVM_QUOTA_GIB`, both from the VM records. The memory test is
-[the one users see](USING.md#is-there-room). `capacity`'s "more clones fit" is
+[the one users see](../guides/using.md#is-there-room). `capacity`'s "more clones fit" is
 `(free - promised - 10 GiB) / 4 GiB`, and "more can run" is
 `(memory - configured for running VMs - 4 GiB) / 4 GiB`, in clones.
 
@@ -390,7 +396,7 @@ guard, so the tool's own files are never what refuses a VM.
   snapshot (free and total disk, memory and running memory, VMs, running, stale,
   promised, the tool's bytes, the clone verdict, more clones, more running),
   only when the ledger is on, because gathering it asks UTM. The Worker's view
-  keeps the newest per machine ([the Worker](WORKER.md#capacity)).
+  keeps the newest per machine ([the Worker](../worker.md#capacity)).
 - *Remote jobs through the Worker* (planned, `.plans/`): admission on a Mac is
   `utmvm.BeginCreate` for a job that makes a VM, which is this guard with the
   job's owner, and for any other job the three-way answer `utmvm.Capacity()`
@@ -404,7 +410,7 @@ Mac. The mutation locks and leases on each machine are the authority: local,
 instant, offline. The ledger is the record of them that outlives a machine and
 can be read from anywhere: which agent used which VM, on which machine, doing
 what, and what was started and never finished. It decides nothing. Where it is
-stored and how it is read is in [the Worker](WORKER.md#the-ledger).
+stored and how it is read is in [the Worker](../worker.md#the-ledger).
 
 **The tool** (`internal/ledger`, wired in `cmd/irgo-winvm/ledger.go`) reports
 the start and end of every command (exit code, duration, the error text)
@@ -487,7 +493,7 @@ Finder.
 
 Measured 30 Sep 2026: 8 MB in 1.1 s instead of 12–14 s, and 49 MB in 1.6 s
 instead of 1 min 17 s, most of the second being the guest round trip for the
-move and hash ([RESULTS](RESULTS.md#pushes-go-over-smb--measured-30-sep-2026)).
+move and hash ([Findings](../findings.md#pushes-go-over-smb--measured-30-sep-2026)).
 
 **The share** is opened by `internal/utmvm/assets/file-share.ps1`, run as SYSTEM.
 `vm-repair` runs it on an existing VM, and `-share=false` removes it again. New
@@ -503,7 +509,7 @@ nothing. It creates:
 
 It also turns **off** the `File and Printer Sharing (Restrictive)` rules. Windows
 11 24H2 enables them itself when a share is created, open to any address, and
-leaves them on after the share is removed ([traps](TRAPS.md#host-utm-and-the-iso)).
+leaves them on after the share is removed ([traps](../reference/traps.md#host-utm-and-the-iso)).
 `LocalAccountTokenFilterPolicy` is not set, because it only matters for admin
 shares (`C$`). `dev` reaches `irgo-drop` with its filtered network token,
 through the grants above.
@@ -511,7 +517,7 @@ through the grants above.
 ## SSH into the guest
 
 What `vm-ssh-create` and `vm-ssh-delete` do for their user is in
-[Using it](USING.md#ssh-into-a-vm). `VMSSHCreate` and `VMSSHDelete`
+[Using it](../guides/using.md#ssh-into-a-vm). `VMSSHCreate` and `VMSSHDelete`
 (`internal/utmvm/vm_ssh.go`) are the whole of it, and everything in the guest
 is one script, whose `-Remove` is the undo: `assets/vm-ssh.ps1` in a Windows
 guest and `assets/vm-ssh.sh` in a Linux one, taking the same arguments
@@ -521,7 +527,7 @@ Windows guest; the Linux differences are the last item.
 - **It runs the way `vm-repair` does**: the script is pushed and run as SYSTEM
   through the guest agent in a batch that captures its output and exit code
   (`appExecSteps`). `utmctl exec` alone returns neither
-  ([traps](TRAPS.md#host-utm-and-the-iso)), and this must be checked.
+  ([traps](../reference/traps.md#host-utm-and-the-iso)), and this must be checked.
 - **The key travels as a file**, pushed beside the script and deleted by it,
   not as an argument: a comment may hold anything, and `cmd` would expand it.
   `ReadSSHPublicKey` is the only reader of `-key`. It takes one line of
@@ -553,18 +559,18 @@ check against listeners on loopback, the split of the script's output from
 `ipconfig`'s, the refusals before UTM is asked). The script was run in a guest
 on 2 Oct 2026, on a fresh clone (Windows 11 ARM64 26100.4349): first run,
 login over SSH, a repeat, the undo and the undo again. The numbers are in
-[RESULTS.md](RESULTS.md#ssh-into-a-clone--measured-2-oct-2026). Not run: a
+[Findings](../findings.md#ssh-into-a-clone--measured-2-oct-2026). Not run: a
 guest account that is not an administrator, a key other than ed25519, and an
 x64 guest. The Linux script was run the same day on a VM made by
 `vm-create -os linux`
-([RESULTS.md](RESULTS.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026));
+([Findings](../findings.md#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026));
 not run: an account other than `dev`, a guest with `ufw` active, and a
 distribution other than Ubuntu 24.04.
 
 ## A Linux VM from the cloud image
 
 What `vm-create -os linux` gives its user is in
-[Using it](USING.md#a-linux-vm). `vmCreateLinux` (`internal/utmvm/linux_vm.go`)
+[Using it](../guides/using.md#a-linux-vm). `vmCreateLinux` (`internal/utmvm/linux_vm.go`)
 is the whole of it, entered from `VMCreate` after the UTM step:
 
 1. **The image**, in `media/` (`ensureLinuxImage`): one dated release pinned
@@ -583,7 +589,7 @@ is the whole of it, entered from `VMCreate` after the UTM step:
      for every VM) and a `meta-data` naming this one, written by
      `isoBuildImage` under the label `cidata`. Attached as a **VirtIO** CD:
      on a USB one cloud-init never saw it
-     ([traps](TRAPS.md#host-utm-and-the-iso)). It stays attached.
+     ([traps](../reference/traps.md#host-utm-and-the-iso)). It stays attached.
    - `config.plist`: the one template, with `linuxGuest`'s values.
 3. **The first boot**, through `EnsureReady` like any boot. Nothing is typed:
    the firmware boots the disk by itself. cloud-init makes the account,
@@ -603,7 +609,7 @@ command is as cheap to repeat as for Windows.
 ## The golden image: sealing and cloning
 
 What the golden image is for, and its commands, are in
-[Using it](USING.md#the-golden-image). There is one for each system, and one
+[Using it](../guides/using.md#the-golden-image). There is one for each system, and one
 body of code for both: the source VM's record says its system, and
 [the guest description](#the-guest-description) supplies the image's name,
 manifest, seal script and steps, shutdown and clone memory.
@@ -628,7 +634,7 @@ one step at a time with the disk's allocation printed after each):
    answer-file and guest-tools CDs, and the Linux seed CD, are dropped;
 5. clone the image once more, boot that clone until its agent answers (a
    Linux clone is then named and checked, below), run
-   [the VM conformance suite](TESTING.md#the-vm-conformance-suite) on it
+   [the VM conformance suite](../guides/testing.md#the-vm-conformance-suite) on it
    (`-check`, on by default; outside a checkout it records that it could not,
    and on Linux that the suite has no Linux checks yet), and delete it, so an
    image that does not boot is never reported made. An image whose clone
@@ -677,16 +683,16 @@ Why it is built this way:
   nothing standalone uses. Every clone is `WIN11ARM` on the network.
 - **Local only.** The Windows licence forbids passing the image to anyone else,
   and every running clone needs its own licence. There is no public download.
-  The licence terms are in `.plans/2026-09-30_1700_vm-golden-image.md`.
+  The licence terms are in `.plans/done/2026-09-30_1700_vm-golden-image.md`.
 
 The research, and what is measured and what is not, is in
-`.plans/2026-09-30_1700_vm-golden-image.md` and [RESULTS.md](RESULTS.md).
+`.plans/done/2026-09-30_1700_vm-golden-image.md` and [Findings](../findings.md).
 
 ### Every request to UTM opens it first
 
 A UTM that a request has to launch can answer it, and then never answer a VM
 start again until it is quit and reopened
-([the trap](TRAPS.md#host-utm-and-the-iso)). With UTM closed an `osascript`
+([the trap](../reference/traps.md#host-utm-and-the-iso)). With UTM closed an `osascript`
 request did that every time, and the first request of `vm-create` and
 `capacity` is one (the capacity model's memory table). So `utmctl` and
 `osascript` are run in one place, `utmCommand`
@@ -707,7 +713,7 @@ with, and which first (`ensureOpen`):
 The wait is a fixed time because UTM cannot be asked whether it has finished
 launching: for some senders that request is the harm. Which senders, and
 when, is measured and not understood
-([RESULTS](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)):
+([Findings](../findings.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)):
 after `open`, the two this tool uses were answered at 0 s with no harm, 7 of
 7, so the two seconds are margin. The lock is held across the wait
 because a second command would otherwise find the UTM the first has just
@@ -726,7 +732,7 @@ anything else that sends UTM a request, such as `utmctl` typed at a shell or
 Every boot goes through `VM.StartWithDisplay` (`internal/utmvm/vm_start.go`):
 `vm-create`, an install's reboots, and `EnsureReady` under `app-create`. A UTM
 that something outside this tool launched with a request takes the start and
-never replies ([the trap](TRAPS.md#host-utm-and-the-iso)); osascript then
+never replies ([the trap](../reference/traps.md#host-utm-and-the-iso)); osascript then
 gives up after two minutes with `AppleEvent timed out. (-1712)`. On that
 error, and no other, `recoverUTM`:
 
@@ -748,16 +754,16 @@ UTM is reached through `utmStarter` and `utmApp`, structs of functions, so
 the tests run all of this against a fake: the guard, the lock, and the order
 of quit, open, wait and list. Opening a closed UTM before the first request
 has been run against the real one
-([RESULTS](RESULTS.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)).
+([Findings](../findings.md#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026)).
 The recovery has not: no run has been made of `recoverUTM` or
 `utmApp.restart` against a UTM in that state, only its commands by hand.
 
 ## The private R2 cache: storage and transfer
 
 How to use and set up the cache, and the licence that keeps it private, are in
-[Using it](USING.md#the-private-r2-cache).
+[Using it](../guides/using.md#the-private-r2-cache).
 
-**One format, two transports.** Through [the Worker](WORKER.md#the-api)
+**One format, two transports.** Through [the Worker](../worker.md#the-api)
 (`internal/utmvm/vm_golden_worker.go`, when `IRGO_GOLDEN_URL` is set) or R2's
 S3 API with an access key (`vm_golden_r2.go`). Both are one `goldenStore`
 interface under the same code: the same manifest, the same checks, the same

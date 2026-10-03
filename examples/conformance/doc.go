@@ -29,7 +29,7 @@
 // upstream (glazecheck.KnownUpstream) so a run can tell "still broken the known
 // way" from "broken in a new way".
 //
-// Linux is out of scope for this repository (docs/ARCHITECTURE.md), so every
+// Linux is out of scope for this repository (docs/concepts/architecture.md), so every
 // test file is built for darwin and windows only; on Linux this package has no
 // tests rather than tests that fail for want of a display.
 package conformance

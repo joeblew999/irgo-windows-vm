@@ -67,7 +67,15 @@ const vmSource = "examples/vmconformance"
 // its reason — turns that into KNOWN ISSUES ONLY.
 var KnownVM []Known
 
-const vmHeader = `# VM status
+// The header opens with the front matter every page in docs/ has
+// (docs/writing.md): the file is a page under Reference.
+const vmHeader = `---
+title: VM status
+nav_order: 4
+parent: Reference
+---
+
+# VM status
 
 Does each Windows VM have every property this project relies on? The last
 recorded answer per VM, written by ` + "`irgo-winvm vm-check`" + ` and read back by

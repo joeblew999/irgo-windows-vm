@@ -17,7 +17,7 @@ import (
 // direction), and the page answering back with what its DOM actually holds.
 //
 // The script is referenced RELATIVELY, not as app://home/app.js, so this
-// measures the Events bridge rather than re-measuring docs/UPSTREAM.md §1b,
+// measures the Events bridge rather than re-measuring docs/reference/upstream.md §1b,
 // which TestAppScheme/absolute_subresources owns.
 const eventsIndex = `<!doctype html><html><head><meta charset="utf-8"></head>
 <body><ul id="log"></ul><script src="/events.js"></script></body></html>`

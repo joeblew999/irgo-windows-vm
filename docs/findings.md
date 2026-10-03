@@ -21,6 +21,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 3 Oct 2026 | [the keeper: the Mac held awake 0.5 s after it started, let go on Ctrl-C; reports in fleet-api; `claude-rig-linux` stopped by hand and started again 15 s later. Under pitchfork, `utmctl` is refused (-1743) until pitchfork is allowed to control UTM](#the-keeper--measured-3-oct-2026) |
 | 3 Oct 2026 | [the Linux golden image: sealed in 44 s (85 s with the shutdown, the clone and the verifying boot), 3.9 GiB; `vm-create -os linux` clones it and answers in 18 s, 30 s in all; two clones differ in MAC, address, machine-id and host keys](#the-linux-golden-image-and-clones-in-seconds--measured-3-oct-2026) |
 | 2 Oct 2026 | [`vm-create` on a Linux VM that has SSH on passes its check (3.6 s), where the first-boot check exits 1; a Windows clone: `vm-ssh-create` 6 min 56 s, repeat 23 s, the undo twice](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026) |
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
@@ -44,6 +45,46 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## The keeper — measured 3 Oct 2026
+
+This Mac (Mac14,10, macOS 27.0.1, UTM 4.7.5), on AC power, with
+`claude-rig-test` (Windows) and `claude-rig-linux` running and both marked
+keep-running. Why: that morning UTM and every VM stopped twice; `pmset -g log`
+has `Idle Sleep` at 10:00:09, **on battery** (100%), and `Maintenance Sleep`
+at 10:25:41 on AC. The keeper holds only on AC, as asked, so it would not have
+kept the first.
+
+**Run from a terminal** (`irgo-winvm keeper`, a build of the branch):
+
+- **The hold**: 0.5 s after it started it said it was keeping the Mac awake
+  for both VMs, and `pmset -g assertions` listed `pid 10570(caffeinate)`
+  holding `PreventUserIdleSystemSleep` and `PreventSystemSleep`, "on behalf of
+  Process ID 10559", the keeper. On Ctrl-C it let go and pmset listed no
+  assertion of that pid.
+- **The restart**: `utmctl stop claude-rig-linux` at 11:29:59. The next pass,
+  at 11:30:10, found it stopped and started it; UTM took the start in 4.5 s,
+  `utmctl status` said `started` at 11:30:15, and the pass after said so too.
+  `claude-rig-test` was not touched.
+- **The reports**: `GET /api/devices` on fleet-api listed `227c4260c884ddfa`
+  (`irgo-winvm`, `keeper`, `start`, `next_s` 300, `keeper.idle` true) with its
+  four VMs and their marks, and `/reports` the `stop` after Ctrl-C with the
+  keeper not running and holding nothing.
+
+**Under pitchfork** (`keeper-create`): `utmctl list` printed `Error from
+event: ... (OSStatus error -1743.)` and `utmctl does not work from SSH sessions
+or before logging in` on stderr, the header alone on stdout, and exited 0, so
+the keeper read UTM as having no VMs. -1743 is macOS refusing pitchfork's
+supervisor (started by launchd at boot) the Apple Events that control UTM; the
+screen showed "pitchfork wants access to control UTM.app", Allow or Don't
+Allow. The first request waited 29 s on that prompt; once it was gone, each
+was refused at once. `List` now treats that output as an error, and the keeper
+holds the Mac awake while it cannot list. Not measured: the keeper under
+pitchfork once pitchfork is allowed, and a start from there.
+
+Not measured at all: the lid closed; UTM reopened by the keeper (it is quit by
+nothing here, and was not quit to test it: unit-tested against a fake);
+Linux and Windows hosts.
 
 ## The Linux golden image, and clones in seconds — measured 3 Oct 2026
 

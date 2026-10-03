@@ -156,6 +156,8 @@ Everything the tool writes goes in one fixed place, with nothing to configure:
   golden-pull/  what vm-golden-pull downloaded: the bundle, its golden.json,
                 manifest.json once finished, .parts/ while it is not
   ledger/   events not yet sent to the ledger, and this machine's random id
+  fleet/    the keeper's: fleet-api's write token (keeper-create, 0600) and
+            spool/, the device reports not sent yet
 ```
 
 VMs live where UTM keeps them, because UTM reads nowhere else. Screenshots
@@ -173,9 +175,11 @@ chosen as documentation are committed under `docs/screens/`, separate from
 | `internal/ledger` | reports commands, leases and VM lifecycle to [the ledger](#the-ledger-client): spools locally, sends in the background, never fails a command. Imports only `wire` and `internal/workerclient`, so `utmvm` can call it |
 | `wire` | the Worker's API declared once ([the route table](../worker.md#the-route-table)): routes, scopes, error codes, key patterns, request and response types. Standard library only, so the TinyGo Worker builds it |
 | `internal/workerclient` | the one client of the Worker, built from `wire`'s table |
+| `internal/device` | reads the machine into the sections of a fleet-api device report: host, CPU, memory and disks by gopsutil on every OS; power, battery, lid and sleep from `pmset` and `ioreg` on macOS, unknown elsewhere. Knows nothing of UTM ([The keeper](#the-keeper)) |
+| `internal/keeper` | the loop `keeper` runs, behind a `UTM` interface the CLI supplies that cannot quit UTM or stop a VM; the hold on sleep (`Caffeinate`); the reports to fleet-api through its Go SDK, spooled ([The keeper](#the-keeper)) |
 | `internal/remote` | the client of the Worker's job queue, and the loop `serve` runs, behind an `Executor` the CLI supplies; knows nothing of UTM, so it builds and is tested on every OS ([Remote jobs](#remote-jobs)) |
 | `internal/glazecheck` | the conformance runner: build a suite under `examples/` into a test binary, run it here or through `app-create` (in parts, as SYSTEM and in the session, for the VM), record every test from its test2json events, with pictures. Two suites, each a `Suite` value: `Glaze` (`examples/conformance`, GLAZE-STATUS.md) and `VM` (`examples/vmconformance`, VM-STATUS.md). Needs a checkout of this repository, so it is not in `utmvm`, which must work on a machine that has never seen it |
-| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`, `capacity.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
+| `cmd/irgo-winvm` | wiring: one file per concern (`iso.go`, `vm.go`, `app.go`, `doctor.go`, `status.go`, `mcp.go`, `glaze.go`, `help.go`, `report.go`, `ledger.go`, `capacity.go`, `keeper.go`), each command's flags beside its run func; `main.go` holds dispatch and the table joining `command.All` to those funcs; `exit.go` maps errors to exit codes |
 
 ### Dependency direction
 
@@ -265,6 +269,7 @@ Every command that changes state takes the locks it declares in
 | per VM (`mutation-vm-<name>.lock`) | that VM | `vm-create`, `vm-delete`, `vm-repair`, `vm-ssh-create`, `vm-ssh-delete`, `app-create`, `app-delete`, `glaze-check -windows` |
 | stage (`mutation-stage-<caller>.lock`) | one caller's `bin/<caller>/`, its staged binaries | `app-upload`, `app-delete` |
 | capacity (`mutation-capacity.lock`) | the check for room and the record of a VM about to start, under a second | `vm-create`, which waits up to 10 s for it rather than refusing |
+| keeper (`mutation-keeper.lock`) | one keeper per Mac, so two never start the same VM | `keeper`, for as long as it runs; it takes each VM's lock too, without waiting, for the moment it starts that VM |
 | UTM launch (`mutation-utm-restart.lock`, the name it had when it guarded only the restart) | UTM while it is opened and left to finish launching, and the restart of a UTM that does not answer, until the VM it was restarted for has started | every request to UTM, inside `utmCommand`, for its check that UTM is running (0.04 s) or for the two seconds after opening it, waiting up to 30 s rather than refusing; and whatever starts a VM, inside `StartWithDisplay`, when it restarts UTM |
 
 `vm-reap` takes each VM's lock itself, one at a time, without waiting, and
@@ -337,6 +342,53 @@ Each clone is a running copy of Windows and needs its own licence; `serve`
 says so when it starts. A command that drives UTM is declared `MacOnly`, and
 `runTool` refuses it on Linux and Windows after its flags parse (so `-h`
 still answers), pointing at `remote-submit`.
+
+## The keeper
+
+What it does for its user is in [Using it](../guides/using.md#the-keeper-vms-that-stay-up).
+`internal/keeper` is the loop; `cmd/irgo-winvm/keeper.go` supplies UTM
+(`macUTM`, over `utmvm`) and the five commands. A pass:
+
+1. **Records** (`utmvm.VMRecords`): which VMs are marked
+   (`VMRecord.KeepRunning`, written by `utmvm.SetKeepRunning`, read back).
+2. **UTM**: asked of macOS whether it runs (`UTMRunning`), never UTM. Closed
+   with nothing marked: left closed, and the report lists the records as
+   stopped. Closed with something marked: `OpenUTM`, which is `ensureOpen`,
+   the two-second rule. Then `ListIfOpen`, which refuses rather than opens.
+3. **Starts**: each marked VM listed `stopped`, past its backoff, under its VM
+   lock taken without waiting, by `StartKeeping`: `StartWithDisplay`'s one
+   body with the restart left out, so a UTM that does not answer is reported
+   and never quit.
+4. **The hold**: `Caffeinate`, `caffeinate -i -s -w <pid>`, checked in
+   `pmset -g assertions` by pid both ways; held while a listed VM runs (not
+   stopped, not paused, `utmvm.VMRunning`) or the list failed, on AC power.
+5. **The report**: `device.Read` and the VMs into fleet-api's
+   `DeviceReport` (schema 1), sent by its Go SDK
+   (`github.com/joeblew999/fleet-api/sdk/go`) with the write token, one
+   attempt with a 10 s limit. Every report is written to `fleet/spool/` first
+   and the spool is sent oldest first; a failure stops the round and nothing
+   is tried for a minute; 400, 413 and 422 drop the report. The id is the
+   ledger's machine id (`ledger.MachineID`), so the Mac is one machine in both.
+   Schema 1 has no section for VMs: they go as `vms`, a field the Worker
+   stores as posted.
+
+Nothing in `UTM` quits UTM, or stops, deletes or restarts a VM, so the
+keeper cannot, whatever it decides. It is tested against fakes of UTM, the
+hold and fleet-api (`internal/keeper/keeper_test.go`), and `pmset`'s and
+`ioreg`'s output from this Mac (`internal/device/testdata/`).
+
+**`keeper-create`** writes `[daemons.irgo-winvm-keeper]` into pitchfork's
+machine-wide `~/.config/pitchfork/config.toml` (claude-rig's session is there
+too, and is never touched: the section is found by its header and ends at the
+next), checks pitchfork lists it, runs `pitchfork boot enable` if boot start is
+off, and starts it. pitchfork restarts it if it exits non-zero (`retry = true`);
+a stop is exit 0. `keeper-delete` stops it and removes the section and the
+token; `pitchfork boot` stays as it was.
+
+Not built: keeping a Linux or Windows host awake, the lid-closed mode
+(`pmset disablesleep`, root, measured first: `.plans/2026-10-01_1440_device-state-and-awake.md`),
+and moving `capacity`'s and `doctor`'s host readings onto `internal/device`.
+
 ## The capacity model
 
 What a VM costs the Mac, and how many are allowed, is one model in

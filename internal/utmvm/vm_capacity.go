@@ -32,11 +32,12 @@ const (
 	diskForClone                   // cloneReserveBytes
 	diskForInstall                 // installReserveBytes
 	diskForLinux                   // linuxReserveBytes
+	diskForLinuxClone              // cloneReserveBytes, with a Linux VM's memory
 )
 
 func (d diskNeed) bytes() int64 {
 	switch d {
-	case diskForClone:
+	case diskForClone, diskForLinuxClone:
 		return cloneReserveBytes
 	case diskForInstall:
 		return installReserveBytes
@@ -51,7 +52,7 @@ func (d diskNeed) memoryMiB() int {
 	switch d {
 	case diskForClone:
 		return cloneMemoryMiB
-	case diskForLinux:
+	case diskForLinux, diskForLinuxClone:
 		return linuxMemoryMiB
 	}
 	return vmMemoryMiB
@@ -65,6 +66,8 @@ func (d diskNeed) String() string {
 		return "an install"
 	case diskForLinux:
 		return "a Linux VM from the cloud image"
+	case diskForLinuxClone:
+		return "a clone of the Linux golden image"
 	}
 	return "nothing new"
 }

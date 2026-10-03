@@ -93,7 +93,7 @@ var All = []Command{
 	{Name: "app-upload", Summary: "stage a binary for app-create, from bytes over MCP", Undo: "app-delete", Locks: LockStage, MacOnly: true, OverMCP: true},
 	// Sealing is many minutes even with nothing to decrypt, so it is always a
 	// job over MCP.
-	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, MacOnly: true, WindowsGuest: true, OverMCP: true},
+	{Name: "vm-golden-create", Summary: "seal a disposable VM into the image vm-create clones for its system", Undo: "vm-golden-delete", Locks: LockMachine | LockVM, Detach: DetachAlways, MacOnly: true, OverMCP: true},
 	// The golden image's private R2 cache. Gigabytes either way, so always a
 	// job over MCP. An Undo with a flag names the command and the flag.
 	{Name: "vm-golden-push", Summary: "upload the golden image to your private R2 bucket", Undo: "vm-golden-push -delete", Locks: LockMachine, Detach: DetachAlways, MacOnly: true, OverMCP: true},
@@ -113,7 +113,7 @@ var All = []Command{
 	// Not destructive: what it removes comes back with one vm-ssh-create.
 	{Name: "vm-ssh-delete", Summary: "turn SSH off in the VM again and remove every authorized key", IsUndo: true, Locks: LockVM, MacOnly: true, OverMCP: true},
 	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
-	{Name: "vm-golden-delete", Summary: "remove the golden image", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
+	{Name: "vm-golden-delete", Summary: "remove a golden image (-os: which)", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
 	// Not an undo of one command: it removes whatever clones callers left
 	// behind. Dry run unless -force, like every destructive command.
 	{Name: "vm-reap", Summary: "remove clones idle past their lease; never irgo-win11 or the golden image", Locks: LockEachVM, Destructive: true, MacOnly: true, OverMCP: true},

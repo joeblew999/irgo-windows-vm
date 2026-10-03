@@ -303,13 +303,33 @@ func vmCreateLinux(opts VMCreateOptions, res *VMCreateResult, steps *int,
 	made := false
 	switch {
 	case errors.Is(fErr, ErrNoVM):
+		// From the golden image when there is one: a clone, a boot of about
+		// half a minute, and no network needed.
+		if !opts.NoGolden {
+			if _, ok, gErr := goldenEntry(linuxGuest); gErr != nil {
+				return stage("the golden image", false, "", gErr)
+			} else if ok {
+				*steps = 2
+				begin("a clone of the golden image, " + GoldenLinuxVMName)
+				if _, cErr := CloneFromGolden(opts.VMName, GuestLinux, say); cErr != nil {
+					return stage("clone the golden image", false, "", cErr)
+				}
+				res.Ready = true
+				_ = stage("clone the golden image", false, "cloned, booted, named, checked", nil)
+				return nil
+			}
+		}
 		if !opts.Install {
 			say("          there is no VM %s. Re-run with -install to make it from Ubuntu's cloud image:", opts.VMName)
 			say("          a download of %s the first time, then about a minute.", LinuxImageDownloadSize())
+			if !opts.NoGolden {
+				say("          Or make a golden image once (vm-golden-create -vm <that VM>), and every later")
+				say("          vm-create -os linux is a clone of seconds.")
+			}
 			return nil
 		}
 		if !opts.NoGolden {
-			say("          there is no Linux golden image in this version; making %s from Ubuntu's cloud image", opts.VMName)
+			say("          there is no Linux golden image (%s); making %s from Ubuntu's cloud image", GoldenLinuxVMName, opts.VMName)
 		}
 		*steps = 6
 		begin("the Ubuntu cloud image")
@@ -396,7 +416,7 @@ func vmCreateLinux(opts VMCreateOptions, res *VMCreateResult, steps *int,
 		return stage("check", false, "", cErr)
 	}
 	res.Ready = true
-	detail := "cloud-init finished, the account is there"
+	detail := "checked: cloud-init done or off, the account there"
 	if made {
 		detail += ", SSH is off"
 	}
@@ -432,6 +452,24 @@ func linuxCheck(vmRef string, made bool, say func(string, ...any)) error {
 		return fmt.Errorf("the check script exited %d in the guest: %s", res.ExitCode, lastLine(res.Stdout))
 	}
 	return nil
+}
+
+// linuxCloned gives a fresh clone of the Linux golden image the name it is
+// known by, as the seed gives a VM made from the cloud image, and checks it
+// as vm-create checks a VM it has just made. The image has cloud-init off, so
+// nothing else would: every clone would be called after the VM it was sealed
+// from.
+func linuxCloned(vmRef, name string, say func(string, ...any)) error {
+	host := seedHostname(name)
+	res, err := appExec(vmRef, []string{"hostnamectl", "set-hostname", host}, time.Minute, say)
+	if err != nil {
+		return fmt.Errorf("naming %s: %w", name, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("naming %s: hostnamectl exited %d in the guest: %s", name, res.ExitCode, lastLine(res.Stdout))
+	}
+	say("  hostname %s", host)
+	return linuxCheck(vmRef, true, say)
 }
 
 // linuxUser is the account the seed makes.

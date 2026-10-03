@@ -18,6 +18,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 // guestOS answers what the shared code asks about a guest's system.
@@ -74,7 +75,31 @@ type guestOS struct {
 	display     string
 	diskIface   DriveInterface
 	memoryMiB   int
+
+	// The golden image of this system (vm_golden.go): its name in UTM and its
+	// manifest's file under the application root; the seal script, pushed as
+	// sealFile and run one step at a time by sealRun, in sealSteps' order;
+	// the command that shuts the guest down from inside after a pause, so the
+	// batch running it can still record its exit code; and the memory a
+	// clone of the image is made with.
+	goldenName, goldenManifest string
+	sealScript, sealFile       string
+	sealRun                    func(path, step string) []string
+	sealSteps                  []sealStep
+	shutdown                   []string
+	cloneMemoryMiB             int
 }
+
+// sealStep is one step of a seal script, what it is for, and how long it may
+// take.
+type sealStep struct {
+	step, what string
+	limit      time.Duration
+}
+
+// goldenVerify is the throwaway clone vm-golden-create boots to prove the
+// image it just made boots.
+func (g guestOS) goldenVerify() string { return g.goldenName + "-verify" }
 
 // tempPath and publicPath are name inside the guest's two directories.
 func (g guestOS) tempPath(name string) string   { return g.tempDir + g.sep + name }
@@ -133,6 +158,27 @@ var windowsGuest = guestOS{
 	// on a VirtIO disk.
 	diskIface: IfaceNVMe,
 	memoryMiB: vmMemoryMiB,
+
+	goldenName:     GoldenVMName,
+	goldenManifest: "golden.json",
+	sealScript:     sealScript,
+	sealFile:       "irgo-vm-golden-seal.ps1",
+	sealRun: func(path, step string) []string {
+		return []string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, "-Step", step}
+	},
+	// The limits are generous on purpose: decryption and DISM are minutes to
+	// tens of minutes on a 30 GB install, and a limit that fires on a slow run
+	// leaves a half-sealed VM for no gain.
+	sealSteps: []sealStep{
+		{"facts", "what is there before", 2 * time.Minute},
+		{"decrypt", "turning BitLocker off and waiting for the decryption", 130 * time.Minute},
+		{"hibernate", "turning hibernation off", 2 * time.Minute},
+		{"cleanup", "cleaning up the component store (DISM /ResetBase), which takes minutes", 90 * time.Minute},
+		{"trim", "TRIM, so freed blocks can become holes on the host", 30 * time.Minute},
+		{"facts", "what is there after", 2 * time.Minute},
+	},
+	shutdown:       []string{"shutdown", "/s", "/t", "5"},
+	cloneMemoryMiB: cloneMemoryMiB,
 }
 
 // vmSSHScriptLinux is vm-ssh-create and, with -Remove, vm-ssh-delete in a
@@ -194,7 +240,28 @@ var linuxGuest = guestOS{
 	// VirtIO: the driver is in the kernel, and it is what UTM's wizard picks.
 	diskIface: IfaceVirtIO,
 	memoryMiB: linuxMemoryMiB,
+
+	goldenName:     GoldenLinuxVMName,
+	goldenManifest: "golden-linux.json",
+	sealScript:     sealScriptLinux,
+	sealFile:       "irgo-vm-golden-seal.sh",
+	sealRun:        func(path, step string) []string { return []string{"/bin/sh", path, step} },
+	sealSteps: []sealStep{
+		{"facts", "what is there before", 2 * time.Minute},
+		{"clean", "removing what makes the machine itself: machine-id, SSH host keys and keys, cloud-init's state; the network matched by name", 10 * time.Minute},
+		{"trim", "fstrim, so freed blocks can become holes on the host", 10 * time.Minute},
+		{"facts", "what is there after", 2 * time.Minute},
+	},
+	// Through systemd, after 5 s: the batch that asks still has to write its
+	// exit code, and the host still has to pull it.
+	shutdown:       []string{"systemd-run", "--on-active=5", "/bin/systemctl", "poweroff"},
+	cloneMemoryMiB: linuxMemoryMiB,
 }
+
+// sealScriptLinux makes a Linux VM fit to be copied, as root.
+//
+//go:embed assets/vm-golden-seal.sh
+var sealScriptLinux string
 
 // guests is every system a VM record can name.
 var guests = []guestOS{windowsGuest, linuxGuest}
@@ -324,6 +391,11 @@ func guestOf(vmRef string) (guestOS, error) {
 		}
 		name = e.Name
 	}
+	// A golden image and its verification clone have no record; their names
+	// say which system they hold.
+	if g, ok := goldenGuest(name); ok {
+		return g, nil
+	}
 	r, _, err := readRecord(name)
 	if err != nil {
 		return guestOS{}, fmt.Errorf("%w %s: %w", ErrGuestOS, name, err)
@@ -336,4 +408,15 @@ func guestOf(vmRef string) (guestOS, error) {
 		guestCache.Store(strings.ToUpper(vmRef), g)
 	}
 	return g, nil
+}
+
+// goldenGuest is the system whose golden image, or its verification clone,
+// is called name.
+func goldenGuest(name string) (guestOS, bool) {
+	for _, g := range guests {
+		if strings.EqualFold(name, g.goldenName) || strings.EqualFold(name, g.goldenVerify()) {
+			return g, true
+		}
+	}
+	return guestOS{}, false
 }

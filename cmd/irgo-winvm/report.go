@@ -499,7 +499,7 @@ var secretName = regexp.MustCompile(`(?i)(^IRGO_|TOKEN|SECRET|PASSW|CREDENTIAL|A
 // names, printed everywhere: the bucket is conventionally called after the
 // golden image. Redacting them would turn every golden-image path into
 // [redacted:IRGO_R2_BUCKET] and hide nothing.
-var publicValues = map[string]bool{utmvm.GoldenVMName: true, utmvm.DefaultVMName: true}
+var publicValues = map[string]bool{utmvm.GoldenVMName: true, utmvm.GoldenLinuxVMName: true, utmvm.DefaultVMName: true}
 
 // secretPatterns catch credentials the report was not told about: in a log
 // line, an error message, a URL.

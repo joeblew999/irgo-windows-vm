@@ -41,7 +41,10 @@ func TestDecideReap(t *testing.T) {
 		{"UTM has no such VM", old, reapFacts{}, ReapForget},
 		{"the owner's VM, whatever its record says", VMRecord{Name: "IRGO-WIN11", Created: old.Created}, exists, ReapKeep},
 		{"the golden image", VMRecord{Name: GoldenVMName, Created: old.Created}, exists, ReapKeep},
-		{"the golden image's verification clone", VMRecord{Name: goldenVerifyName, Created: old.Created}, exists, ReapKeep},
+		{"the golden image's verification clone", VMRecord{Name: windowsGuest.goldenVerify(), Created: old.Created}, exists, ReapKeep},
+		{"the Linux golden image", VMRecord{Name: "IRGO-GOLDEN-LINUX", Created: old.Created}, exists, ReapKeep},
+		{"the Linux golden image's verification clone", VMRecord{Name: linuxGuest.goldenVerify(), Created: old.Created}, exists, ReapKeep},
+		{"a name that only starts like a golden image", VMRecord{Name: "irgo-golden-linux2", Created: old.Created}, exists, ReapDelete},
 	}
 	for _, c := range cases {
 		d := decideReap(c.r, c.f, lease, now)

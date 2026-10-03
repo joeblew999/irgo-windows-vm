@@ -1,10 +1,13 @@
 package utmvm
 
-// The golden image: an installed Windows, sealed once, that every new VM is
-// cloned from instead of installed, so a VM of one's own is a clone and a boot
-// rather than 45 minutes of Setup.
+// The golden image: an installed system, sealed once, that every new VM of
+// that system is cloned from instead of installed, so a VM of one's own is a
+// clone and a boot rather than 45 minutes of Setup (Windows) or a download
+// and a first boot that needs the network (Linux). One per system: each
+// guestOS names its own (guest.go), and everything here takes the system's
+// description and keeps one body.
 //
-// It is a VM like any other, registered with UTM as GoldenVMName, stopped,
+// It is a VM like any other, registered with UTM under that name, stopped,
 // holding only its system disk. Everything that touches a bundle goes through
 // UTM's AppleScript, never the filesystem: macOS App Data protection refuses
 // this process ls, cat and touch in UTM's container, and UTM can do all three.
@@ -25,18 +28,39 @@ import (
 	"time"
 )
 
-// GoldenVMName is the golden image's name in UTM. One, fixed: a second golden
-// image is a second answer to "what does vm-create clone".
-const GoldenVMName = "irgo-golden"
+// GoldenVMName and GoldenLinuxVMName are the golden images' names in UTM. One
+// for each system, fixed: a second image of one system is a second answer to
+// "what does vm-create clone".
+const (
+	GoldenVMName      = "irgo-golden"
+	GoldenLinuxVMName = "irgo-golden-linux"
+)
 
-// goldenVerifyName is the throwaway clone vm-golden-create boots to prove the
-// image it just made actually boots.
-const goldenVerifyName = GoldenVMName + "-verify"
+// goldenOf is the description of the system os names, for the golden image
+// commands: empty is Windows, as in a record.
+func goldenOf(os string) (guestOS, error) {
+	g, err := guestNamed(os)
+	if err != nil {
+		return g, fmt.Errorf("%q is not a system this tool makes VMs of (%s or %s)", os, GuestWindows, GuestLinux)
+	}
+	return g, nil
+}
 
-// goldenManifestName is where what is known about the golden image is kept,
-// under the application root rather than in the bundle, which this process
-// cannot write (see above).
-const goldenManifestName = "golden.json"
+// GoldenName is the golden image of the system os names.
+func GoldenName(os string) (string, error) {
+	g, err := goldenOf(os)
+	return g.goldenName, err
+}
+
+// IsGoldenImage reports whether name is one of the golden images.
+func IsGoldenImage(name string) bool {
+	for _, g := range guests {
+		if strings.EqualFold(name, g.goldenName) {
+			return true
+		}
+	}
+	return false
+}
 
 // cloneBootWait is how long a fresh clone gets to answer. The first boot of a
 // clone is a normal boot of an installed Windows with a new network card, so
@@ -50,31 +74,16 @@ var cloneScript string
 //go:embed assets/vm-golden-seal.ps1
 var sealScript string
 
-// sealSteps is the order the seal script's steps run in, and how long each may
-// take. The limits are generous on purpose: decryption and DISM are minutes to
-// tens of minutes on a 30 GB install, and a limit that fires on a slow run
-// leaves a half-sealed VM for no gain. The step names must be the script's
-// ValidateSet (TestSealStepsAreTheScripts).
-var sealSteps = []struct {
-	step, what string
-	limit      time.Duration
-}{
-	{"facts", "what is there before", 2 * time.Minute},
-	{"decrypt", "turning BitLocker off and waiting for the decryption", 130 * time.Minute},
-	{"hibernate", "turning hibernation off", 2 * time.Minute},
-	{"cleanup", "cleaning up the component store (DISM /ResetBase), which takes minutes", 90 * time.Minute},
-	{"trim", "TRIM, so freed blocks can become holes on the host", 30 * time.Minute},
-	{"facts", "what is there after", 2 * time.Minute},
-}
-
 // GoldenManifest is what is known about the golden image, recorded when it is
 // made. doctor reports it.
 type GoldenManifest struct {
 	Source      string    `json:"source"`       // the VM it was sealed from
+	OS          string    `json:"os,omitempty"` // the system; empty is Windows, as in a VM record
 	Created     time.Time `json:"created"`      // when sealing finished
 	ToolVersion string    `json:"tool_version"` // the irgo-winvm that sealed it
 	Windows     string    `json:"windows"`      // CurrentBuild.UBR
 	WebView2    string    `json:"webview2"`     // the runtime's version, or "none"
+	System      string    `json:"system,omitempty"` // a Linux image's PRETTY_NAME and kernel
 	Allocated   int64     `json:"allocated"`    // disk.img blocks in use, bytes
 	Apparent    int64     `json:"apparent"`     // disk.img length, bytes
 	SealSeconds int       `json:"seal_seconds"` // how long sealing took
@@ -82,24 +91,32 @@ type GoldenManifest struct {
 	VMCheck     string    `json:"vm_check"`     // the VM suite's verdict on that clone, or why it was not run
 }
 
-// GoldenManifestPath is where the manifest lives.
-func GoldenManifestPath() string { return filepath.Join(appRoot(), goldenManifestName) }
+// GoldenManifestPath is where the manifest of the system os names lives,
+// under the application root rather than in the bundle, which this process
+// cannot write (see above).
+func GoldenManifestPath(os string) string {
+	g, _ := goldenOf(os)
+	return g.manifestPath()
+}
 
-// readGoldenManifest returns the manifest, or an error when there is none or
+// manifestPath is where g's golden image manifest lives.
+func (g guestOS) manifestPath() string { return filepath.Join(appRoot(), g.goldenManifest) }
+
+// readGoldenManifest returns g's manifest, or an error when there is none or
 // it cannot be read.
-func readGoldenManifest() (GoldenManifest, error) {
+func readGoldenManifest(g guestOS) (GoldenManifest, error) {
 	var m GoldenManifest
-	b, err := os.ReadFile(GoldenManifestPath())
+	b, err := os.ReadFile(g.manifestPath())
 	if err != nil {
 		return m, err
 	}
 	if err := json.Unmarshal(b, &m); err != nil {
-		return m, fmt.Errorf("reading %s: %w", GoldenManifestPath(), err)
+		return m, fmt.Errorf("reading %s: %w", g.manifestPath(), err)
 	}
 	return m, nil
 }
 
-func writeGoldenManifest(m GoldenManifest) error {
+func writeGoldenManifest(g guestOS, m GoldenManifest) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -111,17 +128,18 @@ func writeGoldenManifest(m GoldenManifest) error {
 	// half a manifest. The write's error is checked: a full disk shows up
 	// there, and a manifest that looks written and is not would report a
 	// golden image nobody made.
-	tmp := GoldenManifestPath() + ".tmp"
+	tmp := g.manifestPath() + ".tmp"
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, GoldenManifestPath())
+	return os.Rename(tmp, g.manifestPath())
 }
 
 // GoldenStatus is what doctor reports about the golden image, from the
 // filesystem alone: stat works on a known path in UTM's container, and the
 // manifest is ours.
 type GoldenStatus struct {
+	Name      string // its name in UTM
 	Bundle    string
 	Present   bool
 	Allocated int64
@@ -131,10 +149,15 @@ type GoldenStatus struct {
 	Manifest     *GoldenManifest // nil when there is none
 }
 
-// Golden reports the golden image.
-func Golden() GoldenStatus {
-	s := GoldenStatus{ManifestPath: GoldenManifestPath()}
-	if b, err := BundlePath(GoldenVMName); err == nil {
+// Golden reports the golden image of the system os names; empty is Windows.
+func Golden(os string) GoldenStatus {
+	g, _ := goldenOf(os)
+	return golden(g)
+}
+
+func golden(g guestOS) GoldenStatus {
+	s := GoldenStatus{Name: g.goldenName, ManifestPath: g.manifestPath()}
+	if b, err := BundlePath(g.goldenName); err == nil {
 		s.Bundle = b
 		if fi, sErr := os.Stat(DiskPath(b)); sErr == nil {
 			s.Present = true
@@ -142,7 +165,7 @@ func Golden() GoldenStatus {
 			s.Allocated, _ = diskUsage(DiskPath(b))
 		}
 	}
-	if m, err := readGoldenManifest(); err == nil {
+	if m, err := readGoldenManifest(g); err == nil {
 		s.Manifest = &m
 	}
 	return s
@@ -153,10 +176,10 @@ func Golden() GoldenStatus {
 // longer the one its manifest describes.
 var ErrGoldenRunning = errors.New("the golden image is running")
 
-// goldenEntry finds the golden image. ok is false when there is none; err is
+// goldenEntry finds g's golden image. ok is false when there is none; err is
 // set when UTM could not be asked, which is not the same as "none".
-func goldenEntry() (Entry, bool, error) {
-	e, err := Find(GoldenVMName)
+func goldenEntry(g guestOS) (Entry, bool, error) {
+	e, err := Find(g.goldenName)
 	if err == nil {
 		return e, true, nil
 	}
@@ -178,7 +201,8 @@ type GoldenCreateOptions struct {
 	Verify func(vm string) (verdict string, err error)
 }
 
-// GoldenCreate seals Source and registers the result as GoldenVMName.
+// GoldenCreate seals Source and registers the result as the golden image of
+// the system Source holds, which its record says.
 //
 // The guard against sealing the shared VM is the caller's (it needs -force,
 // which is the CLI's), and so is the lock. What it does, each step announced
@@ -186,12 +210,14 @@ type GoldenCreateOptions struct {
 // fall out of every run:
 //
 //  1. boot Source and wait for its agent;
-//  2. in the guest, as SYSTEM: decrypt, hibernation off, component cleanup,
-//     TRIM (assets/vm-golden-seal.ps1);
+//  2. in the guest, the system's seal script, one step at a time: on Windows
+//     as SYSTEM, decrypt, hibernation off, component cleanup, TRIM
+//     (assets/vm-golden-seal.ps1); on Linux as root, what makes the machine
+//     itself removed, cloud-init off, fstrim (assets/vm-golden-seal.sh);
 //  3. shut the guest down from inside and wait for UTM to say stopped;
-//  4. clone it through UTM as GoldenVMName, keeping only the system disk;
+//  4. clone it through UTM as the golden image, keeping only the system disk;
 //  5. prove it boots: clone the golden image, boot the clone, wait for its
-//     agent, delete the clone;
+//     agent (and on Linux give it its name and check it), delete the clone;
 //  6. write the manifest.
 //
 // Source is left sealed and stopped, and is still an ordinary VM: vm-delete
@@ -201,24 +227,28 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	var m GoldenManifest
 	began := time.Now()
 
-	if _, ok, err := goldenEntry(); err != nil {
+	src, err := Find(opts.Source)
+	if err != nil {
+		return m, err
+	}
+	g, err := guestOf(src.UUID)
+	if err != nil {
+		return m, err
+	}
+	if _, ok, err := goldenEntry(g); err != nil {
 		return m, err
 	} else if ok {
 		// Idempotent, like every make here: done is reported, not redone.
 		// Rebuilding means deleting first, on purpose — it is an hour of work
 		// to get back.
 		say("STEP 1/6  the golden image")
-		say("          %s is already registered; vm-golden-delete -force to make a new one", GoldenVMName)
-		if existing, rErr := readGoldenManifest(); rErr == nil {
+		say("          %s is already registered; vm-golden-delete -os %s -force to make a new one", g.goldenName, g.name)
+		if existing, rErr := readGoldenManifest(g); rErr == nil {
 			return existing, nil
 		}
 		return m, nil
 	}
 
-	src, err := Find(opts.Source)
-	if err != nil {
-		return m, err
-	}
 	bundle, err := BundlePath(src.Name)
 	if err != nil {
 		return m, err
@@ -226,6 +256,9 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	disk := DiskPath(bundle)
 	m.Source = src.Name
 	m.ToolVersion = opts.ToolVersion
+	if g.name != GuestWindows {
+		m.OS = g.name
+	}
 
 	if err := CheckAutomation(); err != nil {
 		return m, err
@@ -245,26 +278,27 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 	}
 	say("          disk.img: %s", allocated())
 
-	say("STEP 2/6  sealing Windows, in the guest, as SYSTEM")
-	// vm-repair first, so every clone starts with what it sets: the password
-	// that never expires, Windows Update kept quiet, WebView2 registered, and
-	// the SMB share Push uses — a source installed before the answer file
-	// opened that share would otherwise give clones the 0.4 MB/s path.
-	say("          vm-repair: password, Windows Update, WebView2, the SMB share, the desktop")
-	if err := VMRepair(src.UUID, shareUser, true, false, func(f string, a ...any) { say("            "+f, a...) }); err != nil {
-		return m, fmt.Errorf("repairing %s before sealing: %w", src.Name, err)
+	say("STEP 2/6  sealing %s, in the guest, as %s", g.label, g.sshAs)
+	if g.name == GuestWindows {
+		// vm-repair first, so every clone starts with what it sets: the
+		// password that never expires, Windows Update kept quiet, WebView2
+		// registered, and the SMB share Push uses — a source installed before
+		// the answer file opened that share would otherwise give clones the
+		// 0.4 MB/s path.
+		say("          vm-repair: password, Windows Update, WebView2, the SMB share, the desktop")
+		if err := VMRepair(src.UUID, shareUser, true, false, func(f string, a ...any) { say("            "+f, a...) }); err != nil {
+			return m, fmt.Errorf("repairing %s before sealing: %w", src.Name, err)
+		}
 	}
-	guest := guestPublic + `\irgo-vm-golden-seal.ps1`
-	if err := pushScript(src.UUID, guest, sealScript); err != nil {
+	guest := g.publicPath(g.sealFile)
+	if err := pushScript(src.UUID, guest, g.sealScript); err != nil {
 		return m, fmt.Errorf("pushing the seal script: %w", err)
 	}
 	facts := map[string]string{}
-	for _, st := range sealSteps {
+	for _, st := range g.sealSteps {
 		say("          %s", st.what)
 		t0 := time.Now()
-		res, xErr := appExec(src.UUID, []string{
-			"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", guest, "-Step", st.step,
-		}, st.limit, say)
+		res, xErr := appExec(src.UUID, g.sealRun(guest, st.step), st.limit, say)
 		if xErr != nil {
 			return m, fmt.Errorf("seal step %s: %w", st.step, xErr)
 		}
@@ -282,70 +316,75 @@ func GoldenCreate(opts GoldenCreateOptions, say func(string, ...any)) (GoldenMan
 		}
 		say("            [%s] disk.img: %s", time.Since(t0).Round(time.Second), allocated())
 	}
-	m.Windows, m.WebView2 = facts["windows"], facts["webview2"]
+	m.Windows, m.WebView2, m.System = facts["windows"], facts["webview2"], facts["system"]
 	m.SealSeconds = int(time.Since(began).Seconds())
 
 	say("STEP 3/6  shutting %s down from inside", src.Name)
-	if err := shutdownGuest(src.UUID, say); err != nil {
+	if err := shutdownGuest(src.UUID, g, say); err != nil {
 		return m, err
 	}
 	say("          stopped; disk.img: %s", allocated())
 
-	say("STEP 4/6  cloning it as %s, through UTM, keeping only the system disk", GoldenVMName)
+	say("STEP 4/6  cloning it as %s, through UTM, keeping only the system disk", g.goldenName)
 	t0 := time.Now()
 	reprotect := releaseLegacyMedia(bundle, say)
-	cErr := cloneVM(src.Name, GoldenVMName, randomMAC(), 0)
+	cErr := cloneVM(src.Name, g.goldenName, randomMAC(), 0, g.diskIface)
 	reprotect()
 	if cErr != nil {
 		return m, cErr
 	}
 	say("          cloned in %s", time.Since(t0).Round(time.Millisecond))
 
-	g := Golden()
-	if !g.Present {
-		return m, fmt.Errorf("UTM reported the clone made, and there is no disk at %s", Home(DiskPath(g.Bundle)))
+	gs := golden(g)
+	if !gs.Present {
+		return m, fmt.Errorf("UTM reported the clone made, and there is no disk at %s", Home(DiskPath(gs.Bundle)))
 	}
-	m.Allocated, m.Apparent = g.Allocated, g.Apparent
-	say("          %s: %s allocated of %s", Home(g.Bundle), HumanBytes(g.Allocated), HumanBytes(g.Apparent))
+	m.Allocated, m.Apparent = gs.Allocated, gs.Apparent
+	say("          %s: %s allocated of %s", Home(gs.Bundle), HumanBytes(gs.Allocated), HumanBytes(gs.Apparent))
 
-	say("STEP 5/6  proving it boots: a clone of it, %s, until its agent answers", goldenVerifyName)
+	verify := g.goldenVerify()
+	say("STEP 5/6  proving it boots: a clone of it, %s, until its agent answers", verify)
 	// A verification clone left by an earlier run that failed here is ours
 	// and would make the clone refuse its name.
-	if _, fErr := Find(goldenVerifyName); fErr == nil {
-		if _, dErr := Delete(goldenVerifyName, true, func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
-			return m, fmt.Errorf("removing the %s an earlier run left: %w", goldenVerifyName, dErr)
+	if _, fErr := Find(verify); fErr == nil {
+		if _, dErr := Delete(verify, true, func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
+			return m, fmt.Errorf("removing the %s an earlier run left: %w", verify, dErr)
 		}
 	}
-	boot, err := cloneAndBoot(goldenVerifyName, say)
+	boot, err := cloneAndBoot(g, verify, say)
 	if err != nil {
 		return m, fmt.Errorf("the golden image did not boot a clone: %w\n"+
 			"  %s is left for you to look at (vm-screen -vm %s); vm-delete removes it, and\n"+
-			"  vm-golden-delete removes the golden image", err, goldenVerifyName, goldenVerifyName)
+			"  vm-golden-delete -os %s removes the golden image", err, verify, verify, g.name)
 	}
 	m.BootSeconds = int(boot.Seconds())
-	say("          %s answered %s after it was started", goldenVerifyName, boot.Round(time.Second))
-	if err := verifyGolden(opts.Verify, goldenVerifyName, &m, say); err != nil {
+	say("          %s answered %s after it was started", verify, boot.Round(time.Second))
+	if err := verifyGolden(opts.Verify, verify, &m, say); err != nil {
 		// Unregistered, so vm-create cannot clone an image that failed. Cheap
 		// to undo: the source is still sealed, and registering it again is a
 		// clone of seconds.
-		if dErr := GoldenDelete(func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
+		if dErr := goldenDelete(g, func(f string, a ...any) { say("          "+f, a...) }); dErr != nil {
 			return m, fmt.Errorf("%w; and removing the golden image failed too: %v", err, dErr)
 		}
 		return m, fmt.Errorf("%w\n  the golden image is removed, so nothing clones it; %s is left to look at\n"+
 			"  (vm-screen -vm %s, vm-status), and %s is still sealed: fix it, then vm-golden-create -vm %s again",
-			err, goldenVerifyName, goldenVerifyName, src.Name, src.Name)
+			err, verify, verify, src.Name, src.Name)
 	}
-	if _, err := Delete(goldenVerifyName, true, func(f string, a ...any) { say("          "+f, a...) }); err != nil {
-		return m, fmt.Errorf("deleting %s: %w", goldenVerifyName, err)
+	if _, err := Delete(verify, true, func(f string, a ...any) { say("          "+f, a...) }); err != nil {
+		return m, fmt.Errorf("deleting %s: %w", verify, err)
 	}
 
 	say("STEP 6/6  recording it")
 	m.Created = time.Now().UTC()
-	if err := writeGoldenManifest(m); err != nil {
+	if err := writeGoldenManifest(g, m); err != nil {
 		return m, err
 	}
-	say("          %s", Home(GoldenManifestPath()))
-	say("          sealed in %s, Windows %s, WebView2 %s", time.Duration(m.SealSeconds)*time.Second, m.Windows, m.WebView2)
+	say("          %s", Home(g.manifestPath()))
+	if g.name == GuestWindows {
+		say("          sealed in %s, Windows %s, WebView2 %s", time.Duration(m.SealSeconds)*time.Second, m.Windows, m.WebView2)
+	} else {
+		say("          sealed in %s, %s", time.Duration(m.SealSeconds)*time.Second, m.System)
+	}
 	return m, nil
 }
 
@@ -377,10 +416,19 @@ func verifyGolden(verify func(string) (string, error), vm string, m *GoldenManif
 	return nil
 }
 
-// GoldenDelete removes the golden image and its manifest. Nothing there is
-// success: an undo has to be runnable twice. The -force guard is the caller's.
-func GoldenDelete(say func(string, ...any)) error {
-	e, ok, err := goldenEntry()
+// GoldenDelete removes the golden image of the system os names, and its
+// manifest. Nothing there is success: an undo has to be runnable twice. The
+// -force guard is the caller's.
+func GoldenDelete(os string, say func(string, ...any)) error {
+	g, err := goldenOf(os)
+	if err != nil {
+		return err
+	}
+	return goldenDelete(g, say)
+}
+
+func goldenDelete(g guestOS, say func(string, ...any)) error {
+	e, ok, err := goldenEntry(g)
 	if err != nil {
 		return err
 	}
@@ -389,35 +437,40 @@ func GoldenDelete(say func(string, ...any)) error {
 			return err
 		}
 	} else {
-		say("UTM knows no VM %q", GoldenVMName)
+		say("UTM knows no VM %q", g.goldenName)
 	}
 	// The manifest goes whether or not the VM was there: a manifest describing
 	// a golden image that is gone is what doctor would then report.
-	if err := os.Remove(GoldenManifestPath()); err == nil {
-		say("removed %s", Home(GoldenManifestPath()))
+	if err := os.Remove(g.manifestPath()); err == nil {
+		say("removed %s", Home(g.manifestPath()))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
 }
 
-// CloneFromGolden makes name a clone of the golden image and boots it.
+// CloneFromGolden makes name a clone of the golden image of the system os
+// names, and boots it.
 //
 // It reports whether there was a golden image to clone: false with a nil
 // error means there is none, and the caller falls back to installing, saying
 // so. The machine lock is taken for the clone itself — seconds — so it cannot
 // race vm-golden-delete; the boot runs under the caller's VM lock only.
-func CloneFromGolden(name string, say func(string, ...any)) (bool, error) {
-	g, ok, err := goldenEntry()
+func CloneFromGolden(name, os string, say func(string, ...any)) (bool, error) {
+	g, err := goldenOf(os)
+	if err != nil {
+		return false, err
+	}
+	img, ok, err := goldenEntry(g)
 	if err != nil {
 		return false, err
 	}
 	if !ok {
 		return false, nil
 	}
-	if strings.EqualFold(g.Status, statusStarted) || strings.EqualFold(g.Status, "paused") {
+	if strings.EqualFold(img.Status, statusStarted) || strings.EqualFold(img.Status, "paused") {
 		return true, fmt.Errorf("%w (%s): it must stay stopped. Stop it in UTM; "+
-			"if it was changed, vm-golden-delete -force and make it again", ErrGoldenRunning, g.Status)
+			"if it was changed, vm-golden-delete -os %s -force and make it again", ErrGoldenRunning, img.Status, g.name)
 	}
 	if err := CheckAutomation(); err != nil {
 		return true, err
@@ -428,32 +481,33 @@ func CloneFromGolden(name string, say func(string, ...any)) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	say("… cloning %s as %s", GoldenVMName, name)
+	say("… cloning %s as %s", g.goldenName, name)
 	t0 := time.Now()
-	cErr := cloneVM(GoldenVMName, name, randomMAC(), cloneMemoryMiB)
+	cErr := cloneVM(g.goldenName, name, randomMAC(), g.cloneMemoryMiB, g.diskIface)
 	release()
 	if cErr != nil {
 		return true, cErr
 	}
 	say("  cloned in %s", time.Since(t0).Round(time.Millisecond))
-	if _, err := bootClone(name, say); err != nil {
+	if _, err := bootClone(g, name, say); err != nil {
 		return true, err
 	}
 	return true, nil
 }
 
-// cloneAndBoot clones the golden image as name and boots it, for a caller
+// cloneAndBoot clones g's golden image as name and boots it, for a caller
 // that already holds the machine lock.
-func cloneAndBoot(name string, say func(string, ...any)) (time.Duration, error) {
-	if err := cloneVM(GoldenVMName, name, randomMAC(), cloneMemoryMiB); err != nil {
+func cloneAndBoot(g guestOS, name string, say func(string, ...any)) (time.Duration, error) {
+	if err := cloneVM(g.goldenName, name, randomMAC(), g.cloneMemoryMiB, g.diskIface); err != nil {
 		return 0, err
 	}
-	return bootClone(name, say)
+	return bootClone(g, name, say)
 }
 
 // bootClone starts a fresh clone and waits for its agent, returning how long
-// that took.
-func bootClone(name string, say func(string, ...any)) (time.Duration, error) {
+// that took. A Linux clone is then given its own name and checked
+// (linuxCloned): its image has neither, since cloud-init is off in it.
+func bootClone(g guestOS, name string, say func(string, ...any)) (time.Duration, error) {
 	e, err := Find(name)
 	if err != nil {
 		return 0, fmt.Errorf("UTM reported the clone made, and does not list it: %w", err)
@@ -469,19 +523,25 @@ func bootClone(name string, say func(string, ...any)) (time.Duration, error) {
 	}
 	took := time.Since(t0)
 	say("  %s answered in %s", e.Name, took.Round(time.Second))
+	if g.name == GuestLinux {
+		if err := linuxCloned(e.UUID, e.Name, say); err != nil {
+			return took, err
+		}
+	}
 	return took, nil
 }
 
 // cloneVM clones src as dst through UTM with a fresh MAC and memMiB of memory
-// (0 keeps src's), keeping only the system disk, and checks that the MAC and
-// the memory took. See assets/utm-clone.applescript.
-func cloneVM(src, dst, mac string, memMiB int) error {
+// (0 keeps src's), keeping only the system disk, the one fixed drive on the
+// disk interface iface, and checks that the MAC and the memory took. See
+// assets/utm-clone.applescript.
+func cloneVM(src, dst, mac string, memMiB int, iface DriveInterface) error {
 	if _, err := Find(dst); err == nil {
 		return fmt.Errorf("a VM named %q already exists; vm-delete it first or choose another name", dst)
 	} else if !errors.Is(err, ErrNoVM) {
 		return err
 	}
-	out, err := utmScript(fmt.Sprintf(cloneScript, src, memMiB, dst, mac, dst), 5*time.Minute)
+	out, err := utmScript(cloneScriptFor(src, dst, mac, memMiB, iface), 5*time.Minute)
 	if err != nil {
 		return fmt.Errorf("cloning %s as %s: %w", src, dst, err)
 	}
@@ -504,14 +564,22 @@ func cloneVM(src, dst, mac string, memMiB int) error {
 	return nil
 }
 
-// shutdownGuest asks Windows to shut down and waits for UTM to report the VM
-// stopped. From inside, not `utmctl stop`, so Windows writes everything out
-// and the disk is consistent when it is copied.
-func shutdownGuest(vmRef string, say func(string, ...any)) error {
-	// /t 5, not /t 0: the batch that runs this still has to write its exit
-	// code, and the host still has to pull it, before Windows goes away.
-	if _, err := appExec(vmRef, []string{"shutdown", "/s", "/t", "5"}, time.Minute, say); err != nil {
-		return fmt.Errorf("asking Windows to shut down: %w", err)
+// cloneScriptFor renders the clone script. iface is an AppleScript enumerator
+// of UTM's (NVMe, VirtIO), written bare: it is a constant of this package,
+// never input.
+func cloneScriptFor(src, dst, mac string, memMiB int, iface DriveInterface) string {
+	return fmt.Sprintf(cloneScript, src, iface, iface, memMiB, dst, mac, dst)
+}
+
+// shutdownGuest asks the guest to shut down and waits for UTM to report the
+// VM stopped. From inside, not `utmctl stop`, so the guest writes everything
+// out and the disk is consistent when it is copied.
+func shutdownGuest(vmRef string, g guestOS, say func(string, ...any)) error {
+	// After a pause, not at once: the batch that runs this still has to write
+	// its exit code, and the host still has to pull it, before the guest goes
+	// away.
+	if _, err := appExec(vmRef, g.shutdown, time.Minute, say); err != nil {
+		return fmt.Errorf("asking %s to shut down: %w", g.label, err)
 	}
 	vm := Named(vmRef)
 	deadline := time.Now().Add(5 * time.Minute)
@@ -550,7 +618,7 @@ func finishInstall(vmRef string, logf func(string, ...any)) error {
 		time.Sleep(15 * time.Second)
 	}
 	logf("first-logon commands done; shutting down from inside to take the install medium out")
-	if err := shutdownGuest(vmRef, say); err != nil {
+	if err := shutdownGuest(vmRef, windowsGuest, say); err != nil {
 		return err
 	}
 	done, err := ejectInstallMedia(vmRef)

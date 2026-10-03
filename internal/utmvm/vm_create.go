@@ -148,12 +148,12 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 	if _, fErr := Find(opts.VMName); errors.Is(fErr, ErrNoVM) {
 		if opts.NoGolden {
 			say("          -golden=false: installing from the ISO, whether or not there is a golden image")
-		} else if _, ok, gErr := goldenEntry(); gErr != nil {
+		} else if _, ok, gErr := goldenEntry(windowsGuest); gErr != nil {
 			return res, stage("the golden image", false, "", gErr)
 		} else if ok {
 			steps = 2
 			begin("a clone of the golden image, " + GoldenVMName)
-			if _, cErr := CloneFromGolden(opts.VMName, say); cErr != nil {
+			if _, cErr := CloneFromGolden(opts.VMName, GuestWindows, say); cErr != nil {
 				return res, stage("clone the golden image", false, "", cErr)
 			}
 			res.Ready = true
@@ -173,7 +173,7 @@ func VMCreate(opts VMCreateOptions, log func(string)) (VMCreateResult, error) {
 				}
 				_ = stage("pull the golden image", false, "pulled and imported as "+GoldenVMName, nil)
 				begin("a clone of the golden image, " + GoldenVMName)
-				if _, cErr := CloneFromGolden(opts.VMName, say); cErr != nil {
+				if _, cErr := CloneFromGolden(opts.VMName, GuestWindows, say); cErr != nil {
 					return res, stage("clone the golden image", false, "", cErr)
 				}
 				res.Ready = true

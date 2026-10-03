@@ -17,12 +17,17 @@ fail() { echo "$1"; exit 1; }
 
 # Waits for the first boot's work to end: the account, the packages and the
 # commands in user-data. Anything but "done" with exit 0 is a seed that did
-# not apply cleanly.
-cloud-init status --wait >/dev/null 2>&1
-rc=$?
-state=$(cloud-init status 2>/dev/null | head -n 1)
-[ "$rc" -eq 0 ] || fail "cloud-init: $state, exit $rc; /var/log/cloud-init-output.log in the guest says why"
-echo "cloud-init: ok ($state)"
+# not apply cleanly. A clone of the golden image has cloud-init off: its
+# first boot was the image's.
+if [ -e /etc/cloud/cloud-init.disabled ]; then
+  echo "cloud-init: off (a clone of the golden image, whose seal turned it off)"
+else
+  cloud-init status --wait >/dev/null 2>&1
+  rc=$?
+  state=$(cloud-init status 2>/dev/null | head -n 1)
+  [ "$rc" -eq 0 ] || fail "cloud-init: $state, exit $rc; /var/log/cloud-init-output.log in the guest says why"
+  echo "cloud-init: ok ($state)"
+fi
 
 id "$user" >/dev/null 2>&1 || fail "account: there is no account $user, so cloud-init did not apply the seed"
 sudo -u "$user" sudo -n true 2>/dev/null || fail "account: $user cannot use sudo without a password"
@@ -38,4 +43,4 @@ else
 fi
 
 echo "disk: ok (/ is $(df -h --output=size / | tail -n 1 | tr -d ' '), $(df -h --output=used / | tail -n 1 | tr -d ' ') used)"
-echo "system: $(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r), hostname $(hostname)"
+echo "system: $(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r), hostname $(hostname), machine-id $(cut -c1-12 /etc/machine-id)"

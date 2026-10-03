@@ -19,7 +19,7 @@ func vmCreateFlags() *flag.FlagSet {
 	fs.String("os", utmvm.GuestWindows, "the system in a new VM: windows, or linux (Ubuntu Server 24.04 from its cloud image; needs -vm and -install). A VM that exists keeps its own")
 	fs.Bool("install", false, "make the VM when there is no golden image to clone: the unattended Windows install (about 45 minutes), or with -os linux a download and a first boot (about a minute)")
 	fs.Duration("timeout", 60*time.Minute, "overall limit for the install")
-	fs.Bool("golden", true, "clone the golden image when there is one, instead of installing (false: install from the ISO)")
+	fs.Bool("golden", true, "clone the golden image of the VM's system when there is one, instead of installing (false: install from the ISO, or with -os linux make it from the cloud image)")
 	fs.Bool("overcommit", false, "start the VM even when the running VMs' configured memory leaves this Mac too little; they will swap")
 	return fs
 }
@@ -101,7 +101,7 @@ func createOS(v values, name string) (string, error) {
 		return want, nil
 	}
 	// Leaving -vm out lands here too: the default VM is the first of these.
-	for _, reserved := range []string{utmvm.DefaultVMName, utmvm.GoldenVMName} {
+	for _, reserved := range []string{utmvm.DefaultVMName, utmvm.GoldenVMName, utmvm.GoldenLinuxVMName} {
 		if strings.EqualFold(name, reserved) {
 			return "", fmt.Errorf("%w: -os %s needs -vm <name> with a name of its own: %s is a name every command takes "+
 				"to be a Windows VM, and there is no default %s one", errUsage, want, reserved, want)

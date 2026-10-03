@@ -195,8 +195,11 @@ func Capacity() CapacityReport {
 		switch {
 		case strings.EqualFold(v.Name, DefaultVMName):
 			u.Kind = "owner"
-		case strings.EqualFold(v.Name, GoldenVMName):
+		case IsGoldenImage(v.Name):
 			u.Kind = "golden"
+			if g, ok := goldenGuest(v.Name); ok {
+				u.OS = g.name
+			}
 		}
 		if vmUsesMemory(v.Status) {
 			r.RunningMemory += int64(v.MiB) << 20

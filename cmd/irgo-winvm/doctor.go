@@ -117,7 +117,7 @@ func measureSetup() setup {
 		_, sErr := os.Stat(utmvm.DiskPath(b))
 		s.vm = sErr == nil
 	}
-	s.golden = utmvm.Golden().Present
+	s.golden = utmvm.Golden(utmvm.GuestWindows).Present
 	r, cached, err := utmvm.GoldenCacheFromEnv()
 	if cached {
 		s.cache = r.Where()

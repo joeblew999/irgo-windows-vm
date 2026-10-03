@@ -141,10 +141,10 @@ func readVMDisk(name string) vmDisk {
 }
 
 // held is what a VM holds of the disk: what it has written of its own, or
-// its reserve when it has written less. The golden image holds only what it
+// its reserve when it has written less. A golden image holds only what it
 // has written: it stays stopped and never grows.
 func held(name string, d vmDisk) int64 {
-	if strings.EqualFold(name, GoldenVMName) {
+	if IsGoldenImage(name) {
 		return d.Private
 	}
 	return max(d.Private, cloneReserveBytes)

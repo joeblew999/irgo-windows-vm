@@ -85,8 +85,12 @@ func reportVMs(say func(string, ...any)) {
 		switch {
 		case strings.EqualFold(e.Name, utmvm.DefaultVMName):
 			owner = "(the machine's owner; reserved)"
-		case strings.EqualFold(e.Name, utmvm.GoldenVMName):
+		case utmvm.IsGoldenImage(e.Name):
 			owner = "(golden image; shared)"
+			// It has no record; its name says which system it holds.
+			if g, err := utmvm.GuestOSOf(e.Name); err == nil {
+				os = g
+			}
 		}
 		if r, ok := byName[strings.ToLower(e.Name)]; ok {
 			owner = r.Owner

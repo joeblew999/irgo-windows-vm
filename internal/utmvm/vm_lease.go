@@ -167,14 +167,14 @@ func (r VMRecord) lastUse() time.Time {
 func (r VMRecord) Idle(now time.Time) time.Duration { return now.Sub(r.lastUse()) }
 
 // protectedVM reports whether name is never reaped whatever its record says:
-// the owner's VM, the golden image and the clone that verifies it.
+// the owner's VM, and each system's golden image and the clone that verifies
+// it.
 func protectedVM(name string) bool {
-	for _, p := range []string{DefaultVMName, GoldenVMName, goldenVerifyName} {
-		if strings.EqualFold(name, p) {
-			return true
-		}
+	if strings.EqualFold(name, DefaultVMName) {
+		return true
 	}
-	return false
+	_, golden := goldenGuest(name)
+	return golden
 }
 
 // ReapAction is what vm-reap does about one record.
@@ -355,11 +355,20 @@ func BeginCreate(name string, c Caller, osName string, noGolden, overcommit bool
 	switch {
 	case exists:
 	case g.name == GuestLinux:
+		// A clone starts from the image's blocks, as a Windows clone does,
+		// so it is allowed the same growth past them.
 		plan.Disk = diskForLinux
+		if !noGolden {
+			if _, ok, gErr := goldenEntry(linuxGuest); gErr != nil {
+				return nil, fmt.Errorf("%w: cannot tell whether there is a Linux golden image: %v", ErrNoRoom, gErr)
+			} else if ok {
+				plan.Disk = diskForLinuxClone
+			}
+		}
 	default:
 		plan.Disk = diskForInstall
 		if !noGolden {
-			if _, ok, gErr := goldenEntry(); gErr != nil {
+			if _, ok, gErr := goldenEntry(windowsGuest); gErr != nil {
 				return nil, fmt.Errorf("%w: cannot tell whether there is a golden image: %v", ErrNoRoom, gErr)
 			} else if ok {
 				plan.Disk = diskForClone

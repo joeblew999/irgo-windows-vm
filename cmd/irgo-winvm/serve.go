@@ -48,7 +48,7 @@ func runServe(v values, _ []string) error {
 	}
 	c.Runner = v.String("name")
 	say := utmvm.Printer("serve")
-	if g := utmvm.Golden(); !g.Present {
+	if g := utmvm.Golden(utmvm.GuestWindows); !g.Present {
 		return fmt.Errorf("%w: no golden image at %s; make one with vm-golden-create (or vm-golden-pull) first. "+
 			"serve runs every job on a clone of it and never installs Windows for a job", errUsage, utmvm.Home(g.Bundle))
 	}
@@ -113,7 +113,7 @@ func (e macExecutor) run(ctx context.Context, j remote.Job, exe string) remote.O
 	}
 	defer finish()
 	t0 := time.Now()
-	ok, err := utmvm.CloneFromGolden(vm, say)
+	ok, err := utmvm.CloneFromGolden(vm, utmvm.GuestWindows, say)
 	// Deleted whatever happened from here on, cancellation included: a
 	// clone that failed to boot is still a clone.
 	defer e.deleteVM(j, vm, say)

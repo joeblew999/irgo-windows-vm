@@ -302,6 +302,13 @@ func TestDecideCapacityForLinux(t *testing.T) {
 		{"beside irgo-win11 and a clone", capacityFacts{plan: plan, host: 16 * gib, vms: []vmMemory{win, clone}, free: 100 * gib}, AnswerNo},
 		{"disk short of the image and its reserve", capacityFacts{plan: plan, host: 16 * gib, free: 17 * gib}, AnswerNo},
 		{"disk enough", capacityFacts{plan: plan, host: 16 * gib, free: 18 * gib}, AnswerYes},
+		// A clone of the Linux golden image needs a clone's reserve, at a
+		// Linux VM's memory. Negative control, run by hand 3 Oct 2026: with
+		// diskForLinuxClone's bytes at linuxReserveBytes the first case says
+		// no; with its memory at a Windows clone's, the second does.
+		{"a Linux clone, disk for a clone", capacityFacts{plan: CapacityPlan{VM: "l2", Disk: diskForLinuxClone}, host: 16 * gib, free: 14 * gib}, AnswerYes},
+		{"a Linux clone beside irgo-win11 and a 2 GiB VM", capacityFacts{plan: CapacityPlan{VM: "l2", Disk: diskForLinuxClone}, host: 16 * gib,
+			vms: []vmMemory{win, {Name: "l1", Status: "started", MiB: 2048}}, free: 100 * gib}, AnswerYes},
 	} {
 		if got, why := decideCapacity(c.f); got != c.want {
 			t.Errorf("%s: %s (%s), want %s", c.name, got, why, c.want)

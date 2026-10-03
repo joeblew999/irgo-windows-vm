@@ -432,7 +432,7 @@ func checkHeadingIDsStable(s *Site, r *Report) error {
 		if p.Src == "" {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(s.Root, p.Src))
+		raw, err := readSource(s, p.Src)
 		if err != nil {
 			return err
 		}

@@ -40,6 +40,9 @@ no sitemap is written, because a sitemap's URLs must be absolute.
 - **Highlighting** for fenced code that names a language, done with chroma's
   CSS classes in `syntax.css`: `github` for light mode and `github-dark` for
   dark. Unlabelled blocks stay plain. Every block gets a copy button.
+- **Front matter left out.** A page that opens with a `---` block (the
+  `title`, `nav_order` and `parent` GitHub Pages' Jekyll reads) is rendered
+  without it.
 - **GitHub alerts** (`> [!NOTE]`), tables that scroll sideways in their own
   box, dates in headings (`— verified 12 Aug 2026`) set apart as labels, and
   curly quotes. Dashes are left alone, so `--flag` stays typeable.

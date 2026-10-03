@@ -708,14 +708,15 @@ August, 103 MB by APFS's count and by `du`.
 A Mac with nobody at it sleeps, and every VM stops with it: a running VM does
 not keep the Mac awake ([the trap](../reference/traps.md#host-utm-and-the-iso)).
 UTM can also stop, and take every VM with it. The keeper is one long-running
-command that minds both, and tells [fleet-api](https://github.com/joeblew999/fleet-api)
-how the Mac is.
+command that minds both, and writes the VMs down for
+[claude-rig](https://github.com/joeblew999/claude-rig), whose report tells
+[fleet-api](https://github.com/joeblew999/fleet-api) how the Mac is.
 
 | command | what it does | undo |
 |---|---|---|
 | `vm-keep-create -vm <name>` | marks the VM keep-running, in its record | `vm-keep-delete -vm <name>` |
-| `keeper-create` | runs `keeper` under pitchfork, at boot too, and keeps fleet-api's write token | `keeper-delete` |
-| `keeper` | the loop itself; `keeper -once` reads and reports once and changes nothing | Ctrl-C, or `pitchfork stop irgo-winvm-keeper` |
+| `keeper-create` | runs `keeper` under pitchfork, at boot too | `keeper-delete` |
+| `keeper` | the loop itself; `keeper -once` prints what it would write and changes nothing | Ctrl-C, or `pitchfork stop irgo-winvm-keeper` |
 
 Every 15 s the keeper:
 
@@ -734,21 +735,19 @@ Every 15 s the keeper:
    it. A UTM that does not answer the start is reported, not restarted
    ([When UTM does not answer](#when-utm-does-not-answer) is for commands you
    run).
-3. **Reports to fleet-api** (`FLEET_API_URL`, by default
-   `https://fleet-api.gedw99.workers.dev`): this Mac's host, memory, disks,
-   power, battery, lid, sleep and keeper, and its VMs with their state, owner,
-   mark and how often the keeper started each. At start, on a change (at most
-   every 30 s), every 5 min otherwise (`next_s` 300), and `stop` on the way
-   out. A report that cannot be sent is spooled and sent later, in order; one
-   fleet-api refuses is dropped. Owners lose any `user@host`, so a person's
-   login never leaves the Mac.
+3. **Writes the VMs down** in `~/.config/claude-rig/vms.json`
+   (`RIG_CONFIG_HOME`, if set): each VM's state, OS, owner, mark and how often
+   the keeper started it, in fleet-api's shape, with the time. claude-rig's
+   report carries them to fleet-api while they are under 2 minutes old, so
+   the Mac is one device there. On the way out the keeper writes that it
+   stopped. Owners lose any `user@host`, so a person's login never leaves the
+   Mac.
 
-Set it up once, with the write token in the environment (the owner's Mac has
-it in fnox, from fleet-api's checkout):
+Set it up once:
 
 ```sh
 irgo-winvm vm-keep-create -vm claude-rig-test
-FLEET_API_WRITE_TOKEN=... irgo-winvm keeper-create
+irgo-winvm keeper-create
 pitchfork logs irgo-winvm-keeper
 ```
 
@@ -762,10 +761,7 @@ pitchfork logs irgo-winvm-keeper
 - **A version of this tool from before the mark** (v0.7.0 and older) drops it
   when it writes the VM's record, which any command on that VM does. Mark it
   again after such a command, or use one version.
-- **One keeper per Mac**: a second is refused (exit 6). The token is kept in
-  `fleet/write-token`, readable by you alone, and its value is never printed.
-  Without one the keeper still keeps VMs and the Mac awake, and says reporting
-  is off.
+- **One keeper per Mac**: a second is refused (exit 6).
 
 ## Where it keeps things
 

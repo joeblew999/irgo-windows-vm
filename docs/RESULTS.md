@@ -15,6 +15,7 @@ run per platform.
 
 | date | result |
 |---|---|
+| 3 Oct 2026 | [OpenSSH Server sealed into the Windows golden image: **not made**. Twice UTM stopped running during the capability's install, stopping every VM; the old image was restored from its backup both times](#openssh-server-in-the-windows-golden-image-not-made--3-oct-2026) |
 | 2 Oct 2026 | [`vm-create` on a Linux VM that has SSH on passes its check (3.6 s), where the first-boot check exits 1; a Windows clone: `vm-ssh-create` 6 min 56 s, repeat 23 s, the undo twice](#vm-create-on-a-linux-vm-that-has-ssh-on-and-the-windows-clone-again--measured-2-oct-2026) |
 | 2 Oct 2026 | [the request that launches UTM hangs every later start: an AppleScript to a closed UTM, 4 of 4; opened first, 0 of 3. `capacity` did it to itself 2 of 2 before the fix, 0 of 2 after](#the-request-that-launches-utm-hangs-every-later-start--measured-2-oct-2026) |
 | 2 Oct 2026 | [a Linux VM that claude-rig rigs over SSH: `vm-create -os linux` 1 min 42 s with the download, `vm-ssh-create` 2.7 s, the rig's second run changed nothing; a Windows clone behaved as before](#a-linux-vm-that-claude-rig-rigs-over-ssh--measured-2-oct-2026) |
@@ -37,6 +38,40 @@ run per platform.
 | 11 Aug 2026 | [Windows installs unattended](#the-unattended-install--verified-11-aug-2026) |
 | — | [the macOS baseline](#macos--verified) |
 | not yet | [x64 under emulation](#still-to-measure-x64-under-emulation) |
+
+## OpenSSH Server in the Windows golden image: not made — 3 Oct 2026
+
+**Result:** the seal step that installs OpenSSH Server was run twice and
+never finished, because UTM stopped running while it ran. Every VM UTM was
+running stopped with it. The image was not made. Nothing here measures the
+step itself.
+
+M2 Pro, 16 GiB, macOS 27.0.1, UTM 4.7.5. Before anything, `irgo-golden` was
+APFS-cloned to `irgo-golden.utm.backup-2026-10-03` beside it (the extension is
+not `.utm`, so UTM never lists it) and `golden.json` to
+`golden.json.backup-2026-10-03`. `cmp` found the 64 GiB `disk.img`
+byte-identical (2 min 28 s); the other files and the file list matched too.
+
+| try | source | what happened |
+|---|---|---|
+| 1 | `golden-dev-w1`, a clone of `irgo-golden` (cloned 1.7 s, answering 27 s) | `vm-repair` and the first three steps 77 s. The openssh step started at 09:54. The Mac then slept for about 24 minutes (the process's monotonic clock advanced 6 minutes over 30 of wall time). At 10:25:19 the tool found UTM **not running** and opened it, as `utmCommand` does. Every VM was stopped. The step's wait was killed by hand |
+| 2 | `golden-dev-w2`, a clone of the restored image (1.2 s, answering 26 s), under `caffeinate -i -s` | the same steps. About 10 minutes in, during the openssh step, the tool again found UTM not running (UTM's new process started 10:48:02). `claude-rig-test`, which was running, stopped with it |
+
+**Why UTM stopped is not known.** There was no crash report in
+`~/Library/Logs/DiagnosticReports`. The tool's log shows no command of this
+run asked UTM to quit; it only reopened UTM after finding it gone. Other
+agents were using the Mac at the same time (their `status`, `capacity` and a
+refused `vm-create` are in the log). Both times the guest was inside
+`Add-WindowsCapability`, with `claude-rig-test` (4 GiB) running beside it.
+What it would take to find out: `log show` with UTM's process, run as an
+administrator, around the moment it went; or the step run on a Mac nobody
+else is using.
+
+Both times the source VM was deleted and the backup was imported again
+through UTM (`import new virtual machine`, an APFS clone), and `golden.json`
+was copied back. The restored image cloned and booted (try 2's source), and
+after the second restore its `config.plist`, `efi_vars.fd`, `tpmdata` and
+`golden.json` matched the backup. It holds the same 21,133,384 blocks.
 
 ## `vm-create` on a Linux VM that has SSH on, and the Windows clone again — measured 2 Oct 2026
 

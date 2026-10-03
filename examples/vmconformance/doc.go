@@ -11,7 +11,8 @@
 // share with its firewall rule open to the local subnet only and Windows'
 // own "File and Printer Sharing (Restrictive)" rules off, WebView2 registered
 // and present, sleep and the display timeout off, the answer file finished,
-// enough free disk, and the Windows build.
+// enough free disk, OpenSSH Server installed and off until vm-ssh-create
+// turns it on, and the Windows build.
 //
 // The checks only read. None changes the VM, so the suite can be pointed at
 // irgo-win11, the shared VM, as safely as at a disposable clone.

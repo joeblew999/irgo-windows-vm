@@ -95,3 +95,31 @@ func TestParseShareFacts(t *testing.T) {
 		t.Error("conversionStatus")
 	}
 }
+
+// TestParseSSHD, and what counts as off. Negative control, run by hand 3 Oct
+// 2026: drop the OurRule case from sshdOff and "on, asked for" fails; drop
+// the StartType case and "manual" does.
+func TestParseSSHD(t *testing.T) {
+	for _, c := range []struct {
+		name, out string
+		wrong     bool
+	}{
+		{"sealed", "True|Disabled|Stopped|0|False", false},
+		{"after vm-ssh-delete", "True|Disabled|Stopped|5|False", false},
+		{"on, asked for", "True|Automatic|Running|5|True", false},
+		{"running, nobody asked", "True|Automatic|Running|5|False", true},
+		{"manual", "True|Manual|Stopped|0|False", true},
+		{"not installed", "False|||0|False", false},
+	} {
+		s, err := parseSSHD(c.out)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := sshdOff(s) != ""; got != c.wrong {
+			t.Errorf("%s: sshdOff = %q, want wrong %v", c.name, sshdOff(s), c.wrong)
+		}
+	}
+	if _, err := parseSSHD("True|Disabled|Stopped"); err == nil {
+		t.Error("a short line parsed")
+	}
+}

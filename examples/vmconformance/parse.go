@@ -143,3 +143,44 @@ func conversionStatus(n int) string {
 	}
 	return fmt.Sprintf("status %d", n)
 }
+
+// sshdState is what the suite reads about OpenSSH Server, as
+// "installed|StartType|Status|host key files|our firewall rule enabled":
+// "True|Disabled|Stopped|0|False".
+type sshdState struct {
+	Installed, OurRule bool
+	StartType, Status  string
+	HostKeys           int
+}
+
+func parseSSHD(out string) (sshdState, error) {
+	var s sshdState
+	f := strings.Split(strings.TrimSpace(out), "|")
+	if len(f) != 5 {
+		return s, fmt.Errorf("want installed|StartType|Status|host keys|rule, got %q", out)
+	}
+	n, err := strconv.Atoi(f[3])
+	if err != nil {
+		return s, fmt.Errorf("host keys %q: %w", f[3], err)
+	}
+	s = sshdState{Installed: f[0] == "True", StartType: f[1], Status: f[2], HostKeys: n, OurRule: f[4] == "True"}
+	return s, nil
+}
+
+// sshdOff says what is wrong with sshd for a VM nobody has asked for SSH on,
+// or "" when nothing is: disabled, stopped, no host keys. A VM where
+// vm-ssh-create turned it on (its own firewall rule is there and enabled) is
+// asked for, and so is right too.
+func sshdOff(s sshdState) string {
+	switch {
+	case !s.Installed:
+		return ""
+	case s.OurRule:
+		return ""
+	case s.Status != "Stopped":
+		return fmt.Sprintf("sshd is %s with no vm-ssh-create firewall rule: nobody asked for it", s.Status)
+	case s.StartType != "Disabled":
+		return fmt.Sprintf("sshd starts %s, and should be Disabled until vm-ssh-create", s.StartType)
+	}
+	return ""
+}

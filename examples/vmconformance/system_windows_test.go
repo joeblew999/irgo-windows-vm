@@ -399,3 +399,32 @@ func TestFreeDiskSpace(t *testing.T) {
 		t.Fatalf("C: has %s free; want at least %d GiB", gib, minFreeBytes>>30)
 	}
 }
+
+// TestOpenSSHServer: the OpenSSH Server capability is installed, so
+// vm-ssh-create takes seconds rather than the minutes Windows Update takes to
+// install it, and sshd is off until someone asks for it: disabled, stopped,
+// and on a VM that never had it on, without host keys, which sshd makes on its
+// first start, so each clone has its own.
+func TestOpenSSHServer(t *testing.T) {
+	asSystem(t)
+	out := powershell(t, `$s = Get-Service -Name sshd -ErrorAction SilentlyContinue; `+
+		`$k = @(Get-ChildItem "$env:ProgramData\ssh\ssh_host_*_key" -ErrorAction SilentlyContinue).Count; `+
+		`$r = [bool](Get-NetFirewallRule -DisplayName 'irgo-winvm: SSH from the host' -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' }); `+
+		`"$([bool]$s)|$($s.StartType)|$($s.Status)|$k|$r"`)
+	s, err := parseSSHD(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence(t, "installed=%v StartType=%s Status=%s host keys=%d vm-ssh-create rule=%v", s.Installed, s.StartType, s.Status, s.HostKeys, s.OurRule)
+	t.Run("installed", func(t *testing.T) {
+		if !s.Installed {
+			t.Fatal("there is no sshd service: the first vm-ssh-create installs OpenSSH Server, which takes minutes. " +
+				"The golden image's seal installs it (vm-golden-create)")
+		}
+	})
+	t.Run("off_until_asked", func(t *testing.T) {
+		if why := sshdOff(s); why != "" {
+			t.Fatalf("%s (vm-ssh-delete turns it off)", why)
+		}
+	})
+}

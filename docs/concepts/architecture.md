@@ -369,8 +369,9 @@ What it does for its user is in [Using it](../guides/using.md#the-keeper-vms-tha
    and the spool is sent oldest first; a failure stops the round and nothing
    is tried for a minute; 400, 413 and 422 drop the report. The id is the
    ledger's machine id (`ledger.MachineID`), so the Mac is one machine in both.
-   Schema 1 has no section for VMs: they go as `vms`, a field the Worker
-   stores as posted.
+   The VMs go as `vms`, in the shape of the section
+   [fleet-api#3](https://github.com/joeblew999/fleet-api/pull/3) adds; until
+   the SDK has it, as a field the Worker stores as posted.
 
 Nothing in `UTM` quits UTM, or stops, deletes or restarts a VM, so the
 keeper cannot, whatever it decides. It is tested against fakes of UTM, the

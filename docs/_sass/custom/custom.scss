@@ -1,0 +1,4 @@
+// Written by `charter docs`: don't edit, run it again.
+// The one thing the theme has no setting for: its text is 14px on phones, which is too small.
+html { font-size: 17px !important; }
+@media (min-width: 50rem) { html { font-size: 16px !important; } }

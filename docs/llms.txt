@@ -1,0 +1,26 @@
+---
+layout: null
+permalink: /llms.txt
+---
+{%- comment -%} Written by `charter docs`: don't edit. The site's renderer fills this in from the pages' front matter. {%- endcomment -%}
+{%- assign raw = site.gh_edit_repository | replace: "https://github.com/", "https://raw.githubusercontent.com/" | append: "/" | append: site.gh_edit_branch | append: "/docs/" -%}
+{%- assign titled = site.pages | where_exp: "p", "p.title" | where_exp: "p", "p.nav_order" -%}
+{%- assign tops = titled | where_exp: "p", "p.parent == nil" | sort: "nav_order" -%}
+{%- assign kidsof = titled | where_exp: "p", "p.grand_parent == nil" -%}
+# {{ site.title }}
+
+> {{ site.description }}
+
+The links below are the pages' Markdown sources. Rendered for people: {{ "/" | absolute_url }}
+
+## Docs
+
+{% for p in tops -%}
+- [{{ p.title }}]({{ raw }}{{ p.path }})
+{% assign kids = kidsof | where: "parent", p.title | sort: "nav_order" -%}
+{%- for k in kids %}  - [{{ k.title }}]({{ raw }}{{ k.path }})
+{% assign grandkids = titled | where: "parent", k.title | where: "grand_parent", p.title | sort: "nav_order" -%}
+{%- for g in grandkids %}    - [{{ g.title }}]({{ raw }}{{ g.path }})
+{% endfor -%}
+{%- endfor -%}
+{%- endfor %}

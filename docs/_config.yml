@@ -1,0 +1,44 @@
+# Written by `charter docs` (github.com/joeblew999/charter/cmd/charter): don't edit, run it again (mise run docs:setup).
+# GitHub Pages renders this folder as it is, with its built-in Jekyll: there is no build step.
+# README.md is the home page, and links between pages (other.md) become links between the rendered ones.
+# The look (sidebar, search, diagrams) is the Just the Docs theme, loaded by GitHub.
+#
+# What a page says about itself, at its very top (the sidebar is built from these):
+#   ---
+#   title: Short title        # in the sidebar
+#   nav_order: 3              # position
+#   parent: Plans             # optional: sits under the page with this title
+#   has_children: true        # on that parent page
+#   ---
+# The start page, README.md, also needs `permalink: /` there: it is the site's home page.
+title: irgo-windows-vm
+description: "A Windows 11 ARM64 VM on Apple Silicon, and your Go binaries running inside it. Build on the Mac, run on Windows, read the output back."
+aux_links:
+  "GitHub": ["https://github.com/joeblew999/irgo-windows-vm"]
+gh_edit_repository: https://github.com/joeblew999/irgo-windows-vm
+nav_external_links:
+  - title: Latest release
+    url: https://github.com/joeblew999/irgo-windows-vm/releases/latest
+
+remote_theme: just-the-docs/just-the-docs@v0.12.0
+plugins: [jekyll-remote-theme]
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+aux_links_new_tab: true
+enable_copy_code_button: true
+back_to_top: true
+back_to_top_text: Back to top
+gh_edit_link: true
+gh_edit_link_text: Edit this page on GitHub
+gh_edit_branch: main
+gh_edit_source: docs
+gh_edit_view_mode: edit
+search:
+  heading_level: 3
+  previews: 3
+  preview_words_before: 4
+  preview_words_after: 12
+# ```mermaid blocks become diagrams (GitHub renders the same blocks in the repo view).
+mermaid:
+  version: "12.0.0"

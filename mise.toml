@@ -1,13 +1,13 @@
 # Tools, environment, and the tasks. A task longer than one line is a script
 # in mise-tasks/ (the path is the name: mise-tasks/go/check is go:check), and
 # its findings are comments in that script. `mise tasks` lists them all; the
-# reasons behind the ones below are in docs/CONTRIBUTING.md under "mise tasks".
+# reasons behind the ones below are in docs/contributing.md under "mise tasks".
 
 [tools]
 go = "1.27.1"
 golangci-lint = "2.14.0"
 goreleaser = "2.18.2"
-# The Cloudflare Worker in worker/ (docs/WORKER.md, "The Cloudflare
+# The Cloudflare Worker in worker/ (docs/worker.md, "The Cloudflare
 # Worker"): TinyGo builds its Wasm, wrangler runs it locally and deploys it, and
 # wrangler is an npm package, so node is pinned with it. CI installs only the
 # Go tools (install_args, and MISE_TASK_RUN_AUTO_INSTALL=false so `mise run`
@@ -17,6 +17,11 @@ tinygo = "0.42.0"
 "aqua:WebAssembly/binaryen" = "133"
 node = "24.19.0"
 "npm:wrangler" = "4.143.0"
+# charter writes and checks docs/ the way every repo of the owner's keeps it
+# (docs/writing.md, written by it). Not in CI: install_args leaves it out.
+# 0.9.0, as claude-rig pins it: 0.9.1's writing guide drops the Concepts and
+# "This repository" sections and caps a guide at about 500 words.
+"github:joeblew999/charter" = "0.9.0"
 
 [env]
 # Local glaze/native clones, for upstream:*. Bugs there are fixed there.
@@ -36,6 +41,44 @@ run = "go build -o .bin/irgo-winvm ./cmd/irgo-winvm"
 [tasks."go:lint"]
 description = "The analysers, with everything they found already fixed"
 run = "GOOS=darwin golangci-lint run --no-config -E unused,ineffassign,staticcheck,errcheck ./..."
+
+# docs/ kept the way charter keeps it (docs/writing.md has the rules).
+[tasks."docs:setup"]
+description = "Write docs/_config.yml, docs/writing.md, docs/llms.txt and docs/_sass/ (the same in every repo that uses charter)"
+run = "charter docs"
+
+[tasks."docs:lint"]
+description = "Check docs/ for what a program can check: front matter, links, the index, tasks and paths that don't exist"
+run = "charter docs-lint"
+
+[tasks."docs:check"]
+description = "docs:lint, and fail if the files docs:setup writes are stale"
+run = "charter docs -check && charter docs-lint"
+
+[tasks."docs:review"]
+description = "Have Claude bring docs/ up to date and into line with docs/writing.md"
+run = "charter docs-review"
+
+# STANDING IN FOR AN UPSTREAM FIX: charter's docs-lint (0.9.0) reads task
+# names only from [tasks."..."] headers in mise.toml, so it calls every task in
+# mise-tasks/ "no such task". A header with nothing under it changes nothing:
+# mise merges it with the script of the same name, whose #MISE lines still give
+# the description and dependencies (measured 3 Oct 2026, mise 2026.9.15: `mise
+# tasks --json` the same with and without these lines, but for config_sources).
+# Delete this block when charter's docs-lint reads mise-tasks/.
+[tasks."app:test"]
+[tasks."ci:watch"]
+[tasks."gh:labels"]
+[tasks."go:build"]
+[tasks."go:check"]
+[tasks."iso:test"]
+[tasks."upstream:clone"]
+[tasks."upstream:link"]
+[tasks."upstream:lint"]
+[tasks."upstream:test:windows"]
+[tasks."upstream:verify"]
+[tasks."vm:test"]
+[tasks."worker:wasm"]
 
 # The site is docsite (docsite/, its own module) over site/docsite.toml.
 [tasks."site:build"]

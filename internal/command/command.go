@@ -105,6 +105,11 @@ var All = []Command{
 	// The remote job queue: from any OS, through the Worker, to a Mac running
 	// serve. Nothing local changes, so no locks; the Mac's own commands take
 	// theirs when it runs the job.
+	// The keeper's mark on a VM: started again whenever it stops.
+	{Name: "vm-keep-create", Summary: "mark a VM keep-running: the keeper starts it again whenever it stops", Undo: "vm-keep-delete", Locks: LockVM, MacOnly: true, OverMCP: true},
+	// The keeper as a pitchfork daemon. No lock: the running keeper holds
+	// its own, and these change pitchfork's config, not the tool's data.
+	{Name: "keeper-create", Summary: "run the keeper under pitchfork, started at boot", Undo: "keeper-delete", MacOnly: true},
 	{Name: "remote-submit", Summary: "from any OS: run your .exe on a fresh VM on a Mac elsewhere, result back", Undo: "remote-cancel", OverMCP: true},
 
 	{Name: "iso-delete", Summary: "remove the installer", IsUndo: true, Locks: LockMachine, Destructive: true, OverMCP: true},
@@ -112,6 +117,8 @@ var All = []Command{
 	{Name: "app-delete", Summary: "remove your .exe from the VM", IsUndo: true, Locks: LockVM | LockStage, Destructive: true, MacOnly: true, WindowsGuest: true, OverMCP: true},
 	// Not destructive: what it removes comes back with one vm-ssh-create.
 	{Name: "vm-ssh-delete", Summary: "turn SSH off in the VM again and remove every authorized key", IsUndo: true, Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "vm-keep-delete", Summary: "clear the keep-running mark; the VM is left as it is", IsUndo: true, Locks: LockVM, MacOnly: true, OverMCP: true},
+	{Name: "keeper-delete", Summary: "stop the keeper and take it out of pitchfork", IsUndo: true, MacOnly: true},
 	{Name: "remote-cancel", Summary: "cancel a remote job: at once if queued, else its Mac stops it", IsUndo: true, OverMCP: true},
 	{Name: "vm-golden-delete", Summary: "remove a golden image (-os: which)", IsUndo: true, Locks: LockMachine, Destructive: true, MacOnly: true, OverMCP: true},
 	// Not an undo of one command: it removes whatever clones callers left
@@ -149,6 +156,8 @@ var All = []Command{
 	{Name: "mcp", Summary: "serve these commands to an agent over MCP, on stdin and stdout"},
 	// serve runs forever, so it is not an MCP tool; each job's steps are
 	// this binary's own commands and take their own locks.
+	// keeper runs forever, so it is not an MCP tool.
+	{Name: "keeper", Summary: "on the Mac: keep it awake while VMs run, keep marked VMs running, report to fleet-api", MacOnly: true},
 	{Name: "serve", Summary: "on the Mac: take remote jobs from the Worker, each on a fresh clone; connects out only", MacOnly: true},
 }
 

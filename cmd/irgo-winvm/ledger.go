@@ -16,7 +16,7 @@ import (
 // takes no flags, so `glaze-status -h` runs it: the site build did that a
 // dozen times per build and every one reached the live ledger (measured
 // 1 Oct 2026).
-var unrecorded = map[string]bool{"mcp": true, "serve": true, "help": true, "version": true, "commands": true, "glaze-status": true}
+var unrecorded = map[string]bool{"mcp": true, "serve": true, "keeper": true, "help": true, "version": true, "commands": true, "glaze-status": true}
 
 // recordCommand tells the ledger a command is starting, and returns what
 // tells it how the command ended. client is the MCP client's name, or empty

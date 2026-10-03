@@ -330,6 +330,12 @@ func init() {
 		"remote-logs":   {flags: remoteLogsFlags, run: runRemoteLogs},
 		"remote-result": {flags: remoteResultFlags, run: runRemoteResult},
 		"serve":         {flags: serveFlags, about: serveAbout, run: runServe},
+
+		"keeper":         {flags: keeperFlags, about: keeperAbout, run: runKeeper},
+		"keeper-create":  {flags: keeperCreateFlags, run: runKeeperCreate},
+		"keeper-delete":  {flags: keeperDeleteFlags, run: runKeeperDelete},
+		"vm-keep-create": {flags: vmKeepFlags("vm-keep-create"), run: runVMKeepCreate},
+		"vm-keep-delete": {flags: vmKeepFlags("vm-keep-delete"), run: runVMKeepDelete},
 	}
 	var err error
 	if commands, err = join(command.All, impls); err != nil {

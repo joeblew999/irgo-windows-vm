@@ -314,10 +314,32 @@ type Entry struct {
 //
 // UTM only rescans its bundle directory at launch, so a VM generated while UTM
 // is running will not appear here until UTM is restarted.
+//
+// utmctl exits 0 when UTM refuses it the request, printing "Error from event"
+// on stderr and the header alone on stdout, which reads as UTM having no VMs.
+// It does that to a process macOS has not allowed to control UTM: under
+// pitchfork's supervisor, until its Automation prompt is answered, it printed
+// OSStatus error -1743 (3 Oct 2026). So stderr is read, and that is an error.
 func List() ([]Entry, error) {
-	out, err := utmCommand(context.Background(), utmctlPath(), "list").Output()
+	var stderr bytes.Buffer
+	cmd := utmCommand(context.Background(), utmctlPath(), "list")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	return listFrom(string(out), stderr.String(), err)
+}
+
+// listFrom is List's answer from what utmctl printed and how it exited.
+func listFrom(out, stderr string, err error) ([]Entry, error) {
 	if err != nil {
-		return nil, fmt.Errorf("utmctl list: %w", err)
+		return nil, fmt.Errorf("utmctl list: %w: %s", err, firstLine(stderr))
+	}
+	if strings.Contains(stderr, "Error from event") {
+		hint := ""
+		if strings.Contains(stderr, "-1743") {
+			hint = ". macOS has not allowed whatever started this (Terminal, pitchfork) to control UTM: " +
+				"answer its prompt with Allow, or turn it on in System Settings > Privacy & Security > Automation"
+		}
+		return nil, fmt.Errorf("utmctl list: UTM refused the request, and utmctl exited 0: %s%s", firstLine(stderr), hint)
 	}
 	var entries []Entry
 	for i, line := range strings.Split(string(out), "\n") {

@@ -260,7 +260,7 @@ func gather(s *Site) (raw, foot map[string][]byte, err error) {
 	var jobs []hookJob
 	for _, p := range s.Pages {
 		if p.Src != "" {
-			b, err := os.ReadFile(filepath.Join(s.Root, p.Src))
+			b, err := readSource(s, p.Src)
 			if err != nil {
 				return nil, nil, fmt.Errorf("reading %s: %w", p.Src, err)
 			}
@@ -276,6 +276,36 @@ func gather(s *Site) (raw, foot map[string][]byte, err error) {
 		return nil, nil, err
 	}
 	return raw, foot, nil
+}
+
+// readSource reads a page's markdown without its front matter: the block a
+// file may open with between two "---" lines (title, nav_order, ...), which
+// GitHub Pages' Jekyll reads and which is not part of the page. Without this,
+// goldmark renders it as a rule and a heading.
+func readSource(s *Site, src string) ([]byte, error) {
+	b, err := os.ReadFile(filepath.Join(s.Root, src))
+	if err != nil {
+		return nil, err
+	}
+	return stripFrontMatter(b), nil
+}
+
+// stripFrontMatter returns b without a leading front matter block. A file
+// that does not start with "---" on its own line, or never closes it, is
+// returned unchanged.
+func stripFrontMatter(b []byte) []byte {
+	rest, ok := bytes.CutPrefix(b, []byte("---\n"))
+	if !ok {
+		return b
+	}
+	if bytes.HasPrefix(rest, []byte("---\n")) {
+		return bytes.TrimLeft(rest[4:], "\n")
+	}
+	i := bytes.Index(rest, []byte("\n---\n"))
+	if i < 0 {
+		return b
+	}
+	return bytes.TrimLeft(rest[i+5:], "\n")
 }
 
 // anyLink matches every markdown link target. Which ones to rewrite is decided

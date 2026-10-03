@@ -219,3 +219,23 @@ func TestAnchorAttributesInAFixedOrder(t *testing.T) {
 		t.Errorf("%d of 30 anchors have their attributes in order:\n%s", n, body)
 	}
 }
+
+// TestStripFrontMatter: a page's front matter (docs/writing.md's title,
+// nav_order, parent) is not rendered, and a page without one is untouched.
+//
+// Negative control (by hand, 3 Oct 2026): with readSource returning the file
+// as read, this repository's built using.html holds its front matter's
+// nav_order three times; with it, none.
+func TestStripFrontMatter(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"front matter", "---\ntitle: A\nnav_order: 2\n---\n\n# A\n\nText.\n", "# A\n\nText.\n"},
+		{"empty front matter", "---\n---\n# A\n", "# A\n"},
+		{"none", "# A\n\n---\n\nText.\n", "# A\n\n---\n\nText.\n"},
+		{"never closed", "---\ntitle: A\n# A\n", "---\ntitle: A\n# A\n"},
+		{"a rule later on", "# A\n---\ntitle\n---\n", "# A\n---\ntitle\n---\n"},
+	} {
+		if got := string(stripFrontMatter([]byte(c.in))); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}

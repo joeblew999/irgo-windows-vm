@@ -40,6 +40,10 @@ type VMRecord struct {
 	// capacity check counts the memory of a VM still being made (see
 	// BeginCreate), and a dead pid is a create that was killed.
 	CreatingPID int `json:"creating_pid,omitempty"`
+
+	// KeepRunning marks a VM the keeper starts again whenever it stops
+	// (vm-keep-create; vm_keep.go). vm-reap never removes one.
+	KeepRunning bool `json:"keep_running,omitempty"`
 }
 
 // recordsDirName holds one record per VM, named by the VM's key.
@@ -212,6 +216,8 @@ func decideReap(r VMRecord, f reapFacts, lease time.Duration, now time.Time) Rea
 	switch {
 	case protectedVM(r.Name):
 		d.Why = "protected: never reaped"
+	case r.KeepRunning:
+		d.Why = "marked keep-running: vm-keep-delete clears the mark"
 	case f.creatorUp:
 		d.Why = fmt.Sprintf("being made by vm-create (pid %d)", r.CreatingPID)
 	case f.lockErr != nil:
@@ -273,7 +279,7 @@ func Reap(lease time.Duration, force bool, say func(string, ...any)) ([]ReapDeci
 // the decision and the delete.
 func decideOne(r VMRecord, lease time.Duration, now time.Time) (ReapDecision, func()) {
 	var f reapFacts
-	if protectedVM(r.Name) {
+	if protectedVM(r.Name) || r.KeepRunning {
 		// Decided without its lock: taking even briefly the lock of a VM
 		// that is never reaped could refuse its owner's command (exit 6).
 		return decideReap(r, f, lease, now), nil

@@ -75,6 +75,11 @@ func (u utmStarter) startWithDisplay(ref string, say func(string, ...any)) error
 		return out, err
 	}
 	out, err := start()
+	if err != nil && strings.Contains(out, appleEventTimeout) && u.restart == nil {
+		// StartKeeping: never restart UTM, which would stop every VM it runs.
+		return fmt.Errorf("starting %s with a display: %w; not restarting UTM, which stops every VM it runs.\n"+
+			"  When no VM needs to stay up, restart it by hand:\n    %s", name, errUTMNotAnswering, utmRestartCommand)
+	}
 	if err != nil && strings.Contains(out, appleEventTimeout) {
 		say("UTM did not answer the request to start %s: %s", name, firstLine(out))
 		release, rErr := u.recoverUTM(name, say)
